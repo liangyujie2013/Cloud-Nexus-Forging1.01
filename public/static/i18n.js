@@ -1,14 +1,14 @@
 // Cloud Nexus Forging (CNF) v1.0.1 国际化（i18n）+ 主题系统
-// 术语严格对齐 VMware vSphere 官方中英文 UI 命名，便于 vSphere 用户无缝迁移。
+// 术语采用 CNF 自有中性命名，不包含任何第三方产品名。
 // i18n key 命名自解释：模块前缀_含义（nav_mod_* 模块 / nav_<mod>_* 子菜单 / lic_* License / acc_* 访问控制 …）。
 (function () {
 const { ref, reactive } = Vue
 
 // ============================ 词典 ============================
-// 命名对齐 VMware vSphere：
-//   集群 Cluster / 主机 Host / 资源池 Resource Pool / vMotion 迁移 /
-//   DRS 分布式资源调度 / HA 高可用 / EVC 增强型 vMotion 兼容性 /
-//   快照 Snapshot / 角色 Role / 权限 Privilege / 全局权限 Global Permissions
+// CNF 自有术语：
+//   集群 / 主机 / 资源池 / 在线迁移 /
+//   动态资源调度 / 高可用(HA) / CPU 兼容模式 /
+//   快照 / 角色 / 权限 / 全局权限
 const dict = {
   zh: {
     // 品牌 & 通用
@@ -23,17 +23,17 @@ const dict = {
     // 导航分组
     nav_overview: '清单与监控', nav_compute: '主机和集群', nav_ops: '虚拟机操作',
     nav_infra: '存储', nav_admin: '管理',
-    // 导航项（VMware 对齐）
+    // 导航项
     nav_dashboard: '摘要', nav_topology: '主机和集群', nav_vms: '虚拟机',
-    nav_gpu: 'GPU 监控', nav_migration: 'vMotion 迁移', nav_snapshot: '快照管理',
+    nav_gpu: 'GPU 监控', nav_migration: '在线迁移', nav_snapshot: '快照管理',
     nav_storage: '数据存储', nav_cluster_cfg: '集群设置', nav_permissions: '权限管理',
-    nav_drs: 'DRS 迁移编排',
+    nav_drs: '资源调度编排',
 
     // 顶栏标题
     title_dashboard: '摘要', title_topology: '主机和集群', title_vms: '虚拟机',
-    title_gpu: 'GPU 监控', title_storage: '数据存储', title_migration: 'vMotion 迁移',
+    title_gpu: 'GPU 监控', title_storage: '数据存储', title_migration: '在线迁移',
     title_snapshot: '快照管理', title_cluster_cfg: '集群设置',
-    title_permissions: '权限管理', title_drs: 'DRS 迁移编排（拖拽）',
+    title_permissions: '权限管理', title_drs: '资源调度编排（拖拽）',
 
     // 用户
     user_admin: '管理员',
@@ -63,12 +63,12 @@ const dict = {
     gpu_power: '功耗', gpu_bound_vm: '绑定虚拟机', gpu_passthrough: '直通',
     gpu_idle: '空闲',
 
-    // vMotion 迁移
-    mig_start: '发起 vMotion 迁移', mig_vm: '虚拟机', mig_dst: '目标主机',
+    // 在线迁移
+    mig_start: '发起在线迁移', mig_vm: '虚拟机', mig_dst: '目标主机',
     mig_choose: '请选择…', mig_remain: '剩余',
-    mig_live: '在线迁移（vMotion，不停机）', mig_storage: '存储 vMotion（非共享盘）',
+    mig_live: '在线迁移（不停机）', mig_storage: '存储迁移（非共享盘）',
     mig_compress: '压缩传输', mig_downtime: '最大停机 (ms)',
-    mig_gpu_block: '该虚拟机绑定 GPU 直通设备，无法执行在线 vMotion；请改用冷迁移或先解绑 GPU。',
+    mig_gpu_block: '该虚拟机绑定 GPU 直通设备，无法执行在线迁移；请改用冷迁移或先解绑 GPU。',
     mig_go: '开始迁移', mig_running: '迁移中…',
     mig_history: '迁移历史', mig_path: '路径', mig_mode: '模式',
     mig_downtime_col: '停机', mig_throughput: '吞吐',
@@ -79,19 +79,19 @@ const dict = {
     // 快照
     snap_create: '创建快照', snap_vm: '虚拟机', snap_name: '快照名称',
     snap_desc: '说明', snap_with_mem: '包含虚拟机内存（含 NVRAM，可恢复运行态）',
-    snap_quiesce: '静默客户机文件系统（VMware Tools 保证一致性）',
+    snap_quiesce: '静默客户机文件系统（CNF 客户机增强工具保证一致性）',
     snap_tip: '内存快照保存 vCPU/内存/NVRAM 状态，恢复后虚拟机回到精确时刻；仅磁盘快照更快更省空间。',
     snap_creating: '创建中…', snap_chain: '快照树', snap_current: '当前状态',
     snap_mem_nvram: '内存 + NVRAM', snap_disk_only: '仅磁盘', snap_quiesced: '已静默',
     snap_revert: '恢复到此处', snap_delete: '删除',
 
     // 集群设置
-    cc_select: '选择集群', cc_ha: 'vSphere HA 高可用', cc_drs: 'vSphere DRS',
-    cc_evc: 'EVC 模式', cc_overcommit: '资源超分配',
+    cc_select: '选择集群', cc_ha: '高可用（HA）', cc_drs: '动态资源调度',
+    cc_evc: 'CPU 兼容模式', cc_overcommit: '资源超分配',
     cc_ha_desc: '主机故障时自动在其他主机重启受影响虚拟机',
-    cc_drs_desc: '根据负载在主机间自动均衡虚拟机（vMotion）',
-    cc_evc_desc: '增强型 vMotion 兼容性，确保跨 CPU 代际迁移',
-    cc_drs_level: 'DRS 自动化级别', cc_manual: '手动', cc_partial: '半自动',
+    cc_drs_desc: '根据负载在主机间自动均衡虚拟机（在线迁移）',
+    cc_evc_desc: 'CPU 兼容模式，确保跨 CPU 代际迁移',
+    cc_drs_level: '资源调度自动化级别', cc_manual: '手动', cc_partial: '半自动',
     cc_full: '全自动', cc_aggr: '迁移阈值（激进度）',
     cc_admission: '准入控制', cc_admission_desc: '预留故障切换容量，保证 HA 资源',
     cc_host_failures: '容许主机故障数', cc_cpu_over: 'CPU 超分配比', cc_mem_over: '内存超分配比',
@@ -114,10 +114,10 @@ const dict = {
     priv_net_config: '网络.配置', priv_perm_manage: '权限.管理', priv_global_settings: '全局.系统设置',
     perm_global: '全局', perm_dc: '数据中心', perm_cluster: '集群',
 
-    // DRS 拖拽迁移
-    drs_hint: '将虚拟机卡片拖拽到目标主机以发起 vMotion 迁移。系统自动校验资源与兼容性。',
+    // 资源调度拖拽迁移
+    drs_hint: '将虚拟机卡片拖拽到目标主机以发起在线迁移。系统自动校验资源与兼容性。',
     drs_capacity: '容量', drs_vms_on: '承载虚拟机', drs_drop_here: '拖放到此主机迁移',
-    drs_recommend: 'DRS 建议', drs_balanced: '集群已均衡',
+    drs_recommend: '调度建议', drs_balanced: '集群已均衡',
     drs_migrating: '正在迁移', drs_to: '至',
     drs_cannot_gpu: 'GPU 直通虚拟机不可在线迁移',
     drs_insufficient: '目标主机资源不足',
@@ -182,7 +182,7 @@ const dict = {
     wiz_gpu_hint: '选择要直通/分配给该 VM 的 GPU（需主机启用 IOMMU/VFIO）。',
     wiz_no_gpu: '该主机无可用 GPU。',
     wiz_xml_preview: 'libvirt Domain XML 预览', wiz_refresh: '刷新',
-    wiz_xml_hint: '此 XML 由真实生成逻辑产出（与 Go 后端 internal/virt 一致），可直接 virsh define。',
+    wiz_xml_hint: '此 XML 由后端虚拟化引擎生成，可直接 virsh define。',
     wiz_vm_status: '状态', wiz_prev: '上一步', wiz_next: '下一步',
     wiz_step: '步骤', wiz_creating: '创建中...', wiz_create: '创建虚拟机', wiz_finish: '完成',
     wiz_optional: '可选',
@@ -218,7 +218,46 @@ const dict = {
     tpl_spec: '规格', tpl_usage: '部署次数', tpl_updated: '更新时间',
     iso_title: 'ISO 镜像库', iso_upload: '上传 ISO', iso_os_type: '系统类型',
     iso_size: '大小', iso_pool: '存储池', iso_uploaded: '上传时间', iso_checksum: '校验',
-    ctx_migrate: '迁移',
+
+    // ===== 右键上下文菜单（分组标题 + 命令项 + 快捷键）=====
+    ctx_group_power: '电源', ctx_group_console: '控制台', ctx_group_snapshot: '快照',
+    ctx_group_migration: '迁移与克隆', ctx_group_manage: '管理',
+    ctx_power_on: '启动', ctx_shutdown: '关机（来宾）', ctx_reboot: '重启',
+    ctx_suspend: '挂起', ctx_resume: '恢复', ctx_power_off: '强制断电',
+    ctx_open_console: '打开图形控制台', ctx_open_serial: '打开串口终端',
+    ctx_take_snapshot: '创建快照', ctx_manage_snapshots: '管理快照', ctx_revert_snapshot: '恢复到快照',
+    ctx_migrate: '在线迁移', ctx_clone: '克隆', ctx_to_template: '转换为模板',
+    ctx_edit_settings: '编辑设置', ctx_rename: '重命名', ctx_delete: '删除虚拟机',
+    ctx_gpu_block: 'GPU 直通设备不支持在线迁移',
+
+    // ===== 通用操作 / 工具栏 / CRUD / 对话框 =====
+    op_new: '新建', op_edit: '编辑', op_delete: '删除', op_batch: '批量操作',
+    op_filter: '筛选', op_search: '搜索', op_refresh: '刷新', op_reset: '重置',
+    op_confirm: '确定', op_cancel: '取消', op_save: '保存', op_close: '关闭',
+    op_selected_n: '已选 {n} 项', op_batch_delete: '批量删除', op_batch_start: '批量启动', op_batch_stop: '批量关机',
+    op_select_all: '全选', op_actions: '操作', op_no_data: '暂无数据',
+    op_total_n: '共 {n} 条', op_page_prev: '上一页', op_page_next: '下一页', op_page_of: '第 {c}/{t} 页',
+    op_loading: '加载中…', op_required: '此项为必填', op_invalid: '格式不正确',
+    confirm_delete_title: '确认删除', confirm_delete_msg: '确定要删除「{name}」吗？此操作不可恢复。',
+    confirm_batch_delete_msg: '确定要删除选中的 {n} 个对象吗？此操作不可恢复。',
+    toast_success: '操作成功', toast_failed: '操作失败', toast_deleted: '已删除「{name}」',
+    toast_created: '已创建「{name}」', toast_saved: '已保存', toast_canceled: '已取消',
+
+    // ===== 二层虚拟交换机创建（网卡选择 + bond 模式）=====
+    sw_create: '创建虚拟交换机', sw_edit: '编辑交换机',
+    sw_name: '交换机名称', sw_type: '交换机类型', sw_mtu: 'MTU',
+    sw_uplink: '上联网卡', sw_uplink_pick: '点击宿主机网卡图标以选择上联口（可多选组成 bond）',
+    sw_bond_mode: 'Bond 模式', sw_bond_none: '不绑定（单网卡）',
+    sw_nic_speed: '速率', sw_nic_state: '状态', sw_nic_up: '已连接', sw_nic_down: '未连接',
+    sw_selected_nics: '已选网卡', sw_bond_section: 'Bond 链路聚合',
+    bond_balance_rr: 'balance-rr（轮询，吞吐优先）',
+    bond_active_backup: 'active-backup（主备容错）',
+    bond_8023ad: '802.3ad（LACP 动态聚合，需交换机支持）',
+    bond_balance_xor: 'balance-xor（基于 MAC 哈希分流）',
+    bond_broadcast: 'broadcast（广播冗余）',
+    bond_balance_tlb: 'balance-tlb（自适应发送负载均衡）',
+    bond_balance_alb: 'balance-alb（自适应收发负载均衡）',
+    bond_need_two: '该 bond 模式至少需要选择 2 块网卡',
 
     // ===== 基础设施 · 资源池 =====
     pool_title: '资源池', pool_add: '新建资源池', pool_cpu_limit: 'CPU 上限',
@@ -266,7 +305,7 @@ const dict = {
 
     // ===== 系统设置 · 配置 / License =====
     sys_config_title: '平台基础配置', sys_platform: '平台名称', sys_version: '版本号',
-    sys_benchmark: '对标产品', sys_benchmark_val: 'Proxmox VE + VMware vSphere 8',
+    sys_benchmark: '产品定位', sys_benchmark_val: '企业级分布式虚拟化管理平台',
     sys_node_role: '节点角色', sys_tech: '技术栈',
     lic_current: '当前许可证', lic_active: '已激活', lic_inactive: '未激活',
     lic_edition: '许可版本', lic_org: '授权组织', lic_key: '许可密钥', lic_issued: '签发日期',
@@ -276,7 +315,7 @@ const dict = {
     lic_upgrade: '升级许可版本', lic_compare: '版本特性对比', lic_unlimited: '无限制',
     lic_current_badge: '当前版本', lic_contact_sales: '联系销售',
     lic_price: '价格', lic_feat_max_nodes: '最大节点数', lic_feat_max_vms: '最大虚拟机数',
-    lic_feat_ha: '高可用 HA', lic_feat_migration: '热迁移 vMotion', lic_feat_vlan: 'VLAN / SDN',
+    lic_feat_ha: '高可用 HA', lic_feat_migration: '热迁移 / 在线迁移', lic_feat_vlan: 'VLAN / SDN',
     lic_feat_storage: '存储后端', lic_feat_roles: '自定义角色', lic_feat_audit: '操作审计', lic_feat_api: 'API 访问',
   },
   en: {
@@ -291,14 +330,14 @@ const dict = {
     nav_overview: 'Inventory & Monitor', nav_compute: 'Hosts & Clusters', nav_ops: 'VM Operations',
     nav_infra: 'Storage', nav_admin: 'Administration',
     nav_dashboard: 'Summary', nav_topology: 'Hosts & Clusters', nav_vms: 'Virtual Machines',
-    nav_gpu: 'GPU Monitor', nav_migration: 'vMotion', nav_snapshot: 'Snapshots',
+    nav_gpu: 'GPU Monitor', nav_migration: 'Live Migration', nav_snapshot: 'Snapshots',
     nav_storage: 'Datastores', nav_cluster_cfg: 'Cluster Settings', nav_permissions: 'Permissions',
-    nav_drs: 'DRS Orchestration',
+    nav_drs: 'Scheduling Orchestration',
 
     title_dashboard: 'Summary', title_topology: 'Hosts & Clusters', title_vms: 'Virtual Machines',
-    title_gpu: 'GPU Monitor', title_storage: 'Datastores', title_migration: 'vMotion Migration',
+    title_gpu: 'GPU Monitor', title_storage: 'Datastores', title_migration: 'Live Migration',
     title_snapshot: 'Snapshot Manager', title_cluster_cfg: 'Cluster Settings',
-    title_permissions: 'Permission Management', title_drs: 'DRS Orchestration (Drag & Drop)',
+    title_permissions: 'Permission Management', title_drs: 'Scheduling Orchestration (Drag & Drop)',
 
     user_admin: 'Administrator',
     appearance: 'Appearance', language: 'Language',
@@ -323,9 +362,9 @@ const dict = {
     gpu_power: 'Power', gpu_bound_vm: 'Bound VM', gpu_passthrough: 'Passthrough',
     gpu_idle: 'Idle',
 
-    mig_start: 'Start vMotion', mig_vm: 'Virtual Machine', mig_dst: 'Target Host',
+    mig_start: 'Start Live Migration', mig_vm: 'Virtual Machine', mig_dst: 'Target Host',
     mig_choose: 'Select…', mig_remain: 'free',
-    mig_live: 'Live Migration (vMotion, zero downtime)', mig_storage: 'Storage vMotion (non-shared disk)',
+    mig_live: 'Live Migration (zero downtime)', mig_storage: 'Storage Migration (non-shared disk)',
     mig_compress: 'Compressed transfer', mig_downtime: 'Max Downtime (ms)',
     mig_gpu_block: 'This VM has GPU passthrough and cannot be live-migrated; use cold migration or detach the GPU first.',
     mig_go: 'Start Migration', mig_running: 'Migrating…',
@@ -337,18 +376,18 @@ const dict = {
 
     snap_create: 'Create Snapshot', snap_vm: 'Virtual Machine', snap_name: 'Snapshot Name',
     snap_desc: 'Description', snap_with_mem: 'Snapshot VM memory (incl. NVRAM, restorable running state)',
-    snap_quiesce: 'Quiesce guest file system (VMware Tools consistency)',
+    snap_quiesce: 'Quiesce guest file system (CNF Guest Agent consistency)',
     snap_tip: 'Memory snapshots capture vCPU/RAM/NVRAM state to restore the exact moment; disk-only snapshots are faster and smaller.',
     snap_creating: 'Creating…', snap_chain: 'Snapshot Tree', snap_current: 'You are here',
     snap_mem_nvram: 'Memory + NVRAM', snap_disk_only: 'Disk only', snap_quiesced: 'Quiesced',
     snap_revert: 'Revert to', snap_delete: 'Delete',
 
-    cc_select: 'Select Cluster', cc_ha: 'vSphere HA', cc_drs: 'vSphere DRS',
-    cc_evc: 'EVC Mode', cc_overcommit: 'Resource Overcommit',
+    cc_select: 'Select Cluster', cc_ha: 'High Availability (HA)', cc_drs: 'Dynamic Resource Scheduling',
+    cc_evc: 'CPU Compatibility Mode', cc_overcommit: 'Resource Overcommit',
     cc_ha_desc: 'Restart affected VMs on other hosts when a host fails',
-    cc_drs_desc: 'Automatically balance VMs across hosts by load (vMotion)',
-    cc_evc_desc: 'Enhanced vMotion Compatibility for migration across CPU generations',
-    cc_drs_level: 'DRS Automation Level', cc_manual: 'Manual', cc_partial: 'Partially Automated',
+    cc_drs_desc: 'Automatically balance VMs across hosts by load (live migration)',
+    cc_evc_desc: 'CPU compatibility mode for migration across CPU generations',
+    cc_drs_level: 'Scheduling Automation Level', cc_manual: 'Manual', cc_partial: 'Partially Automated',
     cc_full: 'Fully Automated', cc_aggr: 'Migration Threshold (Aggressiveness)',
     cc_admission: 'Admission Control', cc_admission_desc: 'Reserve failover capacity to guarantee HA',
     cc_host_failures: 'Host failures to tolerate', cc_cpu_over: 'CPU Overcommit', cc_mem_over: 'Memory Overcommit',
@@ -370,9 +409,9 @@ const dict = {
     priv_net_config: 'Network.Configure', priv_perm_manage: 'Permissions.Manage', priv_global_settings: 'Global.System Settings',
     perm_global: 'Global', perm_dc: 'Datacenter', perm_cluster: 'Cluster',
 
-    drs_hint: 'Drag a VM card onto a target host to start vMotion. The system validates resources and compatibility automatically.',
+    drs_hint: 'Drag a VM card onto a target host to start live migration. The system validates resources and compatibility automatically.',
     drs_capacity: 'Capacity', drs_vms_on: 'VMs hosted', drs_drop_here: 'Drop here to migrate',
-    drs_recommend: 'DRS Recommendations', drs_balanced: 'Cluster is balanced',
+    drs_recommend: 'Scheduling Recommendations', drs_balanced: 'Cluster is balanced',
     drs_migrating: 'Migrating', drs_to: 'to',
     drs_cannot_gpu: 'GPU-passthrough VM cannot be live-migrated',
     drs_insufficient: 'Insufficient resources on target host',
@@ -430,7 +469,7 @@ const dict = {
     wiz_gpu_hint: 'Select GPU(s) to pass through/assign to this VM (host must enable IOMMU/VFIO).',
     wiz_no_gpu: 'No GPU available on this host.',
     wiz_xml_preview: 'libvirt Domain XML Preview', wiz_refresh: 'Refresh',
-    wiz_xml_hint: 'This XML is produced by the real generation logic (matching Go backend internal/virt) and is directly virsh-define-able.',
+    wiz_xml_hint: 'This XML is produced by the backend virtualization engine and is directly virsh-define-able.',
     wiz_vm_status: 'Status', wiz_prev: 'Previous', wiz_next: 'Next',
     wiz_step: 'Step', wiz_creating: 'Creating...', wiz_create: 'Create VM', wiz_finish: 'Finish',
     wiz_optional: 'Optional',
@@ -466,7 +505,46 @@ const dict = {
     tpl_spec: 'Spec', tpl_usage: 'Deployments', tpl_updated: 'Updated',
     iso_title: 'ISO Library', iso_upload: 'Upload ISO', iso_os_type: 'OS Type',
     iso_size: 'Size', iso_pool: 'Pool', iso_uploaded: 'Uploaded', iso_checksum: 'Checksum',
-    ctx_migrate: 'Migrate',
+
+    // ===== Context menu =====
+    ctx_group_power: 'Power', ctx_group_console: 'Console', ctx_group_snapshot: 'Snapshot',
+    ctx_group_migration: 'Migrate & Clone', ctx_group_manage: 'Manage',
+    ctx_power_on: 'Power On', ctx_shutdown: 'Shut Down (Guest)', ctx_reboot: 'Reboot',
+    ctx_suspend: 'Suspend', ctx_resume: 'Resume', ctx_power_off: 'Force Power Off',
+    ctx_open_console: 'Open Graphical Console', ctx_open_serial: 'Open Serial Terminal',
+    ctx_take_snapshot: 'Take Snapshot', ctx_manage_snapshots: 'Manage Snapshots', ctx_revert_snapshot: 'Revert to Snapshot',
+    ctx_migrate: 'Live Migrate', ctx_clone: 'Clone', ctx_to_template: 'Convert to Template',
+    ctx_edit_settings: 'Edit Settings', ctx_rename: 'Rename', ctx_delete: 'Delete VM',
+    ctx_gpu_block: 'GPU passthrough does not support live migration',
+
+    // ===== Common ops / toolbar / CRUD / dialog =====
+    op_new: 'New', op_edit: 'Edit', op_delete: 'Delete', op_batch: 'Batch',
+    op_filter: 'Filter', op_search: 'Search', op_refresh: 'Refresh', op_reset: 'Reset',
+    op_confirm: 'OK', op_cancel: 'Cancel', op_save: 'Save', op_close: 'Close',
+    op_selected_n: '{n} selected', op_batch_delete: 'Batch Delete', op_batch_start: 'Batch Start', op_batch_stop: 'Batch Stop',
+    op_select_all: 'Select All', op_actions: 'Actions', op_no_data: 'No data',
+    op_total_n: '{n} total', op_page_prev: 'Prev', op_page_next: 'Next', op_page_of: 'Page {c}/{t}',
+    op_loading: 'Loading…', op_required: 'This field is required', op_invalid: 'Invalid format',
+    confirm_delete_title: 'Confirm Delete', confirm_delete_msg: 'Delete "{name}"? This cannot be undone.',
+    confirm_batch_delete_msg: 'Delete the selected {n} objects? This cannot be undone.',
+    toast_success: 'Success', toast_failed: 'Failed', toast_deleted: 'Deleted "{name}"',
+    toast_created: 'Created "{name}"', toast_saved: 'Saved', toast_canceled: 'Canceled',
+
+    // ===== L2 virtual switch creation =====
+    sw_create: 'Create Virtual Switch', sw_edit: 'Edit Switch',
+    sw_name: 'Switch Name', sw_type: 'Switch Type', sw_mtu: 'MTU',
+    sw_uplink: 'Uplink NIC', sw_uplink_pick: 'Click host NIC icons to pick uplinks (multi-select to form a bond)',
+    sw_bond_mode: 'Bond Mode', sw_bond_none: 'No bond (single NIC)',
+    sw_nic_speed: 'Speed', sw_nic_state: 'State', sw_nic_up: 'Up', sw_nic_down: 'Down',
+    sw_selected_nics: 'Selected NICs', sw_bond_section: 'Bond Link Aggregation',
+    bond_balance_rr: 'balance-rr (round-robin, throughput)',
+    bond_active_backup: 'active-backup (failover)',
+    bond_8023ad: '802.3ad (LACP, switch support required)',
+    bond_balance_xor: 'balance-xor (MAC hash)',
+    bond_broadcast: 'broadcast (redundancy)',
+    bond_balance_tlb: 'balance-tlb (adaptive TX load balancing)',
+    bond_balance_alb: 'balance-alb (adaptive TX/RX load balancing)',
+    bond_need_two: 'This bond mode requires at least 2 NICs',
 
     // ===== Infrastructure resource pools =====
     pool_title: 'Resource Pools', pool_add: 'New Pool', pool_cpu_limit: 'CPU Limit',
@@ -513,7 +591,7 @@ const dict = {
 
     // ===== System / License =====
     sys_config_title: 'Platform General Settings', sys_platform: 'Platform Name', sys_version: 'Version',
-    sys_benchmark: 'Benchmarked Against', sys_benchmark_val: 'Proxmox VE + VMware vSphere 8',
+    sys_benchmark: 'Product Positioning', sys_benchmark_val: 'Enterprise Distributed Virtualization Platform',
     sys_node_role: 'Node Role', sys_tech: 'Tech Stack',
     lic_current: 'Current License', lic_active: 'Active', lic_inactive: 'Inactive',
     lic_edition: 'Edition', lic_org: 'Organization', lic_key: 'License Key', lic_issued: 'Issued',

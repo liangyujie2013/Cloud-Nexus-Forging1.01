@@ -116,7 +116,7 @@ const SystemView = {
             </tbody>
           </table>
         </div>
-        <div class="muted" style="margin-top:12px;font-size:13px"><i class="fas fa-circle-info"></i> 企业版支持 Ceph/GlusterFS 分布式存储、SDN、Webhook 与不限虚拟机数。{{ t('lic_contact_sales') }}：sales@cloudnexusforging.com</div>
+        <div class="muted" style="margin-top:12px;font-size:13px"><i class="fas fa-circle-info"></i> 企业版支持分布式存储、SDN、Webhook 与不限虚拟机数。{{ t('lic_contact_sales') }}：sales@cloudnexusforging.com</div>
       </template>
 
       <!-- ===== about：关于系统 ===== -->

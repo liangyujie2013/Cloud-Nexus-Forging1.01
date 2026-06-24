@@ -1,6 +1,6 @@
 // =============================================================================
 //  模块视图：可用性管理 (view-availability.js)
-//  子标签：ha HA 配置（集群 HA/DRS/EVC/超分配）/ migration 迁移中心（vMotion 控制台
+//  子标签：ha HA 配置（集群 高可用/资源调度/CPU兼容/超分配）/ migration 迁移中心（在线迁移控制台
 //          + 历史）/ backup 备份恢复（备份作业列表）。
 //  API：/cluster-configs、/migrations(+/progress)、/backup-jobs、/hosts、/vms。
 // =============================================================================
@@ -93,7 +93,7 @@ const AvailabilityView = {
             <div class="cc-list-item" v-for="c in configs" :key="c.id" :class="{active:sel&&sel.id===c.id}" @click="pick(c)">
               <i class="fas fa-layer-group" :style="{color:sel&&sel.id===c.id?'var(--color-blue)':'var(--text-tertiary)'}"></i>
               <div style="flex:1"><div style="font-weight:600;font-size:14px">{{ c.name }}</div>
-                <div class="muted" style="font-size:11px"><span v-if="c.ha_enabled">HA</span><span v-if="c.drs_enabled"> · DRS</span><span v-if="c.evc_enabled"> · EVC</span></div></div>
+                <div class="muted" style="font-size:11px"><span v-if="c.ha_enabled">HA</span><span v-if="c.drs_enabled"> · 资源调度</span><span v-if="c.evc_enabled"> · CPU兼容</span></div></div>
             </div>
           </div>
           <div v-if="sel">

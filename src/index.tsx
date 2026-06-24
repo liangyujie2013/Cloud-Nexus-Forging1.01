@@ -1,6 +1,6 @@
 // =============================================================================
 //  Cloud Nexus Forging (CNF) v1.0.1 — Hono Mock 后端（路径B 原型）
-//  对标 Proxmox VE + VMware vSphere 8 的企业级分布式虚拟化管理平台。
+//  企业级分布式虚拟化管理平台（CNF 自有产品）。
 //  统一 RESTful 风格：所有业务接口前缀 /api/v1，按 9 大模块组织、复数名词 + 动作子路径。
 //
 //  9 模块：仪表板 dashboard / 基础设施 infrastructure / 计算资源 compute /
@@ -108,14 +108,14 @@ app.post(`${API}/vms/preview-xml`, async (c) => {
 // ============================================================================
 //  模块 4 · 可用性管理 availability：HA 配置 / 迁移中心 / 备份恢复
 // ============================================================================
-// 集群高级配置（HA / DRS / EVC / 超分配）
+// 集群高级配置（高可用 / 动态资源调度 / CPU 兼容模式 / 资源超分配）
 app.get(`${API}/cluster-configs`, (c) => c.json(mockData.cluster_configs))
 app.put(`${API}/cluster-configs/:id`, async (c) => {
   const body = await c.req.json()
   return c.json({ ...body, id: Number(c.req.param('id')), saved: true, message: '（原型）集群可用性配置已保存' })
 })
 
-// 迁移中心（vMotion）：历史 + 提交 + 进度
+// 迁移中心（在线迁移）：历史 + 提交 + 进度
 app.get(`${API}/migrations`, (c) => c.json(mockData.migrations))
 app.post(`${API}/migrations`, async (c) => {
   const body = await c.req.json<{ vm: string; dst: string; live?: boolean; storage?: boolean }>()
@@ -169,6 +169,31 @@ app.post(`${API}/snapshots`, async (c) => {
 // ============================================================================
 app.get(`${API}/vswitches`, (c) => c.json(mockData.vswitches))
 app.get(`${API}/vlans`, (c) => c.json(mockData.vlans))
+// 宿主机物理网卡（创建二层交换机时选择上联口 / 组建 bond）
+app.get(`${API}/host-nics`, (c) => c.json(mockData.host_nics))
+// 支持的 bond 链路聚合模式
+app.get(`${API}/bond-modes`, (c) => c.json(mockData.bond_modes))
+// 创建二层虚拟交换机（原型：回显校验结果）
+app.post(`${API}/vswitches`, async (c) => {
+  const body = await c.req.json()
+  const nics: string[] = body.uplink_nics || []
+  const bondMode: string = body.bond_mode || 'none'
+  const uplink = nics.length > 1
+    ? `bond0 (${nics.length}× ${bondMode})`
+    : (nics[0] || '—')
+  return c.json({
+    id: Date.now(),
+    name: body.name,
+    type: body.type || '分布式虚拟交换机',
+    mtu: body.mtu || 1500,
+    bond_mode: nics.length > 1 ? bondMode : null,
+    uplink,
+    ports: 0,
+    vlans: [],
+    hosts: [],
+    message: `（原型）二层虚拟交换机「${body.name}」已创建，上联：${uplink}`,
+  })
+})
 // 网络拓扑：虚拟交换机 → VLAN
 app.get(`${API}/network/topology`, (c) => {
   const tree = mockData.vswitches.map((sw) => ({

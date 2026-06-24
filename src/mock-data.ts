@@ -1,6 +1,6 @@
 // =============================================================================
 //  Cloud Nexus Forging (CNF) v1.0.1 — 路径B 原型模拟数据集
-//  对标 Proxmox VE + VMware vSphere 8，按 9 模块组织。
+//  企业级分布式虚拟化管理平台，按 9 模块组织。
 //  9 模块：仪表板 / 基础设施 / 计算资源 / 可用性管理 / 存储管理 /
 //         网络管理 / 监控告警 / 访问控制 / 系统设置。
 // =============================================================================
@@ -10,8 +10,8 @@ export const mockData = {
     { id: 2, name: '上海二区 (DC-Shanghai-02)', location: '上海·临港', clusters: 1, hosts: 3, vms: 17 },
   ],
   clusters: [
-    { id: 1, datacenter_id: 1, name: '生产集群 Prod-A', ha_enabled: true, drs_enabled: true, overcommit_cpu: 4.0, hosts: 4, vms: 28, evc_mode: 'Intel Cascade Lake' },
-    { id: 2, datacenter_id: 1, name: 'GPU 计算集群 GPU-Compute', ha_enabled: true, drs_enabled: false, overcommit_cpu: 1.0, hosts: 2, vms: 10, evc_mode: 'Intel Ice Lake' },
+    { id: 1, datacenter_id: 1, name: '生产集群 Prod-A', ha_enabled: true, drs_enabled: true, overcommit_cpu: 4.0, hosts: 4, vms: 28, evc_mode: 'CPU 基线 Gen3' },
+    { id: 2, datacenter_id: 1, name: 'GPU 计算集群 GPU-Compute', ha_enabled: true, drs_enabled: false, overcommit_cpu: 1.0, hosts: 2, vms: 10, evc_mode: 'CPU 基线 Gen4' },
     { id: 3, datacenter_id: 2, name: '测试集群 Test-B', ha_enabled: false, drs_enabled: false, overcommit_cpu: 8.0, hosts: 3, vms: 17, evc_mode: '-' },
   ],
   hosts: [
@@ -64,20 +64,20 @@ export const mockData = {
     { id: 1, vm: 'web-frontend-01', src: 'node-prod-01', dst: 'node-prod-02', live: true, storage: false, status: 'success', downtime_ms: 180, throughput_mbps: 9400, duration_s: 42, time: '2026-06-23 20:05' },
     { id: 2, vm: 'cache-redis-01', src: 'node-prod-03', dst: 'node-prod-01', live: true, storage: true, status: 'success', downtime_ms: 420, throughput_mbps: 7100, duration_s: 188, time: '2026-06-23 18:40' },
   ],
-  // 集群高级配置（HA / DRS / EVC / 超分配）
+  // 集群高级配置（高可用 / 动态资源调度 / CPU 兼容模式 / 超分配）
   cluster_configs: [
     {
       id: 1, name: '生产集群 Prod-A',
       ha_enabled: true, ha_admission_control: true, ha_host_failures: 1,
       drs_enabled: true, drs_automation: 'full', drs_aggressiveness: 3,
-      evc_enabled: true, evc_baseline: 'Intel Cascade Lake',
+      evc_enabled: true, evc_baseline: 'CPU 基线 Gen3',
       overcommit_cpu: 4.0, overcommit_mem: 1.5,
     },
     {
       id: 2, name: 'GPU 计算集群 GPU-Compute',
       ha_enabled: true, ha_admission_control: false, ha_host_failures: 1,
       drs_enabled: false, drs_automation: 'manual', drs_aggressiveness: 2,
-      evc_enabled: true, evc_baseline: 'Intel Ice Lake',
+      evc_enabled: true, evc_baseline: 'CPU 基线 Gen4',
       overcommit_cpu: 1.0, overcommit_mem: 1.0,
     },
     {
@@ -88,7 +88,7 @@ export const mockData = {
       overcommit_cpu: 8.0, overcommit_mem: 2.0,
     },
   ],
-  // RBAC 角色定义（对齐 vSphere 角色/权限模型）
+  // RBAC 角色定义（CNF 企业级角色/权限模型）
   roles: [
     { id: 1, key: 'role_admin', system: true, privileges: ['priv_vm_create','priv_vm_config','priv_vm_power','priv_vm_console','priv_vm_snapshot','priv_host_config','priv_host_maint','priv_cluster_config','priv_ds_manage','priv_net_config','priv_perm_manage','priv_global_settings'] },
     { id: 2, key: 'role_vm_admin', system: false, privileges: ['priv_vm_create','priv_vm_config','priv_vm_power','priv_vm_console','priv_vm_snapshot'] },
@@ -141,7 +141,7 @@ export const mockData = {
     {
       key: 'enterprise', name_zh: '企业版', name_en: 'Enterprise', price: '联系销售 / Contact Sales',
       max_nodes: 32, max_vms: 999999, ha_enabled: true, live_migration: true,
-      vlan_mgmt: 'VLAN + SDN', storage: 'NFS / iSCSI / 本地 / Ceph', custom_roles: true, audit_log: true, api_access: '读写 + Webhook',
+      vlan_mgmt: 'VLAN + SDN', storage: 'NFS / iSCSI / 本地 / 分布式存储', custom_roles: true, audit_log: true, api_access: '读写 + Webhook',
     },
   ],
 
@@ -157,7 +157,7 @@ export const mockData = {
   audit_logs: [
     { id: 1, ts: '2026-06-24 09:31:12', user: 'administrator', action: 'auth.login', resource: '控制台', source_ip: '10.0.0.21', result: 'success', detail: '管理员登录成功' },
     { id: 2, ts: '2026-06-24 09:30:05', user: 'administrator', action: 'vm.create', resource: 'ai-inference-02', source_ip: '10.0.0.21', result: 'success', detail: '创建虚拟机（32 vCPU / 256GB / 1×A100）' },
-    { id: 3, ts: '2026-06-24 09:12:48', user: 'ops-wang', action: 'vm.migrate', resource: 'web-prod-01', source_ip: '10.0.0.35', result: 'success', detail: 'vMotion: node-prod-01 → node-prod-02' },
+    { id: 3, ts: '2026-06-24 09:12:48', user: 'ops-wang', action: 'vm.migrate', resource: 'web-prod-01', source_ip: '10.0.0.35', result: 'success', detail: '在线迁移: node-prod-01 → node-prod-02' },
     { id: 4, ts: '2026-06-24 08:45:30', user: 'ops-wang', action: 'snapshot.create', resource: 'db-postgres-01', source_ip: '10.0.0.35', result: 'success', detail: '创建快照（guest-agent 冻结）' },
     { id: 5, ts: '2026-06-24 07:20:11', user: 'administrator', action: 'vm.migrate', resource: 'cache-redis-01', source_ip: '10.0.0.21', result: 'failed', detail: '目标主机资源不足，迁移回滚' },
     { id: 6, ts: '2026-06-23 22:10:03', user: 'dev-zhang', action: 'vm.power', resource: 'test-vm-08', source_ip: '10.0.0.88', result: 'denied', detail: '权限不足：缺少 priv_vm_power' },
@@ -186,9 +186,28 @@ export const mockData = {
 
   // ===================== 网络管理 · 虚拟交换机 =====================
   vswitches: [
-    { id: 1, name: 'vSwitch-Prod', type: 'Open vSwitch', mtu: 1500, uplink: 'bond0 (2×25GbE)', ports: 128, vlans: [10, 20, 30], hosts: ['node-prod-01', 'node-prod-02', 'node-prod-03'] },
-    { id: 2, name: 'vSwitch-Storage', type: 'Linux Bridge', mtu: 9000, uplink: 'bond1 (2×100GbE)', ports: 64, vlans: [100], hosts: ['node-prod-01', 'node-prod-02'] },
-    { id: 3, name: 'vSwitch-GPU', type: 'Open vSwitch', mtu: 9000, uplink: 'bond0 (2×100GbE)', ports: 48, vlans: [40, 50], hosts: ['gpu-node-01', 'gpu-node-02'] },
+    { id: 1, name: 'vSwitch-Prod', type: '分布式虚拟交换机', mtu: 1500, uplink: 'bond0 (2×25GbE)', bond_mode: '802.3ad', ports: 128, vlans: [10, 20, 30], hosts: ['node-prod-01', 'node-prod-02', 'node-prod-03'] },
+    { id: 2, name: 'vSwitch-Storage', type: '标准网桥', mtu: 9000, uplink: 'bond1 (2×100GbE)', bond_mode: 'active-backup', ports: 64, vlans: [100], hosts: ['node-prod-01', 'node-prod-02'] },
+    { id: 3, name: 'vSwitch-GPU', type: '分布式虚拟交换机', mtu: 9000, uplink: 'bond0 (2×100GbE)', bond_mode: 'balance-rr', ports: 48, vlans: [40, 50], hosts: ['gpu-node-01', 'gpu-node-02'] },
+  ],
+  // ===================== 网络管理 · 宿主机物理网卡（用于交换机上联选择）=====================
+  host_nics: [
+    { id: 'eth0', name: 'eth0', mac: '00:1b:21:aa:01:00', speed_gbe: 25, state: 'up', driver: 'ixgbe', in_use: false },
+    { id: 'eth1', name: 'eth1', mac: '00:1b:21:aa:01:01', speed_gbe: 25, state: 'up', driver: 'ixgbe', in_use: false },
+    { id: 'eth2', name: 'eth2', mac: '00:1b:21:aa:01:02', speed_gbe: 100, state: 'up', driver: 'mlx5', in_use: false },
+    { id: 'eth3', name: 'eth3', mac: '00:1b:21:aa:01:03', speed_gbe: 100, state: 'up', driver: 'mlx5', in_use: false },
+    { id: 'eth4', name: 'eth4', mac: '00:1b:21:aa:01:04', speed_gbe: 10, state: 'down', driver: 'igb', in_use: false },
+    { id: 'eth5', name: 'eth5', mac: '00:1b:21:aa:01:05', speed_gbe: 10, state: 'up', driver: 'igb', in_use: true },
+  ],
+  // ===================== 网络管理 · Bond 链路聚合模式 =====================
+  bond_modes: [
+    { key: 'balance-rr', label_key: 'bond_balance_rr', min_nics: 2, lacp: false },
+    { key: 'active-backup', label_key: 'bond_active_backup', min_nics: 2, lacp: false },
+    { key: '802.3ad', label_key: 'bond_8023ad', min_nics: 2, lacp: true },
+    { key: 'balance-xor', label_key: 'bond_balance_xor', min_nics: 2, lacp: false },
+    { key: 'broadcast', label_key: 'bond_broadcast', min_nics: 2, lacp: false },
+    { key: 'balance-tlb', label_key: 'bond_balance_tlb', min_nics: 2, lacp: false },
+    { key: 'balance-alb', label_key: 'bond_balance_alb', min_nics: 2, lacp: false },
   ],
   // ===================== 网络管理 · VLAN 配置 =====================
   vlans: [

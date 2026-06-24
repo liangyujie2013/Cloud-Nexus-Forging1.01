@@ -50,7 +50,7 @@ const InfrastructureView = {
                   <i class="fas fa-chevron-right chevron" :class="{open:expanded['cl'+cl.id]}"></i>
                   <i class="fas fa-layer-group" style="color:var(--color-indigo)"></i> {{ cl.name }}
                   <span v-if="cl.ha_enabled" class="apple-badge apple-badge--running" style="margin-left:6px"><span class="dot"></span>HA</span>
-                  <span v-if="cl.drs_enabled" class="apple-badge apple-badge--warning"><span class="dot"></span>DRS</span>
+                  <span v-if="cl.drs_enabled" class="apple-badge apple-badge--warning"><span class="dot"></span>资源调度</span>
                 </div>
                 <div class="tree-children" v-if="expanded['cl'+cl.id]">
                   <div class="tree-node" v-for="h in cl.children" :key="h.id">
@@ -80,7 +80,7 @@ const InfrastructureView = {
       <template v-else-if="props.tab==='clusters'">
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
-            <thead><tr><th>{{ t('name') }}</th><th>HA</th><th>DRS</th><th>EVC</th><th>{{ t('cc_cpu_over') }}</th><th>{{ t('host_machine') }}</th><th>{{ t('dash_vms') }}</th></tr></thead>
+            <thead><tr><th>{{ t('name') }}</th><th>HA</th><th>资源调度</th><th>CPU兼容</th><th>{{ t('cc_cpu_over') }}</th><th>{{ t('host_machine') }}</th><th>{{ t('dash_vms') }}</th></tr></thead>
             <tbody>
               <tr v-for="c in clusters" :key="c.id">
                 <td><strong>{{ c.name }}</strong></td>
