@@ -1,3 +1,9 @@
+// =============================================================================
+//  通用组件：虚拟机创建向导 (component-vm-wizard.js)
+//  8 步：基本信息 → CPU 拓扑 → NUMA 亲和 → CPU 绑核 → 内存 → 磁盘&网络
+//        → GPU 设备 → libvirt Domain XML 预览 & 创建。
+//  XML 由后端 /api/v1/vms/preview-xml 真实生成（与生产 libvirt 逻辑一致）。
+// =============================================================================
 (function () {
 const { ref, reactive, computed, watch } = Vue
 const api = window.api
@@ -70,7 +76,7 @@ const VMWizard = {
     const gpuSelected = (g) => f.gpus.some(x => x.pci_address === g.pci)
 
     const refreshXML = async () => {
-      const res = await api('/preview-xml', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) })
+      const res = await api('/vms/preview-xml', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) })
       xml.value = res.xml || ('错误: ' + res.error)
     }
     watch(step, (s) => { if (s === 7) refreshXML() })

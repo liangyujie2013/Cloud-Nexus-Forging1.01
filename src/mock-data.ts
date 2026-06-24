@@ -1,4 +1,9 @@
-// 路径B 原型的模拟数据集：数据中心/集群/主机/VM/GPU/存储。
+// =============================================================================
+//  Cloud Nexus Forging (CNF) v1.0.1 — 路径B 原型模拟数据集
+//  对标 Proxmox VE + VMware vSphere 8，按 9 模块组织。
+//  9 模块：仪表板 / 基础设施 / 计算资源 / 可用性管理 / 存储管理 /
+//         网络管理 / 监控告警 / 访问控制 / 系统设置。
+// =============================================================================
 export const mockData = {
   datacenters: [
     { id: 1, name: '北京一区 (DC-Beijing-01)', location: '北京·亦庄', clusters: 2, hosts: 6, vms: 38 },
@@ -104,6 +109,128 @@ export const mockData = {
     { id: 3, user: 'dev-zhang@cnf.local', role_key: 'role_vm_user', scope: 'perm_dc', scope_obj: '北京一区 DC-Beijing-01', propagate: true },
     { id: 4, user: 'audit@cnf.local', role_key: 'role_readonly', scope: 'perm_global', scope_obj: '—', propagate: true },
     { id: 5, user: 'net-li@cnf.local', role_key: 'role_network', scope: 'perm_dc', scope_obj: '北京一区 DC-Beijing-01', propagate: false },
+  ],
+
+  // ===================== 系统设置 · License 管理 =====================
+  // 当前许可证（Standard 版：16 节点 / 500 VM / 含 HA + 热迁移 + 审计 + 自定义角色）
+  license: {
+    edition: 'standard',
+    organization: 'Cloud Nexus 科技有限公司',
+    license_key: 'CNF-STD-2026-A1B2-C3D4-E5F6-7890',
+    issued_at: '2026-01-15',
+    expires_at: '2027-01-14',
+    hardware_fingerprint: 'HWFP-7F3A9C2E-8B1D-4E6F',
+    is_active: true,
+    max_nodes: 16,
+    max_vms: 500,
+    current_nodes: 6,
+    current_vms: 8,
+  },
+  // 三版本特性对比矩阵（Community / Standard / Enterprise）
+  license_editions: [
+    {
+      key: 'community', name_zh: '社区版', name_en: 'Community', price: '免费 / Free',
+      max_nodes: 3, max_vms: 50, ha_enabled: false, live_migration: false,
+      vlan_mgmt: '基础', storage: 'NFS / iSCSI / 本地', custom_roles: false, audit_log: false, api_access: '只读',
+    },
+    {
+      key: 'standard', name_zh: '标准版', name_en: 'Standard', price: '¥12,800 / 年·节点',
+      max_nodes: 16, max_vms: 500, ha_enabled: true, live_migration: true,
+      vlan_mgmt: '完整 VLAN', storage: 'NFS / iSCSI / 本地', custom_roles: true, audit_log: true, api_access: '读写',
+    },
+    {
+      key: 'enterprise', name_zh: '企业版', name_en: 'Enterprise', price: '联系销售 / Contact Sales',
+      max_nodes: 32, max_vms: 999999, ha_enabled: true, live_migration: true,
+      vlan_mgmt: 'VLAN + SDN', storage: 'NFS / iSCSI / 本地 / Ceph', custom_roles: true, audit_log: true, api_access: '读写 + Webhook',
+    },
+  ],
+
+  // ===================== 访问控制 · 用户 =====================
+  users: [
+    { id: 1, username: 'administrator', display_name: '系统管理员', email: 'administrator@cnf.local', role_keys: ['role_admin'], source: 'local', is_active: true, last_login: '2026-06-24 09:31', created_at: '2026-01-15' },
+    { id: 2, username: 'ops-wang', display_name: '王运维', email: 'ops-wang@cnf.local', role_keys: ['role_vm_admin'], source: 'ldap', is_active: true, last_login: '2026-06-24 08:50', created_at: '2026-02-01' },
+    { id: 3, username: 'dev-zhang', display_name: '张开发', email: 'dev-zhang@cnf.local', role_keys: ['role_vm_user'], source: 'ldap', is_active: true, last_login: '2026-06-23 17:22', created_at: '2026-03-10' },
+    { id: 4, username: 'net-li', display_name: '李网络', email: 'net-li@cnf.local', role_keys: ['role_network'], source: 'local', is_active: true, last_login: '2026-06-22 11:05', created_at: '2026-03-12' },
+    { id: 5, username: 'audit', display_name: '审计员', email: 'audit@cnf.local', role_keys: ['role_readonly'], source: 'local', is_active: false, last_login: '2026-05-30 14:40', created_at: '2026-04-01' },
+  ],
+  // ===================== 访问控制 · 操作审计 =====================
+  audit_logs: [
+    { id: 1, ts: '2026-06-24 09:31:12', user: 'administrator', action: 'auth.login', resource: '控制台', source_ip: '10.0.0.21', result: 'success', detail: '管理员登录成功' },
+    { id: 2, ts: '2026-06-24 09:30:05', user: 'administrator', action: 'vm.create', resource: 'ai-inference-02', source_ip: '10.0.0.21', result: 'success', detail: '创建虚拟机（32 vCPU / 256GB / 1×A100）' },
+    { id: 3, ts: '2026-06-24 09:12:48', user: 'ops-wang', action: 'vm.migrate', resource: 'web-prod-01', source_ip: '10.0.0.35', result: 'success', detail: 'vMotion: node-prod-01 → node-prod-02' },
+    { id: 4, ts: '2026-06-24 08:45:30', user: 'ops-wang', action: 'snapshot.create', resource: 'db-postgres-01', source_ip: '10.0.0.35', result: 'success', detail: '创建快照（guest-agent 冻结）' },
+    { id: 5, ts: '2026-06-24 07:20:11', user: 'administrator', action: 'vm.migrate', resource: 'cache-redis-01', source_ip: '10.0.0.21', result: 'failed', detail: '目标主机资源不足，迁移回滚' },
+    { id: 6, ts: '2026-06-23 22:10:03', user: 'dev-zhang', action: 'vm.power', resource: 'test-vm-08', source_ip: '10.0.0.88', result: 'denied', detail: '权限不足：缺少 priv_vm_power' },
+    { id: 7, ts: '2026-06-23 20:05:44', user: 'ops-wang', action: 'role.update', resource: 'role_vm_admin', source_ip: '10.0.0.35', result: 'success', detail: '为角色新增 priv_vm_snapshot 权限' },
+  ],
+
+  // ===================== 计算资源 · 模板管理 =====================
+  vm_templates: [
+    { id: 1, name: 'tpl-rocky9-base', os: 'Rocky Linux 9', os_type: 'linux', description: '企业基线模板：cloud-init + qemu-guest-agent', vcpus: 4, mem_gb: 8, disk_gb: 40, usage_count: 23, pool: 'prod-nfs-pool', updated_at: '2026-06-10 10:20' },
+    { id: 2, name: 'tpl-ubuntu2204-cuda', os: 'Ubuntu 22.04 + CUDA 12', os_type: 'linux', description: 'AI 训练模板：CUDA / cuDNN / PyTorch 预装', vcpus: 16, mem_gb: 64, disk_gb: 120, usage_count: 9, pool: 'gpu-local-nvme', updated_at: '2026-06-18 16:42' },
+    { id: 3, name: 'tpl-win2022-std', os: 'Windows Server 2022', os_type: 'windows', description: 'Windows 标准模板：virtio 驱动 + RDP', vcpus: 4, mem_gb: 16, disk_gb: 80, usage_count: 5, pool: 'prod-iscsi-fast', updated_at: '2026-05-28 09:15' },
+  ],
+  // ===================== 计算资源 · ISO 镜像 =====================
+  iso_images: [
+    { id: 1, name: 'Rocky-9.4-x86_64-dvd.iso', os_type: 'Linux', size_gb: 11.2, pool: 'prod-nfs-pool', uploaded_at: '2026-04-02', checksum_ok: true },
+    { id: 2, name: 'ubuntu-22.04.4-live-server.iso', os_type: 'Linux', size_gb: 2.1, pool: 'prod-nfs-pool', uploaded_at: '2026-04-02', checksum_ok: true },
+    { id: 3, name: 'Win2022_CN-x64.iso', os_type: 'Windows', size_gb: 5.4, pool: 'prod-iscsi-fast', uploaded_at: '2026-04-05', checksum_ok: true },
+    { id: 4, name: 'virtio-win-0.1.240.iso', os_type: 'Drivers', size_gb: 0.6, pool: 'prod-nfs-pool', uploaded_at: '2026-04-05', checksum_ok: false },
+  ],
+  // ===================== 基础设施 · 资源池 =====================
+  resource_pools: [
+    { id: 1, cluster_id: 1, name: '生产业务池 Prod-Pool', cpu_shares: 'high', cpu_limit_vcpu: 192, cpu_reserved_vcpu: 96, mem_limit_gb: 768, mem_reserved_gb: 384, vms: 16 },
+    { id: 2, cluster_id: 1, name: '测试沙箱池 Test-Pool', cpu_shares: 'low', cpu_limit_vcpu: 64, cpu_reserved_vcpu: 0, mem_limit_gb: 128, mem_reserved_gb: 0, vms: 7 },
+    { id: 3, cluster_id: 2, name: 'AI 训练池 GPU-Pool', cpu_shares: 'high', cpu_limit_vcpu: 256, cpu_reserved_vcpu: 128, mem_limit_gb: 1536, mem_reserved_gb: 768, vms: 5 },
+  ],
+
+  // ===================== 网络管理 · 虚拟交换机 =====================
+  vswitches: [
+    { id: 1, name: 'vSwitch-Prod', type: 'Open vSwitch', mtu: 1500, uplink: 'bond0 (2×25GbE)', ports: 128, vlans: [10, 20, 30], hosts: ['node-prod-01', 'node-prod-02', 'node-prod-03'] },
+    { id: 2, name: 'vSwitch-Storage', type: 'Linux Bridge', mtu: 9000, uplink: 'bond1 (2×100GbE)', ports: 64, vlans: [100], hosts: ['node-prod-01', 'node-prod-02'] },
+    { id: 3, name: 'vSwitch-GPU', type: 'Open vSwitch', mtu: 9000, uplink: 'bond0 (2×100GbE)', ports: 48, vlans: [40, 50], hosts: ['gpu-node-01', 'gpu-node-02'] },
+  ],
+  // ===================== 网络管理 · VLAN 配置 =====================
+  vlans: [
+    { id: 1, vswitch: 'vSwitch-Prod', vlan_id: 10, name: '业务前端 VLAN', subnet: '10.10.1.0/24', gateway: '10.10.1.1', dhcp: true, vms: 12 },
+    { id: 2, vswitch: 'vSwitch-Prod', vlan_id: 20, name: '业务后端 VLAN', subnet: '10.10.2.0/24', gateway: '10.10.2.1', dhcp: true, vms: 8 },
+    { id: 3, vswitch: 'vSwitch-Prod', vlan_id: 30, name: '管理网 VLAN', subnet: '10.0.0.0/24', gateway: '10.0.0.1', dhcp: false, vms: 0 },
+    { id: 4, vswitch: 'vSwitch-Storage', vlan_id: 100, name: '存储网 VLAN', subnet: '10.20.0.0/24', gateway: '10.20.0.1', dhcp: false, vms: 0 },
+    { id: 5, vswitch: 'vSwitch-GPU', vlan_id: 40, name: 'AI 训练 VLAN', subnet: '10.10.2.0/24', gateway: '10.10.2.1', dhcp: true, vms: 5 },
+  ],
+
+  // ===================== 存储管理 · 卷管理 =====================
+  volumes: [
+    { id: 1, name: 'web-prod-01-disk0', pool: 'prod-nfs-pool', vm: 'web-prod-01', format: 'qcow2', size_gb: 40, used_gb: 18, bus: 'virtio-scsi', iops_limit: 5000 },
+    { id: 2, name: 'db-postgres-01-data', pool: 'prod-iscsi-fast', vm: 'db-postgres-01', format: 'raw', size_gb: 500, used_gb: 312, bus: 'virtio-scsi', iops_limit: 20000 },
+    { id: 3, name: 'ai-training-01-nvme', pool: 'gpu-local-nvme', vm: 'ai-training-01', format: 'raw', size_gb: 2000, used_gb: 1240, bus: 'nvme', iops_limit: 0 },
+    { id: 4, name: 'cache-redis-01-disk0', pool: 'prod-nfs-pool', vm: 'cache-redis-01', format: 'qcow2', size_gb: 60, used_gb: 22, bus: 'virtio-scsi', iops_limit: 8000 },
+  ],
+
+  // ===================== 可用性管理 · 备份恢复 =====================
+  backup_jobs: [
+    { id: 1, target_vm: 'db-postgres-01', schedule: '每日 03:00', mode: 'snapshot', retention: '保留 14 份', last_run: '2026-06-24 03:00', last_status: 'success', last_size_gb: 312 },
+    { id: 2, target_vm: 'web-prod-01', schedule: '每日 02:30', mode: 'snapshot', retention: '保留 7 份', last_run: '2026-06-24 02:30', last_status: 'success', last_size_gb: 18 },
+    { id: 3, target_vm: 'cache-redis-01', schedule: '每周日 04:00', mode: 'full', retention: '保留 4 份', last_run: '2026-06-22 04:00', last_status: 'warning', last_size_gb: 22 },
+    { id: 4, target_vm: 'ai-training-01', schedule: '手动', mode: 'full', retention: '保留 2 份', last_run: '2026-06-20 18:00', last_status: 'failed', last_size_gb: 0 },
+  ],
+
+  // ===================== 监控告警 · 告警规则 =====================
+  alert_rules: [
+    { id: 1, name: '主机 CPU 过载', metric: 'host.cpu_usage', condition: '> 90% 持续 5 分钟', severity: 'critical', triggered: 2, channel: '邮件 + Webhook', enabled: true },
+    { id: 2, name: '主机内存不足', metric: 'host.mem_usage', condition: '> 85% 持续 10 分钟', severity: 'warning', triggered: 1, channel: '邮件', enabled: true },
+    { id: 3, name: 'GPU 温度告警', metric: 'gpu.temp', condition: '> 80℃', severity: 'critical', triggered: 0, channel: '邮件 + Webhook', enabled: true },
+    { id: 4, name: '存储池容量告警', metric: 'storage.used_pct', condition: '> 80%', severity: 'warning', triggered: 1, channel: '邮件', enabled: true },
+    { id: 5, name: 'VM 心跳丢失', metric: 'vm.heartbeat', condition: '无响应 > 60s', severity: 'critical', triggered: 0, channel: '邮件 + 短信', enabled: false },
+  ],
+
+  // ===================== 通知中心（顶栏铃铛） =====================
+  notifications: [
+    { id: 1, level: 'error', title: '迁移失败：cache-redis-01 目标主机资源不足', time: '2026-06-24 07:20', read: false },
+    { id: 2, level: 'warning', title: 'node-prod-03 CPU 使用率 78%，接近告警阈值', time: '2026-06-24 09:15', read: false },
+    { id: 3, level: 'info', title: 'ai-inference-02 创建任务进行中（64%）', time: '2026-06-24 09:30', read: false },
+    { id: 4, level: 'info', title: 'db-postgres-01 每日备份完成（312 GB）', time: '2026-06-24 03:01', read: true },
+    { id: 5, level: 'warning', title: 'License 节点用量 6/16，VM 用量 8/500', time: '2026-06-23 23:00', read: true },
   ],
 }
 

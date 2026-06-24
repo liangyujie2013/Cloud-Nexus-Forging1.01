@@ -1,5 +1,6 @@
-// CNFv1.0 国际化（i18n）+ 主题系统
+// Cloud Nexus Forging (CNF) v1.0.1 国际化（i18n）+ 主题系统
 // 术语严格对齐 VMware vSphere 官方中英文 UI 命名，便于 vSphere 用户无缝迁移。
+// i18n key 命名自解释：模块前缀_含义（nav_mod_* 模块 / nav_<mod>_* 子菜单 / lic_* License / acc_* 访问控制 …）。
 (function () {
 const { ref, reactive } = Vue
 
@@ -11,7 +12,8 @@ const { ref, reactive } = Vue
 const dict = {
   zh: {
     // 品牌 & 通用
-    brand_sub: '云原生基础平台',
+    brand_name: 'Cloud Nexus Forging', brand_abbr: 'CNF', brand_version: 'v1.0.1',
+    brand_sub: '企业级分布式虚拟化管理平台',
     mode_demo: '原型演示模式',
     save: '保存', cancel: '取消', confirm: '确定', close: '关闭', apply: '应用',
     create: '创建', edit: '编辑', delete: '删除', search: '搜索', loading: '加载中…',
@@ -184,9 +186,102 @@ const dict = {
     wiz_vm_status: '状态', wiz_prev: '上一步', wiz_next: '下一步',
     wiz_step: '步骤', wiz_creating: '创建中...', wiz_create: '创建虚拟机', wiz_finish: '完成',
     wiz_optional: '可选',
+
+    // ===== 9 模块导航（nav_mod_* 模块名 / nav_<mod>_* 子菜单） =====
+    nav_mod_dashboard: '仪表板', nav_mod_infrastructure: '基础设施', nav_mod_compute: '计算资源',
+    nav_mod_availability: '可用性管理', nav_mod_storage: '存储管理', nav_mod_network: '网络管理',
+    nav_mod_monitoring: '监控告警', nav_mod_access: '访问控制', nav_mod_system: '系统设置',
+    nav_dash_overview: '资源概览', nav_dash_performance: '性能监控', nav_dash_alerts: '告警摘要',
+    nav_infra_datacenter: '数据中心', nav_infra_clusters: '集群管理', nav_infra_hosts: '主机节点', nav_infra_pools: '资源池',
+    nav_compute_vms: '虚拟机列表', nav_compute_templates: '模板管理', nav_compute_isos: 'ISO 镜像',
+    nav_avail_ha: 'HA 配置', nav_avail_migration: '迁移中心', nav_avail_backup: '备份恢复',
+    nav_storage_pools: '存储池', nav_storage_volumes: '卷管理', nav_storage_snapshots: '快照树',
+    nav_net_vswitch: '虚拟交换机', nav_net_vlan: 'VLAN 配置', nav_net_topology: '网络拓扑',
+    nav_mon_realtime: '实时监控', nav_mon_history: '历史性能', nav_mon_rules: '告警规则',
+    nav_acc_users: '用户管理', nav_acc_roles: '角色权限', nav_acc_audit: '操作审计',
+    nav_sys_config: '基础配置', nav_sys_license: 'License 管理', nav_sys_about: '关于系统',
+
+    // ===== 顶部工具栏 =====
+    tb_search_ph: '搜索虚拟机 / 主机 / 任务…', tb_notifications: '通知中心',
+    tb_mark_all_read: '全部已读', tb_no_notifications: '暂无通知', tb_logout: '退出登录',
+
+    // ===== 仪表板补充 =====
+    dash_clusters_n: '个集群', dash_connected: '已连接', dash_connected_total: '台主机在线',
+    dash_assigned_total: '块 GPU 已分配', dash_gpus: 'GPU 加速卡',
+    dash_vcpu_alloc: 'vCPU 分配', dash_mem_alloc: '内存分配', dash_recent_tasks: '最近任务',
+    dash_sse_live: '实时数据流',
+    task_target: '目标对象', task_time: '时间', task_progress: '进度',
+    task_success: '成功', task_failed: '失败',
+
+    // ===== 计算资源 · 模板 / ISO =====
+    tpl_title: '虚拟机模板', tpl_add: '新建模板', tpl_deploy: '从模板部署',
+    tpl_spec: '规格', tpl_usage: '部署次数', tpl_updated: '更新时间',
+    iso_title: 'ISO 镜像库', iso_upload: '上传 ISO', iso_os_type: '系统类型',
+    iso_size: '大小', iso_pool: '存储池', iso_uploaded: '上传时间', iso_checksum: '校验',
+    ctx_migrate: '迁移',
+
+    // ===== 基础设施 · 资源池 =====
+    pool_title: '资源池', pool_add: '新建资源池', pool_cpu_limit: 'CPU 上限',
+    pool_cpu_reserved: 'CPU 预留', pool_mem_limit: '内存上限', pool_mem_reserved: '内存预留', pool_vms: '虚拟机数',
+    shares_high: '高份额', shares_normal: '正常份额', shares_low: '低份额',
+
+    // ===== 可用性 · 备份恢复 =====
+    bk_title: '备份任务', bk_add: '新建备份任务', bk_target: '目标虚拟机', bk_job_name: '任务名',
+    bk_schedule: '调度计划', bk_mode: '备份模式', bk_mode_full: '全量', bk_mode_incremental: '增量',
+    bk_retention: '保留策略', bk_last_run: '上次运行', bk_last_status: '上次结果', bk_last_size: '备份大小',
+    bk_run_now: '立即运行', bk_status_success: '成功', bk_status_warning: '告警', bk_status_failed: '失败',
+    // 迁移中心补充
+    mig_vm: '虚拟机', mig_target_host: '目标主机', mig_current_host: '当前主机', mig_path: '迁移路径',
+    mig_mode: '迁移模式', mig_storage2: '同时迁移存储', mig_cold: '冷迁移', mig_remain: '剩余',
+    mig_progress_remaining: '剩余数据', mig_in_progress: '迁移进行中', mig_done: '迁移完成',
+    mig_running: '运行中', mig_success: '成功', mig_failed: '失败',
+
+    // ===== 存储 · 卷 / 快照补充 =====
+    vol_title: '个卷', vol_add: '新建卷', vol_name: '卷名', vol_pool: '存储池', vol_vm: '挂载虚拟机',
+    vol_format: '格式', vol_size: '容量', vol_used: '已用', vol_bus: '总线', vol_iops: 'IOPS 限制', vol_unlimited: '不限',
+    st_active: '活动', st_shared: '共享存储', st_local: '本地存储', st_read_iops: '读 IOPS', st_write_iops: '写 IOPS',
+    st_running: '运行中', st_paused: '已挂起', st_stopped: '已停止',
+    snap_current: '当前', snap_disk_only: '仅磁盘', snap_mem_label: '含内存', snap_name: '快照名',
+    snap_name_ph: '例如 before-upgrade-v2', snap_quiesced2: '已冻结', snap_rollback: '回滚', snap_vm: '虚拟机',
+
+    // ===== 网络 · 交换机 / VLAN =====
+    sw_title: '虚拟交换机', sw_add: '新建交换机', sw_uplink: '上联', sw_ports: '端口数',
+    sw_vlans: '承载 VLAN', sw_hosts: '成员主机',
+    vlan_title: 'VLAN 列表', vlan_add: '新建 VLAN', vlan_vswitch: '所属交换机', vlan_id: 'VLAN ID',
+    vlan_name: '名称', vlan_subnet: '子网', vlan_gateway: '网关', vlan_dhcp: 'DHCP', vlan_vms: '台虚拟机',
+    net_topo_hint: '展开交换机查看其承载的 VLAN 与虚拟机分布。',
+
+    // ===== 监控 · 告警规则 =====
+    rule_title: '告警规则', rule_add: '新建规则', rule_name: '规则名', rule_metric: '监控指标',
+    rule_condition: '触发条件', rule_severity: '级别', rule_triggered: '触发次数', rule_channel: '通知渠道', rule_enabled: '启用',
+    sev_critical: '严重', sev_warning: '警告',
+
+    // ===== 访问控制 · 用户 / 审计 =====
+    acc_users_title: '用户列表', acc_add_user: '新建用户', acc_username: '用户名', acc_display_name: '显示名',
+    acc_email: '邮箱', acc_roles: '角色', acc_source: '来源', acc_source_local: '本地', acc_source_ldap: 'LDAP',
+    acc_last_login: '最近登录',
+    acc_audit_title: '操作审计', acc_audit_time: '时间', acc_audit_user: '操作者', acc_audit_action: '操作',
+    acc_audit_resource: '对象', acc_audit_ip: '来源 IP', acc_audit_result: '结果', acc_audit_detail: '详情',
+    acc_result_success: '成功', acc_result_failed: '失败', acc_result_denied: '拒绝',
+
+    // ===== 系统设置 · 配置 / License =====
+    sys_config_title: '平台基础配置', sys_platform: '平台名称', sys_version: '版本号',
+    sys_benchmark: '对标产品', sys_benchmark_val: 'Proxmox VE + VMware vSphere 8',
+    sys_node_role: '节点角色', sys_tech: '技术栈',
+    lic_current: '当前许可证', lic_active: '已激活', lic_inactive: '未激活',
+    lic_edition: '许可版本', lic_org: '授权组织', lic_key: '许可密钥', lic_issued: '签发日期',
+    lic_expires: '到期日期', lic_hw_fp: '硬件指纹',
+    lic_ed_community: '社区版', lic_ed_standard: '标准版', lic_ed_enterprise: '企业版',
+    lic_usage: '资源用量', lic_nodes_usage: '节点用量', lic_vms_usage: '虚拟机用量',
+    lic_upgrade: '升级许可版本', lic_compare: '版本特性对比', lic_unlimited: '无限制',
+    lic_current_badge: '当前版本', lic_contact_sales: '联系销售',
+    lic_price: '价格', lic_feat_max_nodes: '最大节点数', lic_feat_max_vms: '最大虚拟机数',
+    lic_feat_ha: '高可用 HA', lic_feat_migration: '热迁移 vMotion', lic_feat_vlan: 'VLAN / SDN',
+    lic_feat_storage: '存储后端', lic_feat_roles: '自定义角色', lic_feat_audit: '操作审计', lic_feat_api: 'API 访问',
   },
   en: {
-    brand_sub: 'Cloud Native Foundation',
+    brand_name: 'Cloud Nexus Forging', brand_abbr: 'CNF', brand_version: 'v1.0.1',
+    brand_sub: 'Enterprise Distributed Virtualization Platform',
     mode_demo: 'Prototype Demo',
     save: 'Save', cancel: 'Cancel', confirm: 'OK', close: 'Close', apply: 'Apply',
     create: 'Create', edit: 'Edit', delete: 'Delete', search: 'Search', loading: 'Loading…',
@@ -339,6 +434,97 @@ const dict = {
     wiz_vm_status: 'Status', wiz_prev: 'Previous', wiz_next: 'Next',
     wiz_step: 'Step', wiz_creating: 'Creating...', wiz_create: 'Create VM', wiz_finish: 'Finish',
     wiz_optional: 'Optional',
+
+    // ===== 9-module navigation =====
+    nav_mod_dashboard: 'Dashboard', nav_mod_infrastructure: 'Infrastructure', nav_mod_compute: 'Compute',
+    nav_mod_availability: 'Availability', nav_mod_storage: 'Storage', nav_mod_network: 'Network',
+    nav_mod_monitoring: 'Monitoring', nav_mod_access: 'Access Control', nav_mod_system: 'System',
+    nav_dash_overview: 'Resource Overview', nav_dash_performance: 'Performance', nav_dash_alerts: 'Alert Summary',
+    nav_infra_datacenter: 'Datacenters', nav_infra_clusters: 'Clusters', nav_infra_hosts: 'Hosts', nav_infra_pools: 'Resource Pools',
+    nav_compute_vms: 'Virtual Machines', nav_compute_templates: 'Templates', nav_compute_isos: 'ISO Images',
+    nav_avail_ha: 'HA Config', nav_avail_migration: 'Migration', nav_avail_backup: 'Backup',
+    nav_storage_pools: 'Storage Pools', nav_storage_volumes: 'Volumes', nav_storage_snapshots: 'Snapshots',
+    nav_net_vswitch: 'vSwitches', nav_net_vlan: 'VLANs', nav_net_topology: 'Topology',
+    nav_mon_realtime: 'Real-time', nav_mon_history: 'History', nav_mon_rules: 'Alert Rules',
+    nav_acc_users: 'Users', nav_acc_roles: 'Roles & Privileges', nav_acc_audit: 'Audit Log',
+    nav_sys_config: 'General', nav_sys_license: 'License', nav_sys_about: 'About',
+
+    // ===== Toolbar =====
+    tb_search_ph: 'Search VMs / hosts / tasks…', tb_notifications: 'Notifications',
+    tb_mark_all_read: 'Mark all read', tb_no_notifications: 'No notifications', tb_logout: 'Sign Out',
+
+    // ===== Dashboard extras =====
+    dash_clusters_n: 'clusters', dash_connected: 'Connected', dash_connected_total: 'hosts online',
+    dash_assigned_total: 'GPUs assigned', dash_gpus: 'GPU Accelerators',
+    dash_vcpu_alloc: 'vCPU Allocation', dash_mem_alloc: 'Memory Allocation', dash_recent_tasks: 'Recent Tasks',
+    dash_sse_live: 'Live stream',
+    task_target: 'Target', task_time: 'Time', task_progress: 'Progress',
+    task_success: 'Success', task_failed: 'Failed',
+
+    // ===== Compute templates / ISO =====
+    tpl_title: 'VM Templates', tpl_add: 'New Template', tpl_deploy: 'Deploy from Template',
+    tpl_spec: 'Spec', tpl_usage: 'Deployments', tpl_updated: 'Updated',
+    iso_title: 'ISO Library', iso_upload: 'Upload ISO', iso_os_type: 'OS Type',
+    iso_size: 'Size', iso_pool: 'Pool', iso_uploaded: 'Uploaded', iso_checksum: 'Checksum',
+    ctx_migrate: 'Migrate',
+
+    // ===== Infrastructure resource pools =====
+    pool_title: 'Resource Pools', pool_add: 'New Pool', pool_cpu_limit: 'CPU Limit',
+    pool_cpu_reserved: 'CPU Reserved', pool_mem_limit: 'Mem Limit', pool_mem_reserved: 'Mem Reserved', pool_vms: 'VMs',
+    shares_high: 'High Shares', shares_normal: 'Normal Shares', shares_low: 'Low Shares',
+
+    // ===== Availability backup =====
+    bk_title: 'Backup Jobs', bk_add: 'New Backup Job', bk_target: 'Target VM', bk_job_name: 'Job Name',
+    bk_schedule: 'Schedule', bk_mode: 'Mode', bk_mode_full: 'Full', bk_mode_incremental: 'Incremental',
+    bk_retention: 'Retention', bk_last_run: 'Last Run', bk_last_status: 'Last Status', bk_last_size: 'Size',
+    bk_run_now: 'Run Now', bk_status_success: 'Success', bk_status_warning: 'Warning', bk_status_failed: 'Failed',
+    mig_vm: 'Virtual Machine', mig_target_host: 'Target Host', mig_current_host: 'Current Host', mig_path: 'Path',
+    mig_mode: 'Mode', mig_storage2: 'Migrate storage too', mig_cold: 'Cold Migration', mig_remain: 'Remaining',
+    mig_progress_remaining: 'Remaining data', mig_in_progress: 'Migrating', mig_done: 'Completed',
+    mig_running: 'Running', mig_success: 'Success', mig_failed: 'Failed',
+
+    // ===== Storage volumes / snapshots =====
+    vol_title: 'volumes', vol_add: 'New Volume', vol_name: 'Volume', vol_pool: 'Pool', vol_vm: 'Attached VM',
+    vol_format: 'Format', vol_size: 'Size', vol_used: 'Used', vol_bus: 'Bus', vol_iops: 'IOPS Limit', vol_unlimited: 'Unlimited',
+    st_active: 'Active', st_shared: 'Shared', st_local: 'Local', st_read_iops: 'Read IOPS', st_write_iops: 'Write IOPS',
+    st_running: 'Running', st_paused: 'Paused', st_stopped: 'Stopped',
+    snap_current: 'Current', snap_disk_only: 'Disk only', snap_mem_label: 'With memory', snap_name: 'Snapshot Name',
+    snap_name_ph: 'e.g. before-upgrade-v2', snap_quiesced2: 'Quiesced', snap_rollback: 'Rollback', snap_vm: 'Virtual Machine',
+
+    // ===== Network =====
+    sw_title: 'Virtual Switches', sw_add: 'New Switch', sw_uplink: 'Uplink', sw_ports: 'Ports',
+    sw_vlans: 'VLANs', sw_hosts: 'Member Hosts',
+    vlan_title: 'VLANs', vlan_add: 'New VLAN', vlan_vswitch: 'vSwitch', vlan_id: 'VLAN ID',
+    vlan_name: 'Name', vlan_subnet: 'Subnet', vlan_gateway: 'Gateway', vlan_dhcp: 'DHCP', vlan_vms: 'VMs',
+    net_topo_hint: 'Expand a switch to see its VLANs and VM distribution.',
+
+    // ===== Monitoring alert rules =====
+    rule_title: 'Alert Rules', rule_add: 'New Rule', rule_name: 'Rule', rule_metric: 'Metric',
+    rule_condition: 'Condition', rule_severity: 'Severity', rule_triggered: 'Triggered', rule_channel: 'Channel', rule_enabled: 'Enabled',
+    sev_critical: 'Critical', sev_warning: 'Warning',
+
+    // ===== Access control =====
+    acc_users_title: 'Users', acc_add_user: 'New User', acc_username: 'Username', acc_display_name: 'Display Name',
+    acc_email: 'Email', acc_roles: 'Roles', acc_source: 'Source', acc_source_local: 'Local', acc_source_ldap: 'LDAP',
+    acc_last_login: 'Last Login',
+    acc_audit_title: 'Audit Log', acc_audit_time: 'Time', acc_audit_user: 'User', acc_audit_action: 'Action',
+    acc_audit_resource: 'Resource', acc_audit_ip: 'Source IP', acc_audit_result: 'Result', acc_audit_detail: 'Detail',
+    acc_result_success: 'Success', acc_result_failed: 'Failed', acc_result_denied: 'Denied',
+
+    // ===== System / License =====
+    sys_config_title: 'Platform General Settings', sys_platform: 'Platform Name', sys_version: 'Version',
+    sys_benchmark: 'Benchmarked Against', sys_benchmark_val: 'Proxmox VE + VMware vSphere 8',
+    sys_node_role: 'Node Role', sys_tech: 'Tech Stack',
+    lic_current: 'Current License', lic_active: 'Active', lic_inactive: 'Inactive',
+    lic_edition: 'Edition', lic_org: 'Organization', lic_key: 'License Key', lic_issued: 'Issued',
+    lic_expires: 'Expires', lic_hw_fp: 'Hardware Fingerprint',
+    lic_ed_community: 'Community', lic_ed_standard: 'Standard', lic_ed_enterprise: 'Enterprise',
+    lic_usage: 'Resource Usage', lic_nodes_usage: 'Node Usage', lic_vms_usage: 'VM Usage',
+    lic_upgrade: 'Upgrade Edition', lic_compare: 'Edition Comparison', lic_unlimited: 'Unlimited',
+    lic_current_badge: 'Current', lic_contact_sales: 'Contact Sales',
+    lic_price: 'Price', lic_feat_max_nodes: 'Max Nodes', lic_feat_max_vms: 'Max VMs',
+    lic_feat_ha: 'High Availability', lic_feat_migration: 'Live Migration', lic_feat_vlan: 'VLAN / SDN',
+    lic_feat_storage: 'Storage Backend', lic_feat_roles: 'Custom Roles', lic_feat_audit: 'Audit Log', lic_feat_api: 'API Access',
   },
 }
 

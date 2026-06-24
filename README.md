@@ -1,90 +1,87 @@
-# CNFv1.0 · 企业级虚拟化管理平台
+# Cloud Nexus Forging (CNF)
 
 ## 项目概述
-- **名称**：CNFv1.0 (Cloud Native Foundation v1.0)
-- **目标**：对标 VMware vSphere 8 / SmartX ELF 的企业级私有云虚拟化管理平台
-- **交付方式**：A（源码工程）+ B（在线原型）组合
+- **产品名**：Cloud Nexus Forging（CNF）
+- **版本**：v1.0.1
+- **定位**：企业级分布式虚拟化管理平台，对标 **Proxmox VE + VMware vSphere 8**
+- **当前阶段**：阶段一（路径 B）— 可在线点击的原型（Vue 3 CDN + Hono Mock 后端，部署于 Cloudflare Pages 沙箱）
 
-## 本仓库包含两部分
+## 已完成功能（阶段一）
+- ✅ **产品改名**：CNFv1.0 → Cloud Nexus Forging v1.0.1（品牌、标题、favicon）
+- ✅ **9 模块导航**：左侧手风琴式导航，模块 + 子菜单两级
+  1. 仪表板（资源概览 / 性能监控 / 告警摘要）
+  2. 基础设施（数据中心 / 集群管理 / 主机节点 / 资源池）
+  3. 计算资源（虚拟机列表 / 模板管理 / ISO 镜像）
+  4. 可用性管理（HA 配置 / 迁移中心 / 备份恢复）
+  5. 存储管理（存储池 / 卷管理 / 快照树）
+  6. 网络管理（虚拟交换机 / VLAN 配置 / 网络拓扑）
+  7. 监控告警（实时监控 / 历史性能 / 告警规则）
+  8. 访问控制（用户管理 / 角色权限 / 操作审计）
+  9. 系统设置（基础配置 / License 管理 / 关于系统）
+- ✅ **VM 右键上下文菜单**：电源 / 控制台 / 快照 / 迁移 / 管理 五组（对齐 vSphere）
+- ✅ **License 页面**：当前许可证 + 用量进度条 + 社区版/标准版/企业版三版本特性对比
+- ✅ **RBAC 界面**：用户列表、角色-权限矩阵、权限分配、操作审计日志
+- ✅ **顶部工具栏**：面包屑 / 全局搜索 / 通知中心 / 用户菜单 / 语言切换 / 三主题（白/深灰/黑）
+- ✅ **中英双语 i18n** + **三主题** + **SSE 实时监控流**
+- ✅ **libvirt Domain XML 实时预览**（VM 创建向导，真实生成逻辑）
 
-### 路径 A：源码工程（`cnf-source/`）
-可在 **Rocky Linux 9 / RHEL 9** 上编译部署的完整 Go + 前端源码：
-- PostgreSQL 16 完整 DDL（层级模型 + NUMA/CPU 绑核字段）
-- Go 核心模型 + **libvirt domain XML 生成器**（CPU 绑核 / NUMA 亲和 / GPU 直通 / UEFI / 大页，单元测试覆盖率 **76.8%**）
-- 统一存储驱动接口（local / NFS / iSCSI）
-- install.sh / upgrade.sh / systemd 服务文件
-- Apple HIG 设计系统 CSS
+## 公网访问
+- **沙箱预览**：见对话中 GetServiceUrl 返回的临时 URL（端口 3000）
+- **生产部署**：阶段二交付（Cloudflare Pages）
 
-> 发布包：`CNFv1.0-source-2026-06-24.tar.gz`
-
-### 路径 B：在线原型（本 Hono Web 应用）
-Apple HIG 风格的可交互 Web 原型，可在线预览界面与交互效果。
-后端为 mock 数据，但 **libvirt XML 预览端点为真实生成逻辑**（与 Go 后端一致）。
-
-**全局特性（最新）**：
-- 🌐 **中 / 英双语切换**：顶栏分段控件一键切换，功能名称严格对齐 **VMware vSphere** 官方术语（vMotion / DRS / vSphere HA / EVC / 已打开电源 Powered On 等），偏好持久化到 localStorage。
-- 🎨 **三套外观主题**：浅色（白）/ 深灰（GitHub Dim）/ 纯黑（OLED），通过 `data-theme` 切换并平滑过渡，偏好持久化。
-- 所有视图（含原有视图）均已接入 i18n，切换语言全应用即时生效。
-
-## 功能入口（在线原型）
-
-| 视图 (VMware 对齐) | 功能 |
-|------|------|
-| 摘要 Summary | 资源统计卡 + 集群 CPU 实时曲线(SSE) + 容量条 + 任务表 |
-| 主机和集群 Hosts & Clusters | 数据中心→集群→主机→VM 四层可展开树 |
-| 虚拟机 Virtual Machines | VM 列表（CPU 拓扑/绑核/NUMA/GPU/HA）+ 8 步创建向导 |
-| GPU 监控 | 圆环利用率 + 显存条 + 温度/功耗 + 实时刷新 |
-| **集群设置 Cluster Settings** | vSphere HA（准入控制/容许故障数）+ DRS（自动化级别/迁移阈值）+ EVC（CPU 基线）+ 资源超分配 |
-| vMotion 迁移 | 在线/存储 vMotion 控制台 + 进度阶段 + 迁移历史 |
-| **DRS 迁移编排（拖拽）** | HTML5 拖拽 VM→主机发起 vMotion，自动校验资源/GPU 兼容性 + DRS 负载均衡建议 |
-| 快照管理 | 内存+NVRAM / 仅磁盘快照 + Quiesce 静默 + 快照树 |
-| 数据存储 Datastores | 容量 + IOPS + 延迟，按 local/NFS/iSCSI 区分 |
-| **权限管理 Permissions** | RBAC 角色定义（权限项网格）+ 用户与全局权限分配（作用域/向下传播） |
-
-**VM 创建向导（核心）**：8 步——基本信息 / CPU 拓扑 / NUMA 亲和 / CPU 绑核可视化 / 内存 / 磁盘&网络 / GPU 选择 / **实时 libvirt XML 预览**。
-
-## API 端点
-
-| 路径 | 说明 |
-|------|------|
-| GET /api/summary | 汇总统计 |
-| GET /api/topology | 层级拓扑树 |
-| GET /api/vms /hosts /gpus /storage-pools /tasks | 资源列表 |
-| GET /api/snapshots, POST /api/snapshots | 快照列表 / 创建 |
-| GET /api/migrations, POST /api/migrate, GET /api/migrate/progress | 迁移历史 / 发起 / 进度 |
-| **GET /api/cluster-configs, PUT /api/cluster-configs/:id** | 集群 HA/DRS/EVC 设置（读取 / 保存） |
-| **GET /api/roles, /api/privileges, /api/permission-assignments** | RBAC 角色 / 权限项 / 权限分配 |
-| POST /api/preview-xml | **真实 libvirt XML 生成**（输入 VM 配置） |
-| GET /api/metrics/stream | SSE 实时监控流 |
+## API（RESTful，统一前缀 `/api/v1`，按 9 模块组织）
+| 模块 | 主要端点 |
+|------|----------|
+| 仪表板 | `GET /summary`、`GET /tasks` |
+| 基础设施 | `GET /datacenters`、`/clusters`、`/hosts`、`/resource-pools`、`/infrastructure/topology` |
+| 计算资源 | `GET /vms`、`/vm-templates`、`/iso-images`、`/gpus`；`POST /vms`、`POST /vms/:id/power`、`POST /vms/preview-xml` |
+| 可用性 | `GET/PUT /cluster-configs[/:id]`、`GET/POST /migrations`、`GET /migrations/progress`、`GET /backup-jobs` |
+| 存储 | `GET /storage-pools`、`/volumes`、`GET/POST /snapshots` |
+| 网络 | `GET /vswitches`、`/vlans`、`/network/topology` |
+| 监控 | `GET /alert-rules`、`/notifications`、`/monitoring/metrics[/stream]` |
+| 访问控制 | `GET /users`、`GET/POST /roles`、`/privileges`、`/permission-assignments`、`/audit-logs` |
+| 系统 | `GET /license`、`GET /license/editions` |
 
 ## 数据架构
-- **数据模型**：Datacenter → Cluster → Host → VM（含 GPU/Disk/NIC 子资源）
-- **存储服务**：生产用 PostgreSQL 16；在线原型用内存 mock 数据
-- **实时数据流**：SSE (Server-Sent Events)
+- **数据模型**：数据中心/集群/主机/VM/GPU/存储池/卷/快照/迁移/集群配置/角色/权限/用户/审计/许可证/版本矩阵/模板/ISO/资源池/虚拟交换机/VLAN/备份任务/告警规则/通知（共 24 类）
+- **存储服务**：原型阶段使用内存 Mock 数据（`src/mock-data.ts`）；阶段二迁移至生产数据库
+- **数据流**：前端 `window.api(/api/v1/*)` → Hono 路由 → mockData / genMetrics
 
-## 技术栈
-- **后端（生产）**：Go 1.22 + Fiber v3 + PostgreSQL 16 + libvirt/KVM
-- **后端（原型）**：Hono + TypeScript（Cloudflare Pages）
-- **前端**：Vue 3 (CDN) + 自研 Apple HIG 组件 + Chart.js
-- **i18n**：全局响应式 `window.i18n` + `window.t(key)` 词典（zh/en，~230 键，VMware 术语对齐）
-- **主题**：CSS 自定义属性 `[data-theme="light|dim|dark"]` + localStorage 持久化
-- **交互**：HTML5 Drag & Drop API（DRS 拖拽迁移）
-
-## 本地开发
-```bash
-npm run build
-pm2 start ecosystem.config.cjs
-curl http://localhost:3000/api/summary
+## 代码结构（文件名自解释）
+```
+src/index.tsx                       # Hono Mock 后端（/api/v1 RESTful，9 模块分区）
+src/mock-data.ts                    # 24 类模拟数据 + genMetrics
+src/libvirt-xml.ts                  # libvirt Domain XML 生成
+public/static/i18n.js               # 中英双语词典 + 主题系统（最先加载）
+public/static/component-context-menu.js  # VM 右键菜单 + 全局 window.api 初始化
+public/static/component-vm-wizard.js     # VM 创建向导（8 步）
+public/static/view-dashboard.js          # 仪表板
+public/static/view-infrastructure.js     # 基础设施
+public/static/view-compute.js            # 计算资源
+public/static/view-availability.js       # 可用性管理
+public/static/view-storage.js            # 存储管理
+public/static/view-network.js            # 网络管理
+public/static/view-monitoring.js         # 监控告警
+public/static/view-access-control.js     # 访问控制
+public/static/view-system.js             # 系统设置（含 License 页）
+public/static/app.js                     # 应用根组件（导航 + 工具栏，最后加载）
+public/static/app.css / apple-hig.css    # 样式（Apple HIG 设计系统）
 ```
 
-## 部署状态
-- **平台**：Cloudflare Pages（原型）
-- **状态**：✅ 本地运行中
-- **最后更新**：2026-06-24
+## 用户指南
+1. 左侧点击任一模块标题展开子菜单，点击子项切换视图
+2. 计算资源 → 虚拟机列表：右键任意 VM 调出上下文菜单（开机/关机/迁移/快照等）
+3. 系统设置 → License 管理：查看许可用量与三版本对比
+4. 右上角切换中/英文与白/深灰/黑三主题；铃铛查看通知中心
 
-## 后续开发建议
-- **P0**：✅ 源码工程 service 层业务逻辑（VM 生命周期、libvirt-go 连接）已完成（第二阶段）
-- **P1**：NUMA/绑核调度算法、GPU vGPU 扩展、热迁移联调
-- **P2**：HA 故障转移 + etcd 锁、跨集群迁移、多租户 RBAC（原型已具备界面）
-- **P3**：Prometheus 导出器、自动化升级、备份恢复
-- **原型增强（已完成）**：✅ 集群设置 / 权限管理 / DRS 拖拽迁移视图 · ✅ 中英双语 · ✅ 三主题（白/深灰/黑）· ✅ VMware 术语对齐
+## 未实现 / 阶段二计划（路径 A · 生产部署）
+- ⏳ Python/FastAPI 生产源码包（编译验证 + 数据库测试 + API 测试）
+- ⏳ Element Plus + Vite 生产级前端
+- ⏳ 部署脚本（生产部署，非 demo）
+- ⏳ DRS 拖拽迁移编排在 9 模块结构中的最终落位
+
+## 部署
+- **平台**：Cloudflare Pages（沙箱预览）
+- **状态**：✅ 阶段一原型运行中
+- **技术栈**：Hono + TypeScript + Vue 3 (CDN) + TailwindCSS/Apple HIG + Vite
+- **最后更新**：2026-06-24

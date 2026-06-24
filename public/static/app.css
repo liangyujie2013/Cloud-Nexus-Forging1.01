@@ -271,3 +271,210 @@
   .cc-layout, .perm-layout { grid-template-columns: 1fr; }
   .priv-grid { grid-template-columns: 1fr; }
 }
+
+/* =============================================================================
+   Cloud Nexus Forging v1.0.1 — 9 模块导航 / 顶部工具栏 / 弹窗 / 右键菜单 等新增样式
+   ============================================================================= */
+
+/* ----- 品牌区文字 ----- */
+.brand-text .title { font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+.brand-text .ver { font-size: 11px; color: var(--text-secondary); }
+
+/* ----- 9 模块手风琴导航 ----- */
+.nav-module { margin-bottom: 2px; }
+.nav-module-head {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 12px; border-radius: var(--radius-md);
+  cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-primary);
+  transition: background var(--duration-fast);
+}
+.nav-module-head:hover { background: rgba(120,120,128,0.12); }
+.nav-module-head.active { color: var(--color-blue); }
+.nav-mod-icon { width: 18px; text-align: center; color: var(--text-secondary); font-size: 15px; }
+.nav-module-head.active .nav-mod-icon { color: var(--color-blue); }
+.nav-mod-label { flex: 1; }
+.nav-caret { font-size: 10px; color: var(--text-tertiary); transition: transform var(--duration-fast); }
+.nav-caret.rot { transform: rotate(90deg); }
+
+.nav-submenu { margin: 2px 0 6px; padding-left: 12px; }
+.nav-subitem {
+  position: relative; padding: 8px 12px 8px 28px; margin: 1px 0;
+  border-radius: var(--radius-sm); font-size: 13px; color: var(--text-secondary);
+  cursor: pointer; transition: all var(--duration-fast);
+}
+.nav-subitem::before {
+  content: ''; position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary);
+}
+.nav-subitem:hover { background: rgba(120,120,128,0.10); color: var(--text-primary); }
+.nav-subitem.active { background: var(--color-blue); color: #fff; font-weight: 600; }
+.nav-subitem.active::before { background: #fff; }
+
+/* ----- 顶部工具栏（独立类名，避免与视图内 .toolbar 行内操作条冲突） ----- */
+.app-toolbar {
+  height: 56px; display: flex; align-items: center; gap: 14px;
+  padding: 0 24px; border-bottom: 1px solid var(--separator);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  position: sticky; top: 0; z-index: 50;
+}
+
+/* 面包屑 */
+.breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 14px; min-width: 0; }
+.crumb-home { color: var(--color-blue); font-size: 15px; }
+.crumb-sep { color: var(--text-tertiary); }
+.crumb { color: var(--text-secondary); white-space: nowrap; }
+.crumb.last { color: var(--text-primary); font-weight: 600; }
+
+/* 工具栏搜索框 */
+.toolbar-search {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-secondary); border: 1px solid var(--separator);
+  border-radius: var(--radius-pill); padding: 6px 14px; width: 260px;
+}
+.toolbar-search i { color: var(--text-tertiary); font-size: 13px; }
+.toolbar-search input {
+  border: none; background: transparent; outline: none; flex: 1;
+  font-size: 13px; color: var(--text-primary);
+}
+.toolbar-actions { display: flex; align-items: center; gap: 12px; }
+
+/* 图标按钮 */
+.icon-btn {
+  position: relative; width: 36px; height: 36px; border-radius: 9px;
+  border: 1px solid var(--separator); background: var(--bg-secondary);
+  color: var(--text-secondary); cursor: pointer; font-size: 15px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--duration-fast);
+}
+.icon-btn:hover { color: var(--color-blue); border-color: var(--color-blue); }
+.notif-badge {
+  position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px;
+  border-radius: 9px; background: var(--color-red); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 17px; text-align: center;
+}
+
+/* ----- 通用弹出层 popover ----- */
+.notif-wrap, .user-wrap { position: relative; }
+.popover {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 100;
+  background: var(--bg-elevated); border: 1px solid var(--separator);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  min-width: 280px; overflow: hidden;
+  animation: pop-in var(--duration-fast) var(--ease-standard);
+}
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+.popover-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--separator); font-size: 14px;
+}
+.link-btn { border: none; background: none; color: var(--color-blue); cursor: pointer; font-size: 12px; font-weight: 600; }
+.popover-empty { padding: 28px 16px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+
+/* 通知列表 */
+.notif-pop { min-width: 340px; }
+.notif-list { max-height: 380px; overflow-y: auto; }
+.notif-item {
+  display: flex; gap: 11px; padding: 12px 16px; border-bottom: 1px solid var(--separator);
+  transition: background var(--duration-fast);
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item.unread { background: rgba(10,132,255,0.05); }
+.notif-ic { font-size: 15px; margin-top: 2px; }
+.notif-ic.lvl-info { color: var(--color-blue); }
+.notif-ic.lvl-warning { color: var(--color-orange); }
+.notif-ic.lvl-error { color: var(--color-red); }
+.notif-body { flex: 1; min-width: 0; }
+.notif-title { font-size: 13px; line-height: 1.4; color: var(--text-primary); }
+.notif-time { font-size: 11px; color: var(--text-tertiary); margin-top: 3px; }
+
+/* 用户菜单 */
+.user-chip-btn {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 5px;
+  border: 1px solid var(--separator); background: var(--bg-secondary);
+  border-radius: var(--radius-pill); cursor: pointer; font-size: 13px; color: var(--text-primary);
+  transition: all var(--duration-fast);
+}
+.user-chip-btn:hover { border-color: var(--color-blue); }
+.user-chip-btn .avatar {
+  width: 26px; height: 26px; border-radius: 50%; background: var(--color-green);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px;
+}
+.user-chip-name { font-weight: 600; }
+.user-chip-btn .fa-chevron-down { font-size: 10px; color: var(--text-tertiary); }
+.user-pop { min-width: 220px; }
+.menu-row {
+  display: flex; align-items: center; gap: 10px; padding: 11px 16px;
+  font-size: 14px; cursor: pointer; color: var(--text-primary);
+  transition: background var(--duration-fast);
+}
+.menu-row:hover { background: var(--bg-secondary); }
+.menu-row i { width: 16px; text-align: center; color: var(--text-secondary); }
+.menu-row.danger { color: var(--color-red); }
+.menu-row.danger i { color: var(--color-red); }
+
+/* ----- VM 右键上下文菜单 ----- */
+.ctx-menu {
+  position: fixed; z-index: 9999; min-width: 230px;
+  background: var(--bg-elevated); border: 1px solid var(--separator);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+  padding: 6px; font-size: 13px;
+  animation: pop-in var(--duration-fast) var(--ease-standard);
+}
+.ctx-header {
+  padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--separator);
+  font-weight: 700; display: flex; align-items: center; gap: 8px;
+}
+.ctx-group-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-tertiary); padding: 8px 10px 4px;
+}
+.ctx-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: var(--radius-sm); cursor: pointer; color: var(--text-primary);
+  transition: background var(--duration-fast);
+}
+.ctx-item:hover { background: var(--bg-secondary); }
+.ctx-item.disabled { opacity: 0.4; cursor: not-allowed; }
+.ctx-item.disabled:hover { background: transparent; }
+.ctx-item.danger { color: var(--color-red); }
+.ctx-ic { width: 16px; text-align: center; color: var(--text-secondary); }
+.ctx-item.danger .ctx-ic { color: var(--color-red); }
+.ctx-sep { height: 1px; background: var(--separator); margin: 4px 0; }
+
+/* ----- 键值表（License / 关于系统） ----- */
+.kv-table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+.kv-table td { padding: 9px 0; font-size: 13px; border-bottom: 1px solid var(--separator); }
+.kv-table tr:last-child td { border-bottom: none; }
+.kv-table td:first-child { color: var(--text-secondary); width: 42%; }
+
+/* ----- License 版本对比表 ----- */
+.lic-compare { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.lic-compare th, .lic-compare td {
+  padding: 12px 14px; text-align: center; border-bottom: 1px solid var(--separator); font-size: 13px;
+}
+.lic-compare th { font-weight: 700; font-size: 14px; }
+.lic-compare td:first-child, .lic-compare th:first-child { text-align: left; color: var(--text-secondary); }
+.lic-compare .lic-current-col { background: rgba(10,132,255,0.06); }
+.lic-compare th.lic-current-col { color: var(--color-blue); }
+
+/* ----- 全局轻提示 toast ----- */
+.cnf-toast {
+  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+  background: var(--text-primary); color: var(--bg-elevated);
+  padding: 12px 22px; border-radius: var(--radius-pill); font-size: 14px; font-weight: 500;
+  box-shadow: var(--shadow-lg); z-index: 9998;
+  animation: toast-up var(--duration-base) var(--ease-spring);
+}
+@keyframes toast-up { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ----- VM 列表行（支持右键菜单提示） ----- */
+.vm-row { cursor: context-menu; }
+.vm-row:hover { background: var(--bg-secondary); }
+
+/* 小屏适配 */
+@media (max-width: 720px) {
+  .toolbar-search { width: 140px; }
+  .user-chip-name { display: none; }
+  .breadcrumb .crumb:not(.last) { display: none; }
+}
