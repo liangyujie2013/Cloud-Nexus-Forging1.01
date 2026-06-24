@@ -283,6 +283,50 @@ app.post(`${API}/hosts/:id/maintenance`, async (c) => {
   return c.json({ id, maintenance_mode: enable, status: host.status, message: enable ? `主机 ${host.name} 已进入维护模式` : `主机 ${host.name} 已退出维护模式` })
 })
 
+// ---- 校验：IPv4 地址 / 子网掩码格式 ----
+const isIPv4 = (s: string) => /^((25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(25[0-5]|2[0-4]\d|1?\d?\d)$/.test(s)
+
+// ---- 更新单台主机的管理网络（IP / 掩码 / 网关 / 管理 VLAN / 上联网卡）----
+app.put(`${API}/hosts/:id/network`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const host = mockData.hosts.find((h) => h.id === id)
+  if (!host) return c.json({ error: '主机不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<any>().catch(() => ({}))
+  // 字段校验（仅校验本次提交的字段）
+  if (b.ip != null && !isIPv4(b.ip)) return c.json({ error: '管理 IP 格式无效', code: 'INVALID' }, 400)
+  if (b.netmask != null && !isIPv4(b.netmask)) return c.json({ error: '子网掩码格式无效', code: 'INVALID' }, 400)
+  if (b.gateway != null && b.gateway !== '' && !isIPv4(b.gateway)) return c.json({ error: '网关格式无效', code: 'INVALID' }, 400)
+  if (b.mgmt_vlan != null && (Number(b.mgmt_vlan) < 0 || Number(b.mgmt_vlan) > 4094)) return c.json({ error: '管理 VLAN 须为 0~4094', code: 'INVALID' }, 400)
+  // IP 不可与其他主机冲突
+  if (b.ip != null && mockData.hosts.some((h) => h.id !== id && h.ip === b.ip)) return c.json({ error: `管理 IP ${b.ip} 已被其他主机占用`, code: 'IP_CONFLICT' }, 409)
+  if (b.ip != null) host.ip = b.ip
+  if (b.netmask != null) (host as any).netmask = b.netmask
+  if (b.gateway != null) (host as any).gateway = b.gateway
+  if (b.mgmt_vlan != null) (host as any).mgmt_vlan = Number(b.mgmt_vlan)
+  if (b.mgmt_nic != null) (host as any).mgmt_nic = b.mgmt_nic
+  return c.json({ ...host, message: `主机 ${host.name} 管理网络已更新` })
+})
+
+// ---- 批量统一修改某集群下所有主机的管理网络（网关 / 掩码 / VLAN / 上联网卡）----
+// 仅下发非空字段，IP 保持各主机原值（IP 唯一，不做批量覆盖）。
+app.put(`${API}/clusters/:id/host-network`, async (c) => {
+  const cid = Number(c.req.param('id'))
+  const cluster = mockData.clusters.find((cl) => cl.id === cid)
+  if (!cluster) return c.json({ error: '集群不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<any>().catch(() => ({}))
+  if (b.netmask && !isIPv4(b.netmask)) return c.json({ error: '子网掩码格式无效', code: 'INVALID' }, 400)
+  if (b.gateway && !isIPv4(b.gateway)) return c.json({ error: '网关格式无效', code: 'INVALID' }, 400)
+  if (b.mgmt_vlan != null && b.mgmt_vlan !== '' && (Number(b.mgmt_vlan) < 0 || Number(b.mgmt_vlan) > 4094)) return c.json({ error: '管理 VLAN 须为 0~4094', code: 'INVALID' }, 400)
+  const targets = mockData.hosts.filter((h) => h.cluster_id === cid)
+  targets.forEach((h) => {
+    if (b.netmask) (h as any).netmask = b.netmask
+    if (b.gateway) (h as any).gateway = b.gateway
+    if (b.mgmt_vlan != null && b.mgmt_vlan !== '') (h as any).mgmt_vlan = Number(b.mgmt_vlan)
+    if (b.mgmt_nic) (h as any).mgmt_nic = b.mgmt_nic
+  })
+  return c.json({ cluster_id: cid, updated: targets.length, message: `已统一更新集群「${cluster.name}」下 ${targets.length} 台主机的管理网络` })
+})
+
 // ============================================================================
 //  模块 3 · 计算资源 compute：虚拟机列表 / 模板管理 / ISO 镜像
 // ============================================================================

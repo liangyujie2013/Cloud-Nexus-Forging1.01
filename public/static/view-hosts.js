@@ -1,9 +1,12 @@
 // =============================================================================
 //  模块视图：主机管理 (view-hosts.js) — Cloud Nexus Forging v2.0
 //  独立一级模块。子标签：
-//    list      主机列表 —— 全集群主机卡片/表格，状态、负载、维护模式切换
-//    detail    主机详情 —— 概览 / 硬件 / HA 状态 / 虚拟机 四个 Tab
-//  数据：/hosts、/hosts/:id/hardware、/hosts/:id/ha-status、/hosts/:id/maintenance
+//    list      主机列表 —— 全集群主机卡片，实时 CPU/内存负载、维护模式切换
+//    detail    主机管理 / 网络 —— 按集群分组的管理网络表（IP/掩码/网关/VLAN/网卡），
+//              支持单台编辑与「集群级批量统一修改」；点击列表卡片则进入单台主机详情
+//              （概览 / 硬件 / HA 状态 / 监控 / 虚拟机）。
+//  数据：/hosts、/hosts/:id/hardware、/hosts/:id/ha-status、/hosts/:id/maintenance、
+//        /hosts/:id/network(PUT)、/clusters/:id/host-network(PUT 批量)
 //  时间统一走 window.cnfFmtTime（浏览器本地时区）。
 // =============================================================================
 (function () {
@@ -71,6 +74,75 @@ const HostsView = {
     }
     // 添加主机：复用全局主机纳管向导（与基础设施一致）
     const addHost = () => window.dispatchEvent(new CustomEvent('cnf:open-host-wizard', { detail: { presetClusterId: 0 } }))
+
+    // ============================================================
+    //  「主机管理 / 网络」页（detail tab 未选主机时）—— 按集群分组
+    //  统一查看 / 配置宿主机管理网络（IP / 掩码 / 网关 / VLAN / 网卡）
+    // ============================================================
+    const ipv4Re = /^((25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(25[0-5]|2[0-4]\d|1?\d?\d)$/
+    // 按集群分组的主机（用于管理网络表格）
+    const clusterGroups = computed(() => {
+      const map = new Map()
+      hosts.value.forEach((h) => {
+        const key = h.cluster_id ?? 0
+        if (!map.has(key)) map.set(key, { cluster_id: key, cluster_name: h.cluster_name || t('hmn_no_hosts'), hosts: [] })
+        map.get(key).hosts.push(h)
+      })
+      return Array.from(map.values())
+    })
+
+    // 单台主机管理网络编辑对话框
+    const netDlg = reactive({ open: false, busy: false, host: null, form: {}, errors: {} })
+    const openNetEdit = (h) => {
+      netDlg.host = h
+      netDlg.form = { ip: h.ip || '', netmask: h.netmask || '255.255.255.0', gateway: h.gateway || '', mgmt_vlan: h.mgmt_vlan ?? '', mgmt_nic: h.mgmt_nic || 'bond0' }
+      netDlg.errors = {}
+      netDlg.open = true
+    }
+    const submitNet = async () => {
+      const e = {}
+      if (!ipv4Re.test(netDlg.form.ip)) e.ip = t('hmn_ip_invalid')
+      if (!ipv4Re.test(netDlg.form.netmask)) e.netmask = t('hmn_netmask_invalid')
+      if (netDlg.form.gateway && !ipv4Re.test(netDlg.form.gateway)) e.gateway = t('hmn_gateway_invalid')
+      const vlan = netDlg.form.mgmt_vlan
+      if (vlan !== '' && (Number(vlan) < 0 || Number(vlan) > 4094)) e.mgmt_vlan = t('hmn_vlan_invalid')
+      netDlg.errors = e
+      if (Object.keys(e).length) return
+      netDlg.busy = true
+      try {
+        const res = await api('/hosts/' + netDlg.host.id + '/network', { method: 'PUT', body: JSON.stringify(netDlg.form) })
+        if (res && res.error) { netDlg.errors = { ip: res.code === 'IP_CONFLICT' ? t('hmn_ip_conflict') : res.error }; return }
+        toast(res.message, 'success')
+        await store.fetchAll()
+        netDlg.open = false
+      } catch (err) { toast(t('op_failed'), 'error') } finally { netDlg.busy = false }
+    }
+
+    // 集群级批量统一修改管理网络对话框
+    const batchDlg = reactive({ open: false, busy: false, cluster: null, form: {}, errors: {} })
+    const openBatch = (group) => {
+      batchDlg.cluster = group
+      batchDlg.form = { netmask: '', gateway: '', mgmt_vlan: '', mgmt_nic: '' }
+      batchDlg.errors = {}
+      batchDlg.open = true
+    }
+    const submitBatch = async () => {
+      const e = {}
+      if (batchDlg.form.netmask && !ipv4Re.test(batchDlg.form.netmask)) e.netmask = t('hmn_netmask_invalid')
+      if (batchDlg.form.gateway && !ipv4Re.test(batchDlg.form.gateway)) e.gateway = t('hmn_gateway_invalid')
+      const vlan = batchDlg.form.mgmt_vlan
+      if (vlan !== '' && (Number(vlan) < 0 || Number(vlan) > 4094)) e.mgmt_vlan = t('hmn_vlan_invalid')
+      batchDlg.errors = e
+      if (Object.keys(e).length) return
+      batchDlg.busy = true
+      try {
+        const res = await api('/clusters/' + batchDlg.cluster.cluster_id + '/host-network', { method: 'PUT', body: JSON.stringify(batchDlg.form) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        toast(res.message, 'success')
+        await store.fetchAll()
+        batchDlg.open = false
+      } catch (err) { toast(t('op_failed'), 'error') } finally { batchDlg.busy = false }
+    }
 
     // react to nav tab changes (e.g. user clicks "主机列表")
     watch(() => props.tab, (nv) => {
@@ -159,20 +231,17 @@ const HostsView = {
       props, hosts, filteredHosts, search, statusFilter, statusMeta, openDetail, backToList, addHost,
       selectedId, detail, ha, detailTab, loading, showDetailView, detailHost, detailVMs,
       toggleMaintenance, maintBusy, blockDlg,
+      clusterGroups, netDlg, openNetEdit, submitNet, batchDlg, openBatch, submitBatch,
       haCheckList, haStatusColor, haStatusText, overallColor, overallText, evIcon, evColor,
       bytesRate, utilColor, C, t, fmt,
     }
   },
   template: `
   <div>
-    <!-- ====================== LIST ====================== -->
-    <template v-if="!showDetailView">
-      <!-- 主机详情 tab 但未选中主机：引导选择（区别于主机列表）-->
-      <div v-if="props.tab==='detail'" class="hosts-pick-hint">
-        <i class="fas fa-circle-info"></i> {{ t('host_pick_hint') }}
-      </div>
+    <!-- ====================== 主机列表（卡片 · 实时负载 / 维护模式）====================== -->
+    <template v-if="props.tab==='list' && !showDetailView">
       <div class="toolbar">
-        <button v-if="props.tab==='list'" class="apple-btn apple-btn--primary" @click="addHost"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
+        <button class="apple-btn apple-btn--primary" @click="addHost"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
         <div class="toolbar-search"><i class="fas fa-magnifying-glass"></i><input v-model="search" :placeholder="t('host_search_ph')"></div>
         <select class="host-filter-select" v-model="statusFilter">
           <option value="">{{ t('host_filter_all') }}</option>
@@ -205,16 +274,49 @@ const HostsView = {
             <span class="muted"><i class="fas fa-desktop"></i> {{ h.vm_running }}/{{ h.vm_count }} VM</span>
             <span class="muted" v-if="h.gpus"><i class="fas fa-microchip" style="color:#76b900"></i> {{ h.gpus }} GPU</span>
             <div class="spacer"></div>
-            <!-- 主机列表 tab：维护模式切换；主机详情 tab：查看详情 -->
-            <button v-if="props.tab==='list'" class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click.stop="toggleMaintenance(h)">
+            <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click.stop="toggleMaintenance(h)">
               <i v-if="maintBusy===h.id" class="fas fa-spinner fa-spin"></i>
               <i v-else :class="h.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
               {{ h.status==='maintenance' ? t('host_exit_maint') : t('host_enter_maint') }}
             </button>
-            <button v-else class="apple-btn apple-btn--ghost apple-btn--sm" @click.stop="openDetail(h.id)">
-              <i class="fas fa-arrow-right"></i> {{ t('host_view_detail') }}
-            </button>
           </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============ 主机管理 / 网络（按集群分组统一管理宿主机管理网络）============ -->
+    <template v-else-if="props.tab==='detail' && !showDetailView">
+      <div class="hmn-intro">
+        <div class="hmn-intro-title"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('hmn_title') }}</div>
+        <div class="muted">{{ t('hmn_intro') }}</div>
+      </div>
+      <div class="apple-card hmn-cluster-card" v-for="g in clusterGroups" :key="g.cluster_id">
+        <div class="hmn-cluster-head">
+          <div><i class="fas fa-layer-group" :style="{color:C.indigo}"></i> <strong>{{ g.cluster_name }}</strong>
+            <span class="muted" style="margin-left:8px;font-weight:400">· {{ g.hosts.length }} {{ t('hmn_hosts_n') }}</span></div>
+          <button class="apple-btn apple-btn--secondary apple-btn--sm" @click="openBatch(g)"><i class="fas fa-sliders"></i> {{ t('hmn_batch') }}</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="apple-table hmn-table">
+            <thead><tr>
+              <th>{{ t('hmn_col_host') }}</th><th>{{ t('hmn_col_status') }}</th><th>{{ t('hmn_col_ip') }}</th>
+              <th>{{ t('hmn_col_netmask') }}</th><th>{{ t('hmn_col_gateway') }}</th><th>{{ t('hmn_col_vlan') }}</th>
+              <th>{{ t('hmn_col_nic') }}</th><th style="text-align:right">{{ t('hmn_col_ops') }}</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="h in g.hosts" :key="h.id">
+                <td><strong>{{ h.name }}</strong></td>
+                <td><span class="apple-badge" :class="statusMeta(h.status).cls"><span class="dot"></span>{{ t(statusMeta(h.status).key) }}</span></td>
+                <td class="mono">{{ h.ip }}</td>
+                <td class="mono muted">{{ h.netmask || '—' }}</td>
+                <td class="mono muted">{{ h.gateway || '—' }}</td>
+                <td class="mono"><span class="hw-chip">VLAN {{ h.mgmt_vlan ?? '—' }}</span></td>
+                <td class="mono muted">{{ h.mgmt_nic || '—' }}</td>
+                <td style="text-align:right"><button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openNetEdit(h)"><i class="fas fa-pen"></i> {{ t('hmn_edit_host') }}</button></td>
+              </tr>
+              <tr v-if="!g.hosts.length"><td colspan="8" class="muted" style="text-align:center;padding:16px">{{ t('hmn_no_hosts') }}</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </template>
@@ -427,6 +529,46 @@ const HostsView = {
         </div>
       </div>
     </template>
+
+    <!-- 单台主机管理网络编辑对话框 -->
+    <div v-if="netDlg.open" class="modal-mask" @click.self="netDlg.open=false">
+      <div class="modal-dialog">
+        <div class="modal-head"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('hmn_edit_title') }} <span class="muted" style="font-weight:400">· {{ netDlg.host && netDlg.host.name }}</span></div>
+        <div class="modal-body">
+          <div class="form-grid-2">
+            <div class="form-row"><label class="req">{{ t('hmn_col_ip') }}</label><input v-model="netDlg.form.ip" :class="{invalid:netDlg.errors.ip}" placeholder="192.168.1.100"><div v-if="netDlg.errors.ip" class="form-err">{{ netDlg.errors.ip }}</div></div>
+            <div class="form-row"><label class="req">{{ t('hmn_col_netmask') }}</label><input v-model="netDlg.form.netmask" :class="{invalid:netDlg.errors.netmask}" placeholder="255.255.255.0"><div v-if="netDlg.errors.netmask" class="form-err">{{ netDlg.errors.netmask }}</div></div>
+            <div class="form-row"><label>{{ t('hmn_col_gateway') }}</label><input v-model="netDlg.form.gateway" :class="{invalid:netDlg.errors.gateway}" placeholder="192.168.1.1"><div v-if="netDlg.errors.gateway" class="form-err">{{ netDlg.errors.gateway }}</div></div>
+            <div class="form-row"><label>{{ t('hmn_col_vlan') }}</label><input type="number" min="0" max="4094" v-model.number="netDlg.form.mgmt_vlan" :class="{invalid:netDlg.errors.mgmt_vlan}" placeholder="10"><div v-if="netDlg.errors.mgmt_vlan" class="form-err">{{ netDlg.errors.mgmt_vlan }}</div></div>
+            <div class="form-row"><label>{{ t('hmn_col_nic') }}</label><input v-model="netDlg.form.mgmt_nic" placeholder="bond0"></div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="netDlg.open=false">{{ t('op_cancel') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="netDlg.busy" @click="submitNet"><i v-if="netDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 集群级批量统一修改管理网络对话框 -->
+    <div v-if="batchDlg.open" class="modal-mask" @click.self="batchDlg.open=false">
+      <div class="modal-dialog">
+        <div class="modal-head"><i class="fas fa-sliders" :style="{color:C.indigo}"></i> {{ t('hmn_batch_title') }} <span class="muted" style="font-weight:400">· {{ batchDlg.cluster && batchDlg.cluster.cluster_name }}</span></div>
+        <div class="modal-body">
+          <div class="hosts-pick-hint" style="margin-bottom:14px"><i class="fas fa-circle-info"></i> {{ t('hmn_batch_hint') }}</div>
+          <div class="form-grid-2">
+            <div class="form-row"><label>{{ t('hmn_col_netmask') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('hmn_keep') }}</span></label><input v-model="batchDlg.form.netmask" :class="{invalid:batchDlg.errors.netmask}" placeholder="255.255.255.0"><div v-if="batchDlg.errors.netmask" class="form-err">{{ batchDlg.errors.netmask }}</div></div>
+            <div class="form-row"><label>{{ t('hmn_col_gateway') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('hmn_keep') }}</span></label><input v-model="batchDlg.form.gateway" :class="{invalid:batchDlg.errors.gateway}" placeholder="192.168.1.1"><div v-if="batchDlg.errors.gateway" class="form-err">{{ batchDlg.errors.gateway }}</div></div>
+            <div class="form-row"><label>{{ t('hmn_col_vlan') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('hmn_keep') }}</span></label><input type="number" min="0" max="4094" v-model="batchDlg.form.mgmt_vlan" :class="{invalid:batchDlg.errors.mgmt_vlan}" placeholder="10"><div v-if="batchDlg.errors.mgmt_vlan" class="form-err">{{ batchDlg.errors.mgmt_vlan }}</div></div>
+            <div class="form-row"><label>{{ t('hmn_col_nic') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('hmn_keep') }}</span></label><input v-model="batchDlg.form.mgmt_nic" placeholder="bond0"></div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="batchDlg.open=false">{{ t('op_cancel') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="batchDlg.busy" @click="submitBatch"><i v-if="batchDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+        </div>
+      </div>
+    </div>
 
     <!-- block dialog (maintenance has running VM) -->
     <div v-if="blockDlg.open" class="modal-mask" @click.self="blockDlg.open=false">
