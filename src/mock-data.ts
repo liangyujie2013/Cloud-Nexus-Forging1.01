@@ -49,7 +49,7 @@ export const mockData = {
   storage_pools: [
     { id: 1, cluster_id: 1, name: 'prod-nfs-pool', type: 'nfs', capacity_tb: 50, used_tb: 31.2, shared: true, status: 'active', read_iops: 12400, write_iops: 8200, latency: 1.2 },
     { id: 2, cluster_id: 1, name: 'prod-iscsi-fast', type: 'iscsi', capacity_tb: 20, used_tb: 14.8, shared: true, status: 'active', read_iops: 48000, write_iops: 32000, latency: 0.4 },
-    { id: 3, cluster_id: 2, name: 'gpu-local-nvme', type: 'local', capacity_tb: 8, used_tb: 5.1, shared: false, status: 'active', read_iops: 95000, write_iops: 78000, latency: 0.1 },
+    { id: 3, cluster_id: 2, host_id: 5, name: 'gpu-local-nvme', type: 'local', capacity_tb: 8, used_tb: 5.1, shared: false, status: 'active', read_iops: 95000, write_iops: 78000, latency: 0.1 },
     { id: 4, cluster_id: 1, name: 'backup-nfs', type: 'nfs', capacity_tb: 100, used_tb: 42.0, shared: true, status: 'active', read_iops: 3200, write_iops: 2100, latency: 3.5 },
   ],
   tasks: [

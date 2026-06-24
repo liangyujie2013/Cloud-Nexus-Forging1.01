@@ -216,6 +216,49 @@ async function removeHost(id) {
   return { ok: true }
 }
 
+// 创建数据中心
+async function createDatacenter(data) {
+  const res = await api('/datacenters', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (res && res.error) return { ok: false, code: res.code, error: res.error }
+  state.datacenters.push(res)
+  return { ok: true, datacenter: res }
+}
+// 编辑数据中心
+async function updateDatacenter(id, data) {
+  const res = await api('/datacenters/' + id, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (res && res.error) return { ok: false, code: res.code, error: res.error }
+  const idx = state.datacenters.findIndex((d) => d.id === id)
+  if (idx >= 0) Object.assign(state.datacenters[idx], res)
+  return { ok: true, datacenter: res }
+}
+// 创建集群（须归属数据中心）
+async function createCluster(data) {
+  const res = await api('/clusters', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (res && res.error) return { ok: false, code: res.code, error: res.error }
+  state.clusters.push(res)
+  return { ok: true, cluster: res }
+}
+// 编辑集群
+async function updateCluster(id, data) {
+  const res = await api('/clusters/' + id, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (res && res.error) return { ok: false, code: res.code, error: res.error }
+  const idx = state.clusters.findIndex((c) => c.id === id)
+  if (idx >= 0) Object.assign(state.clusters[idx], res)
+  return { ok: true, cluster: res }
+}
+
 // ---- 跨视图导航事件（拓扑树点击 → 切换模块/子页 + 高亮目标）----
 function navigateTo(type, id) {
   const map = {
@@ -237,6 +280,7 @@ window.cnfTopology = {
   fetchAll,
   datacenterStats, clusterStats, hostStats, topologyTree,
   addHostToCluster, getMigrationTargets, migrateVm,
+  createDatacenter, updateDatacenter, createCluster, updateCluster,
   deleteDatacenter, deleteCluster, removeHost,
   navigateTo,
 }

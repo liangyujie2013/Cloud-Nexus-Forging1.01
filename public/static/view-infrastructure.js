@@ -35,6 +35,55 @@ const InfrastructureView = {
     const blockDlg = ref({ open: false, title: '', message: '', children: [] })
     const showBlocked = (title, message, children) => { blockDlg.value = { open: true, title, message, children: children || [] } }
 
+    // ============================================================
+    //  数据中心：创建 / 编辑对话框
+    // ============================================================
+    const dcDlg = ref({ open: false, mode: 'create', id: null, form: {}, err: {}, saving: false })
+    const openDcCreate = () => { dcDlg.value = { open: true, mode: 'create', id: null, form: { name: '', location: '', timezone: 'Asia/Shanghai', description: '' }, err: {}, saving: false } }
+    const openDcEdit = (dc) => { dcDlg.value = { open: true, mode: 'edit', id: dc.id, form: { name: dc.name, location: dc.location || '', timezone: dc.timezone || 'Asia/Shanghai', description: dc.description || '' }, err: {}, saving: false } }
+    const saveDc = async () => {
+      const f = dcDlg.value.form; const err = {}
+      if (!f.name || !f.name.trim()) err.name = t('op_required')
+      dcDlg.value.err = err
+      if (Object.keys(err).length) return
+      dcDlg.value.saving = true
+      const res = dcDlg.value.mode === 'create'
+        ? await store.createDatacenter(f)
+        : await store.updateDatacenter(dcDlg.value.id, f)
+      dcDlg.value.saving = false
+      if (!res.ok) {
+        if (res.code === 'NAME_DUPLICATE') { dcDlg.value.err = { name: res.error }; return }
+        return toast(res.error || t('op_failed'), 'error')
+      }
+      toast(dcDlg.value.mode === 'create' ? t('toast_created') : t('toast_saved'), 'success')
+      dcDlg.value.open = false
+    }
+
+    // ============================================================
+    //  集群：创建 / 编辑对话框
+    // ============================================================
+    const clDlg = ref({ open: false, mode: 'create', id: null, form: {}, err: {}, saving: false })
+    const openClCreate = () => { clDlg.value = { open: true, mode: 'create', id: null, form: { name: '', datacenter_id: (datacenters.value[0] && datacenters.value[0].id) || '', description: '', ha_enabled: true, drs_enabled: false, overcommit_cpu: 4.0 }, err: {}, saving: false } }
+    const openClEdit = (cl) => { clDlg.value = { open: true, mode: 'edit', id: cl.id, form: { name: cl.name, datacenter_id: cl.datacenter_id, description: cl.description || '', ha_enabled: cl.ha_enabled, drs_enabled: cl.drs_enabled, overcommit_cpu: cl.overcommit_cpu }, err: {}, saving: false } }
+    const saveCl = async () => {
+      const f = clDlg.value.form; const err = {}
+      if (!f.name || !f.name.trim()) err.name = t('op_required')
+      if (!f.datacenter_id) err.datacenter_id = t('op_required')
+      clDlg.value.err = err
+      if (Object.keys(err).length) return
+      clDlg.value.saving = true
+      const res = clDlg.value.mode === 'create'
+        ? await store.createCluster(f)
+        : await store.updateCluster(clDlg.value.id, f)
+      clDlg.value.saving = false
+      if (!res.ok) {
+        if (res.code === 'NAME_DUPLICATE') { clDlg.value.err = { name: res.error }; return }
+        return toast(res.error || t('op_failed'), 'error')
+      }
+      toast(clDlg.value.mode === 'create' ? t('toast_created') : t('toast_saved'), 'success')
+      clDlg.value.open = false
+    }
+
     // ---- 添加主机向导（通过全局事件打开，可携带预设集群）----
     const addHost = (presetClusterId) => {
       window.dispatchEvent(new CustomEvent('cnf:open-host-wizard', { detail: { presetClusterId: presetClusterId || 0 } }))
@@ -82,6 +131,8 @@ const InfrastructureView = {
       props, pools, datacenters, clusters, hosts,
       expandedHost, toggleHost, blockDlg, addHost,
       delDatacenter, delCluster, delHost,
+      dcDlg, openDcCreate, openDcEdit, saveDc,
+      clDlg, openClCreate, openClEdit, saveCl,
       focusId, focusType, sharesLabel, t,
     }
   },
@@ -89,6 +140,11 @@ const InfrastructureView = {
     <div>
       <!-- ===== datacenter：资源拓扑树 + DC 统计卡 ===== -->
       <template v-if="props.tab==='datacenter'">
+        <div class="crud-toolbar">
+          <button class="apple-btn apple-btn--primary" @click="openDcCreate"><i class="fas fa-plus"></i> {{ t('dc_create') }}</button>
+          <div class="spacer"></div>
+          <span class="muted" style="font-size:13px">{{ datacenters.length }} {{ t('nav_infra_datacenter') }}</span>
+        </div>
         <div class="muted" style="margin-bottom:12px"><i class="fas fa-info-circle"></i> {{ t('topo_full_hint') }}</div>
         <div class="infra-topo-layout">
           <!-- 左：资源拓扑树 -->

@@ -453,14 +453,29 @@ const STORAGE_POOL_TYPES = [
   { type: 'distributed', shared: true, fields: ['dist_monitors', 'dist_pool'] },
 ]
 
-// 存储池（带聚合统计 + 集群归属名 + 卷数量）
+// 存储池（带聚合统计 + 集群归属名 + 卷数量 + 挂载主机清单）
+//   挂载主机语义：
+//     · 共享池(shared=true)：自动挂载到「所属集群的全部主机」（批量），mounted_hosts=集群全部主机
+//     · 本地池(shared=false)：仅挂载到单台主机（host_id），mounted_hosts=该主机
 function computeStoragePools() {
   return mockData.storage_pools.map((p) => {
     const poolVols = mockData.volumes.filter((v) => v.pool === p.name)
     const cl = mockData.clusters.find((c2) => c2.id === p.cluster_id)
+    let mountedHosts: { id: number; name: string; hostname: string; mount_status: string }[]
+    if (p.shared) {
+      mountedHosts = mockData.hosts
+        .filter((h) => h.cluster_id === p.cluster_id)
+        .map((h) => ({ id: h.id, name: h.name, hostname: h.hostname, mount_status: h.status === 'connected' ? 'mounted' : (h.status === 'maintenance' ? 'standby' : 'unreachable') }))
+    } else {
+      const h = mockData.hosts.find((x) => x.id === (p as any).host_id) || mockData.hosts.find((x) => x.cluster_id === p.cluster_id)
+      mountedHosts = h ? [{ id: h.id, name: h.name, hostname: h.hostname, mount_status: h.status === 'connected' ? 'mounted' : 'unreachable' }] : []
+    }
     return {
       ...p,
       cluster_name: cl?.name || '未分配',
+      scope: p.shared ? 'cluster' : 'host', // cluster=集群级共享 / host=单机本地
+      mounted_hosts: mountedHosts,
+      mounted_host_count: mountedHosts.length,
       volume_count: poolVols.length,
       free_tb: +(p.capacity_tb - p.used_tb).toFixed(1),
       usage_pct: Math.round((p.used_tb / p.capacity_tb) * 100),
@@ -675,6 +690,72 @@ app.delete(`${API}/storage/volumes/:id`, (c) => {
     return c.json({ error: `磁盘已挂载到 ${disk.attached_vms.length} 台虚拟机，请先卸载`, code: 'ATTACHED', children: disk.attached_vms.map((a) => a.vm_name) }, 409)
   mockData.virtual_disks = mockData.virtual_disks.filter((d) => d.id !== id)
   return c.json({ id, deleted: true, message: '磁盘已删除' })
+})
+// ---- 扩容磁盘（只增不减）----
+app.post(`${API}/storage/volumes/:id/expand`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const disk = mockData.virtual_disks.find((d) => d.id === id)
+  if (!disk) return c.json({ error: '磁盘不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<{ new_size_gb: number }>()
+  const ns = Number(b.new_size_gb)
+  if (!ns || ns <= disk.size_gb) return c.json({ error: `新容量须大于当前 ${disk.size_gb}GB`, code: 'INVALID_SIZE' }, 400)
+  disk.size_gb = ns
+  if (disk.provisioning === 'thick') disk.allocated_gb = ns
+  disk.last_modified = new Date().toISOString().slice(0, 16).replace('T', ' ')
+  return c.json({ ...disk, message: `磁盘 ${disk.name} 已扩容至 ${ns}GB` })
+})
+
+// ---- 磁盘迁移（storage migration / storage vMotion）----
+//   候选目标池：由「目标主机所在集群」可访问的存储池决定
+//     · 共享池：目标主机所在集群的所有共享池都可访问
+//     · 本地池：仅当目标主机即该本地池所属主机时可访问
+//   迁移类型：
+//     · same_pool   同池（仅切换计算节点，共享盘随 VM 走，无需拷数据）
+//     · cross_pool  跨池（storage vMotion，需拷贝底层数据）
+app.get(`${API}/storage/volumes/:id/migration-targets`, (c) => {
+  const id = Number(c.req.param('id'))
+  const disk = mockData.virtual_disks.find((d) => d.id === id)
+  if (!disk) return c.json({ error: '磁盘不存在', code: 'NOT_FOUND' }, 404)
+  // 列出所有主机，并标注可访问的池
+  const hosts = mockData.hosts.map((h) => {
+    const cl = mockData.clusters.find((x) => x.id === h.cluster_id)
+    const accessiblePools = computeStoragePools().filter((p) => {
+      if (p.shared) return p.cluster_id === h.cluster_id
+      return (p as any).host_id === h.id
+    }).map((p) => ({ id: p.id, name: p.name, type: p.type, shared: p.shared, free_tb: p.free_tb }))
+    return { id: h.id, name: h.name, hostname: h.hostname, cluster_id: h.cluster_id, cluster_name: cl?.name || '-', status: h.status, accessible_pools: accessiblePools }
+  })
+  return c.json({ disk_id: id, disk_name: disk.name, current_pool_id: disk.storage_pool_id, current_pool_name: disk.storage_pool_name, hosts })
+})
+app.post(`${API}/storage/volumes/:id/migrate`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const disk = mockData.virtual_disks.find((d) => d.id === id)
+  if (!disk) return c.json({ error: '磁盘不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<{ target_host_id: number; target_pool_id: number }>()
+  const targetHost = mockData.hosts.find((h) => h.id === Number(b.target_host_id))
+  const targetPool = mockData.storage_pools.find((p) => p.id === Number(b.target_pool_id))
+  if (!targetHost) return c.json({ error: '目标主机不存在', code: 'HOST_NOT_FOUND' }, 404)
+  if (!targetPool) return c.json({ error: '目标存储池不存在', code: 'POOL_NOT_FOUND' }, 404)
+  // 约束：目标池必须能被目标主机访问
+  const accessible = targetPool.shared
+    ? targetPool.cluster_id === targetHost.cluster_id
+    : (targetPool as any).host_id === targetHost.id
+  if (!accessible)
+    return c.json({ error: `目标主机 ${targetHost.name} 无法访问存储池 ${targetPool.name}（共享池须同集群 / 本地池须同主机）`, code: 'POOL_UNREACHABLE' }, 409)
+  const crossPool = targetPool.id !== disk.storage_pool_id
+  // 迁移磁盘归属池
+  disk.storage_pool_id = targetPool.id
+  disk.storage_pool_name = targetPool.name
+  disk.last_modified = new Date().toISOString().slice(0, 16).replace('T', ' ')
+  return c.json({
+    ...disk,
+    migration_type: crossPool ? 'cross_pool' : 'same_pool',
+    target_host: targetHost.name,
+    target_pool: targetPool.name,
+    message: crossPool
+      ? `磁盘 ${disk.name} 已通过 Storage vMotion 迁移到 ${targetPool.name}（${targetHost.name}），底层数据已拷贝`
+      : `磁盘 ${disk.name} 已迁移计算节点到 ${targetHost.name}（共享存储无需拷盘）`,
+  })
 })
 
 // ============================================================================
