@@ -16,6 +16,7 @@ const api = window.api
 const t = window.t
 const toast = window.cnfToast
 const useContextMenu = window.useContextMenu
+const store = window.cnfTopology
 
 const PAGE_SIZE = 8
 
@@ -44,6 +45,9 @@ const ComputeView = {
 
     // ---- 编辑/重命名表单对话框 ----
     const editDlg = reactive({ open: false, mode: 'edit', busy: false, vm: null, form: { name: '', vcpus: 1, mem_gb: 1 }, errors: {} })
+
+    // ---- 虚拟机迁移对话框（体现集群约束：目标只能是同集群在线主机）----
+    const migDlg = reactive({ open: false, busy: false, vm: null, targets: [], targetId: null })
 
     const load = async () => {
       loading.value = true
@@ -104,8 +108,37 @@ const ComputeView = {
       if (powerCmds[command]) return doPower(vm, command)
       if (command === 'delete') return askDelete([vm])
       if (command === 'rename' || command === 'edit_settings') return openEdit(vm, command === 'rename' ? 'rename' : 'edit')
-      if (command === 'migrate') return toast(`「${vm.name}」${t('ctx_migrate')}（请前往「可用性管理 → 迁移中心」执行）`, 'info')
+      if (command === 'migrate') return openMigrate(vm)
       toast(`「${vm.name}」：${t('ctx_' + command)}（原型演示）`, 'info')
+    }
+
+    // ---- 虚拟机迁移：核心集群约束 ----
+    //  目标主机列表只显示「同集群内的其他在线非维护主机」（store.getMigrationTargets）。
+    const openMigrate = async (vm) => {
+      // 确保 store 已加载层级数据（VM 列表、主机、集群血缘）
+      await store.fetchAll()
+      const targets = store.getMigrationTargets(vm.id)
+      migDlg.vm = vm
+      migDlg.targets = targets
+      migDlg.targetId = targets.length ? targets[0].id : null
+      migDlg.busy = false
+      // 同集群内没有其他可用主机 → 直接提示并不打开对话框
+      if (!targets.length) return toast(t('mig_no_target'), 'warning')
+      migDlg.open = true
+    }
+    const doMigrate = async () => {
+      if (!migDlg.targetId) return
+      migDlg.busy = true
+      const target = migDlg.targets.find((h) => h.id === migDlg.targetId)
+      toast(t('mig_in_progress').replace('{vm}', migDlg.vm.name).replace('{host}', target ? target.name : ''), 'info')
+      const res = await store.migrateVm(migDlg.vm.id, migDlg.targetId)
+      migDlg.busy = false
+      if (!res.ok) return
+      // 同步本地 VM 列表的归属主机（即时一致）
+      const local = vms.value.find((v) => v.id === migDlg.vm.id)
+      if (local) local.host_id = Number(migDlg.targetId)
+      migDlg.open = false
+      toast(t('mig_success').replace('{vm}', migDlg.vm.name).replace('{host}', target ? target.name : ''), 'success')
     }
 
     // ---- 删除二次确认 ----
@@ -186,6 +219,7 @@ const ComputeView = {
       filtered, paged, pageCount, isSelected, toggleSelect, allChecked, toggleAll, selectedVms,
       confirmDlg, confirmOk, askDelete, batchPower, batchDelete,
       editDlg, openEdit, saveEdit,
+      migDlg, openMigrate, doMigrate,
       statusBadge, openWizard, refresh, setFilter, t,
     }
   },
@@ -359,6 +393,41 @@ const ComputeView = {
             <button class="apple-btn apple-btn--secondary" :disabled="editDlg.busy" @click="editDlg.open=false">{{ t('op_cancel') }}</button>
             <button class="apple-btn apple-btn--primary" :disabled="editDlg.busy" @click="saveEdit">
               <i v-if="editDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_save') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 虚拟机迁移对话框（目标主机列表仅同集群在线主机）-->
+      <div v-if="migDlg.open" class="modal-mask" @click.self="!migDlg.busy && (migDlg.open=false)">
+        <div class="modal-dialog">
+          <div class="modal-head"><i class="fas fa-truck-fast" style="color:var(--color-indigo)"></i> {{ t('mig_title') }} · {{ migDlg.vm.name }}</div>
+          <div class="modal-body">
+            <div class="info-alert"><i class="fas fa-circle-info"></i> {{ t('mig_same_cluster') }}</div>
+            <div class="form-row">
+              <label>{{ t('mig_select_target') }} <span class="req">*</span></label>
+              <div class="mig-target-list">
+                <label class="mig-target" v-for="h in migDlg.targets" :key="h.id"
+                       :class="{active: migDlg.targetId===h.id}">
+                  <input type="radio" name="mig-target" :value="h.id" v-model="migDlg.targetId" />
+                  <div class="mig-target-main">
+                    <div class="mig-target-name"><i class="fas fa-server" style="color:var(--color-blue)"></i> <strong>{{ h.name }}</strong>
+                      <span class="apple-badge apple-badge--running" style="margin-left:6px"><span class="dot"></span>{{ h.cluster_name }}</span>
+                    </div>
+                    <div class="mig-target-meta muted">{{ h.ip }} · {{ h.cpu_model }}</div>
+                  </div>
+                  <div class="mig-target-free">
+                    <div><span class="muted">{{ t('mig_cpu_free') }}</span> <strong>{{ 100 - (h.cpu_usage||0) }}%</strong></div>
+                    <div><span class="muted">{{ t('mig_mem_free') }}</span> <strong>{{ (h.mem_total_gb||0) - (h.mem_used_gb||0) }} GB</strong></div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--secondary" :disabled="migDlg.busy" @click="migDlg.open=false">{{ t('op_cancel') }}</button>
+            <button class="apple-btn apple-btn--primary" :disabled="migDlg.busy || !migDlg.targetId" @click="doMigrate">
+              <i v-if="migDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-truck-fast"></i> {{ t('mig_start') }}
             </button>
           </div>
         </div>

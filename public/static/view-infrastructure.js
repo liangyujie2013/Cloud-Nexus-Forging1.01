@@ -1,74 +1,113 @@
 // =============================================================================
-//  模块视图：基础设施 (view-infrastructure.js)
-//  子标签：datacenter 数据中心（四层拓扑树）/ clusters 集群管理 / hosts 主机节点
-//          / pools 资源池。API：/infrastructure/topology、/clusters、/hosts、/resource-pools。
+//  模块视图：基础设施 (view-infrastructure.js) — Cloud Nexus Forging v2.0
+//  子标签：datacenter 数据中心（资源拓扑树 + DC 统计卡）/ clusters 集群管理
+//          / hosts 主机节点 / pools 资源池。
+//
+//  ★ 完整层级血缘（数据中心 → 集群 → 宿主机 → 虚拟机）：
+//    · 所有数据来自统一 store（window.cnfTopology），聚合统计实时一致
+//    · datacenter 页：左侧资源拓扑树 + 右侧 DC 统计卡（集群数/主机数/VM数）
+//    · clusters 页：显示所属数据中心 + 主机数/VM数 + 「添加主机」+ 删除级联校验
+//    · hosts 页：显示所属集群/数据中心 + 真实硬件型号 + 该主机运行的 VM 列表 + 移除校验
+//    · 删除前级联校验（删 DC 查集群 / 删集群查主机 / 移除主机查运行 VM）
 // =============================================================================
 (function () {
-const { ref, onMounted, watch } = Vue
-const api = window.api
+const { ref, computed, onMounted, watch } = Vue
 const t = window.t
+const store = window.cnfTopology
+const toast = window.cnfToast
 
 const InfrastructureView = {
-  props: { tab: { type: String, default: 'datacenter' } },
+  components: { TopologyTree: window.__CNF_VIEWS.TopologyTree },
+  props: { tab: { type: String, default: 'datacenter' }, focus: { type: Object, default: null } },
   setup(props) {
-    const tree = ref([])
-    const expanded = ref({})
-    const clusters = ref([])
-    const hosts = ref([])
     const pools = ref([])
 
+    // ---- 聚合数据（来自统一 store）----
+    const datacenters = computed(() => store.datacenterStats.value)
+    const clusters = computed(() => store.clusterStats.value)
+    const hosts = computed(() => store.hostStats.value)
+
+    // ---- 主机详情展开（显示该主机上运行的 VM 列表）----
+    const expandedHost = ref(null)
+    const toggleHost = (id) => { expandedHost.value = expandedHost.value === id ? null : id }
+
+    // ---- 删除级联校验对话框 ----
+    const blockDlg = ref({ open: false, title: '', message: '', children: [] })
+    const showBlocked = (title, message, children) => { blockDlg.value = { open: true, title, message, children: children || [] } }
+
+    // ---- 添加主机向导（通过全局事件打开，可携带预设集群）----
+    const addHost = (presetClusterId) => {
+      window.dispatchEvent(new CustomEvent('cnf:open-host-wizard', { detail: { presetClusterId: presetClusterId || 0 } }))
+    }
+
+    // ---- 删除数据中心（级联校验）----
+    const delDatacenter = async (dc) => {
+      const res = await store.deleteDatacenter(dc.id)
+      if (!res.ok) return showBlocked(t('del_blocked_title'), res.error, res.children)
+      toast(t('toast_success'), 'success')
+    }
+    // ---- 删除集群（级联校验）----
+    const delCluster = async (cl) => {
+      const res = await store.deleteCluster(cl.id)
+      if (!res.ok) return showBlocked(t('del_blocked_title'), res.error, res.children)
+      toast(t('toast_success'), 'success')
+    }
+    // ---- 移除主机（级联校验）----
+    const delHost = async (h) => {
+      const res = await store.removeHost(h.id)
+      if (!res.ok) return showBlocked(t('del_blocked_title'), res.error, res.children)
+      toast(t('toast_success'), 'success')
+    }
+
     const load = async () => {
-      if (props.tab === 'datacenter' && !tree.value.length) {
-        tree.value = await api('/infrastructure/topology')
-        tree.value.forEach((dc) => (expanded.value['dc' + dc.id] = true))
-      }
-      if (props.tab === 'clusters' && !clusters.value.length) clusters.value = await api('/clusters')
-      if (props.tab === 'hosts' && !hosts.value.length) hosts.value = await api('/hosts')
-      if (props.tab === 'pools' && !pools.value.length) pools.value = await api('/resource-pools')
+      await store.fetchAll()
+      if (props.tab === 'pools' && !pools.value.length) pools.value = await window.api('/resource-pools')
     }
     onMounted(load)
     watch(() => props.tab, load)
-    const toggle = (k) => (expanded.value[k] = !expanded.value[k])
+
+    // ---- 跨视图聚焦高亮（拓扑树点击跳转时定位目标行）----
+    const focusId = ref(null)
+    const focusType = ref(null)
+    watch(() => props.focus, (f) => {
+      if (!f) return
+      focusType.value = f.focusType; focusId.value = f.focusId
+      if (f.focusType === 'host') expandedHost.value = f.focusId
+      setTimeout(() => { focusId.value = null }, 2400)
+    }, { immediate: true })
+
     const sharesLabel = (s) => ({ high: t('shares_high'), normal: t('shares_normal'), low: t('shares_low') }[s] || s)
 
-    return { props, tree, expanded, toggle, clusters, hosts, pools, sharesLabel, t }
+    return {
+      props, pools, datacenters, clusters, hosts,
+      expandedHost, toggleHost, blockDlg, addHost,
+      delDatacenter, delCluster, delHost,
+      focusId, focusType, sharesLabel, t,
+    }
   },
   template: `
     <div>
-      <!-- ===== datacenter：四层拓扑树 ===== -->
+      <!-- ===== datacenter：资源拓扑树 + DC 统计卡 ===== -->
       <template v-if="props.tab==='datacenter'">
-        <div class="apple-card">
-          <div class="muted" style="margin-bottom:12px"><i class="fas fa-info-circle"></i> {{ t('topo_full_hint') }}</div>
-          <div class="tree-node" v-for="dc in tree" :key="dc.id">
-            <div class="tree-row" @click="toggle('dc'+dc.id)">
-              <i class="fas fa-chevron-right chevron" :class="{open:expanded['dc'+dc.id]}"></i>
-              <i class="fas fa-building" style="color:var(--color-blue)"></i><strong>{{ dc.name }}</strong><span class="muted">· {{ dc.location }}</span>
-            </div>
-            <div class="tree-children" v-if="expanded['dc'+dc.id]">
-              <div class="tree-node" v-for="cl in dc.children" :key="cl.id">
-                <div class="tree-row" @click="toggle('cl'+cl.id)">
-                  <i class="fas fa-chevron-right chevron" :class="{open:expanded['cl'+cl.id]}"></i>
-                  <i class="fas fa-layer-group" style="color:var(--color-indigo)"></i> {{ cl.name }}
-                  <span v-if="cl.ha_enabled" class="apple-badge apple-badge--running" style="margin-left:6px"><span class="dot"></span>HA</span>
-                  <span v-if="cl.drs_enabled" class="apple-badge apple-badge--warning"><span class="dot"></span>资源调度</span>
-                </div>
-                <div class="tree-children" v-if="expanded['cl'+cl.id]">
-                  <div class="tree-node" v-for="h in cl.children" :key="h.id">
-                    <div class="tree-row" @click="toggle('h'+h.id)">
-                      <i class="fas fa-chevron-right chevron" :class="{open:expanded['h'+h.id]}"></i>
-                      <i class="fas fa-server" :style="{color:h.status==='connected'?'var(--color-green)':'var(--color-orange)'}"></i>
-                      {{ h.name }} <span class="muted">· {{ h.ip }} · {{ h.vcpus }}vCPU · {{ h.mem_total_gb }}GB</span>
-                      <span v-if="h.gpus>0" class="apple-badge apple-badge--running" style="margin-left:6px"><span class="dot"></span>{{ h.gpus }} GPU</span>
-                    </div>
-                    <div class="tree-children" v-if="expanded['h'+h.id]">
-                      <div class="tree-row" v-for="v in h.children" :key="v.id">
-                        <span style="width:14px"></span>
-                        <i class="fas fa-desktop" :style="{color:v.status==='running'?'var(--color-green)':v.status==='paused'?'var(--color-orange)':'var(--color-gray)'}"></i>
-                        {{ v.name }} <span class="muted">· {{ v.vcpus }}vCPU · {{ v.mem_gb }}GB</span>
-                        <span v-if="v.cpu_pinning" class="apple-badge apple-badge--running" style="margin-left:6px"><span class="dot"></span>{{ t('pin_numa') }}{{ v.numa }}</span>
-                      </div>
-                    </div>
+        <div class="muted" style="margin-bottom:12px"><i class="fas fa-info-circle"></i> {{ t('topo_full_hint') }}</div>
+        <div class="infra-topo-layout">
+          <!-- 左：资源拓扑树 -->
+          <TopologyTree />
+          <!-- 右：数据中心统计卡 -->
+          <div class="infra-topo-right">
+            <div class="grid grid-1" style="gap:12px">
+              <div class="apple-card dc-card" v-for="dc in datacenters" :key="dc.id"
+                   :class="{focused: focusType==='datacenter' && focusId===dc.id}">
+                <div class="flex between" style="margin-bottom:12px">
+                  <div><i class="fas fa-building" style="color:var(--color-blue)"></i> <strong>{{ dc.name }}</strong>
+                    <div class="muted" style="font-size:12px;margin-top:2px">{{ dc.location }} · {{ dc.description }}</div>
                   </div>
+                  <span class="apple-badge apple-badge--running"><span class="dot"></span>{{ dc.status }}</span>
+                </div>
+                <div class="gpu-stats">
+                  <div class="gpu-stat"><div class="k">{{ t('nav_infra_clusters') }}</div><div class="v">{{ dc.cluster_count }}</div></div>
+                  <div class="gpu-stat"><div class="k">{{ t('host_machine') }}</div><div class="v">{{ dc.host_online }}/{{ dc.host_count }}</div></div>
+                  <div class="gpu-stat"><div class="k">{{ t('dash_vms') }}</div><div class="v">{{ dc.vm_running }}/{{ dc.vm_count }}</div></div>
                 </div>
               </div>
             </div>
@@ -76,42 +115,87 @@ const InfrastructureView = {
         </div>
       </template>
 
-      <!-- ===== clusters：集群管理 ===== -->
+      <!-- ===== clusters：集群管理（显示所属数据中心 + 聚合统计 + 添加主机/删除校验）===== -->
       <template v-else-if="props.tab==='clusters'">
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
-            <thead><tr><th>{{ t('name') }}</th><th>HA</th><th>资源调度</th><th>CPU兼容</th><th>{{ t('cc_cpu_over') }}</th><th>{{ t('host_machine') }}</th><th>{{ t('dash_vms') }}</th></tr></thead>
+            <thead><tr>
+              <th>{{ t('name') }}</th><th>{{ t('host_dc') }}</th><th>HA</th><th>{{ t('nav_drs') }}</th><th>CPU{{ t('cc_cpu_over') }}</th>
+              <th>{{ t('host_machine') }}</th><th>{{ t('dash_vms') }}</th><th style="width:120px">{{ t('op_actions') }}</th>
+            </tr></thead>
             <tbody>
-              <tr v-for="c in clusters" :key="c.id">
-                <td><strong>{{ c.name }}</strong></td>
+              <tr v-for="c in clusters" :key="c.id" :class="{focused: focusType==='cluster' && focusId===c.id}">
+                <td><strong>{{ c.name }}</strong><div class="muted" style="font-size:12px">{{ c.description }}</div></td>
+                <td><span class="apple-badge"><i class="fas fa-building"></i> {{ c.datacenter_name }}</span></td>
                 <td><i :class="c.ha_enabled?'fas fa-circle-check':'far fa-circle'" :style="{color:c.ha_enabled?'var(--color-green)':'var(--text-tertiary)'}"></i></td>
                 <td><i :class="c.drs_enabled?'fas fa-circle-check':'far fa-circle'" :style="{color:c.drs_enabled?'var(--color-green)':'var(--text-tertiary)'}"></i></td>
-                <td class="muted">{{ c.evc_mode }}</td>
                 <td class="mono">{{ c.overcommit_cpu }}×</td>
-                <td>{{ c.hosts }}</td>
-                <td>{{ c.vms }}</td>
+                <td><strong>{{ c.host_online }}</strong><span class="muted">/{{ c.host_count }}</span></td>
+                <td><strong>{{ c.vm_running }}</strong><span class="muted">/{{ c.vm_count }}</span></td>
+                <td>
+                  <button class="icon-btn" :title="t('hw_add_host')" @click="addHost(c.id)"><i class="fas fa-plus"></i></button>
+                  <button class="icon-btn danger" :title="t('op_delete')" @click="delCluster(c)"><i class="fas fa-trash"></i></button>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
       </template>
 
-      <!-- ===== hosts：主机节点 ===== -->
+      <!-- ===== hosts：主机节点（所属集群/DC + 真实硬件 + 运行VM列表 + 移除校验）===== -->
       <template v-else-if="props.tab==='hosts'">
+        <div class="crud-toolbar">
+          <button class="apple-btn apple-btn--primary" @click="addHost(0)"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
+          <div class="spacer"></div>
+          <span class="muted" style="font-size:13px">{{ hosts.length }} {{ t('host_machine') }}</span>
+        </div>
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
-            <thead><tr><th>{{ t('name') }}</th><th>{{ t('status') }}</th><th>IP</th><th>CPU</th><th>{{ t('col_mem') }}</th><th>{{ t('dash_vms') }}</th><th>GPU</th><th>{{ t('col_load') }}</th></tr></thead>
+            <thead><tr>
+              <th style="width:34px"></th><th>{{ t('name') }}</th><th>{{ t('host_cluster') }}</th><th>{{ t('status') }}</th>
+              <th>IP</th><th>CPU</th><th>{{ t('col_mem') }}</th><th>{{ t('dash_vms') }}</th><th>GPU</th><th>{{ t('col_load') }}</th><th style="width:54px"></th>
+            </tr></thead>
             <tbody>
-              <tr v-for="h in hosts" :key="h.id">
-                <td><strong>{{ h.name }}</strong><div class="muted" style="font-size:12px">{{ h.cpu_model }}</div></td>
-                <td><span class="apple-badge" :class="h.status==='connected'?'apple-badge--running':'apple-badge--warning'"><span class="dot"></span>{{ h.status==='connected'?t('dash_connected'):'维护' }}</span></td>
-                <td class="mono muted">{{ h.ip }}</td>
-                <td class="mono">{{ h.sockets }}×{{ h.cores }}×{{ h.threads }} = {{ h.vcpus }}</td>
-                <td class="mono">{{ h.mem_used_gb }}/{{ h.mem_total_gb }} GB</td>
-                <td>{{ h.vms }}</td>
-                <td>{{ h.gpus>0 ? h.gpus+' ×' : '—' }}</td>
-                <td style="width:90px"><div class="usage-bar"><div class="fill" :style="{width:h.cpu_usage+'%',background:h.cpu_usage>80?'var(--color-red)':'var(--color-blue)'}"></div></div></td>
-              </tr>
+              <template v-for="h in hosts" :key="h.id">
+                <tr class="host-row" :class="{focused: focusType==='host' && focusId===h.id}" @click="toggleHost(h.id)">
+                  <td><i class="fas fa-chevron-right chevron" :class="{open:expandedHost===h.id}"></i></td>
+                  <td><strong>{{ h.name }}</strong><div class="muted" style="font-size:12px">{{ h.cpu_model }}</div></td>
+                  <td>
+                    <div><span class="apple-badge"><i class="fas fa-layer-group"></i> {{ h.cluster_name }}</span></div>
+                    <div class="muted" style="font-size:11px;margin-top:2px"><i class="fas fa-building"></i> {{ h.datacenter_name }}</div>
+                  </td>
+                  <td><span class="apple-badge" :class="h.status==='connected'?'apple-badge--running':'apple-badge--warning'"><span class="dot"></span>{{ h.status==='connected'?t('dash_connected'):(h.status==='connecting'?'纳管中':'维护') }}</span></td>
+                  <td class="mono muted">{{ h.ip }}</td>
+                  <td class="mono">{{ h.sockets }}×{{ h.cores }}×{{ h.threads }} = {{ h.vcpus }}</td>
+                  <td class="mono">{{ h.mem_used_gb }}/{{ h.mem_total_gb }} GB</td>
+                  <td><strong>{{ h.vm_running }}</strong><span class="muted">/{{ h.vm_count }}</span></td>
+                  <td>{{ h.gpus>0 ? h.gpus+' ×' : '—' }}</td>
+                  <td style="width:90px"><div class="usage-bar"><div class="fill" :style="{width:h.cpu_usage+'%',background:h.cpu_usage>80?'var(--color-red)':'var(--color-blue)'}"></div></div></td>
+                  <td><button class="icon-btn danger" :title="t('op_remove')" @click.stop="delHost(h)"><i class="fas fa-trash"></i></button></td>
+                </tr>
+                <!-- 展开：硬件详情 + 该主机运行的 VM 列表 -->
+                <tr v-if="expandedHost===h.id" class="host-detail-row">
+                  <td colspan="11">
+                    <div class="host-detail">
+                      <div class="host-hw">
+                        <div class="hw-item"><span class="hw-k"><i class="fas fa-microchip"></i> CPU</span><span class="hw-v">{{ h.cpu_model }} · {{ h.sockets }}×{{ h.cores }}C/{{ h.threads }}T</span></div>
+                        <div class="hw-item"><span class="hw-k"><i class="fas fa-ethernet"></i> {{ t('host_nic_model') }}</span><span class="hw-v">{{ h.nic_model }}</span></div>
+                        <div class="hw-item"><span class="hw-k"><i class="fas fa-hard-drive"></i> {{ t('host_raid_model') }}</span><span class="hw-v">{{ h.raid_model }}</span></div>
+                        <div class="hw-item"><span class="hw-k"><i class="fas fa-database"></i> {{ t('host_disk_model') }}</span><span class="hw-v">{{ h.disk_model }}</span></div>
+                      </div>
+                      <div class="host-vms">
+                        <div class="host-vms-title"><i class="fas fa-desktop"></i> {{ t('host_vms_running') }}（{{ h.vm_running }}/{{ h.vm_count }}）</div>
+                        <div v-if="h.vms_list.length" class="host-vm-chips">
+                          <span class="host-vm-chip" v-for="v in h.vms_list" :key="v.id" :class="'st-'+v.status">
+                            <span class="dot"></span>{{ v.name }} <span class="muted">· {{ v.vcpus }}vCPU/{{ v.mem_gb }}GB</span>
+                          </span>
+                        </div>
+                        <div v-else class="muted" style="font-size:13px">{{ t('op_no_data') }}</div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -136,6 +220,23 @@ const InfrastructureView = {
           </div>
         </div>
       </template>
+
+      <!-- 级联删除阻止对话框 -->
+      <div v-if="blockDlg.open" class="modal-mask" @click.self="blockDlg.open=false">
+        <div class="modal-dialog modal-sm">
+          <div class="modal-head"><i class="fas fa-ban" style="color:var(--color-red)"></i> {{ blockDlg.title }}</div>
+          <div class="modal-body">
+            <p>{{ blockDlg.message }}</p>
+            <div v-if="blockDlg.children.length" class="block-children">
+              <div class="muted" style="font-size:12px;margin-bottom:6px">{{ t('del_blocked_children') }}：</div>
+              <span class="apple-badge" v-for="(ch,i) in blockDlg.children" :key="i" style="margin:2px">{{ ch }}</span>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--primary" @click="blockDlg.open=false">{{ t('close') }}</button>
+          </div>
+        </div>
+      </div>
     </div>`,
 }
 

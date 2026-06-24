@@ -611,3 +611,138 @@
   .user-chip-name { display: none; }
   .breadcrumb .crumb:not(.last) { display: none; }
 }
+
+/* =============================================================================
+   v2.0 四层拓扑架构 —— 新增样式
+   （资源拓扑树 / 添加主机向导 / 主机详情 / 虚拟机迁移 / 级联删除 / 聚焦高亮）
+   Apple HIG：12px 圆角 / 毛玻璃 / 流畅动画。无任何第三方 UI 框架。
+   ========================================================================== */
+
+/* ---- 数据中心页：拓扑树 + 统计卡 左右布局 ---- */
+.infra-topo-layout { display: grid; grid-template-columns: 360px 1fr; gap: 16px; align-items: start; }
+.infra-topo-right { min-width: 0; }
+@media (max-width: 1080px) { .infra-topo-layout { grid-template-columns: 1fr; } }
+
+/* ---- 资源拓扑树 ---- */
+.topology-tree {
+  background: var(--glass-bg); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--separator); border-radius: var(--radius-lg); overflow: hidden;
+}
+.topo-tree-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--separator); }
+.topo-tree-header h3 { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; margin: 0; }
+.topo-tree-totals { display: flex; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--separator); font-size: 13px; color: var(--text-secondary); }
+.topo-tree-totals span { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.topo-tree-body { padding: 8px; max-height: 560px; overflow: auto; }
+.topo-node { user-select: none; }
+.topo-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13px; transition: background var(--duration-fast);
+}
+.topo-row:hover { background: var(--bg-secondary); }
+.topo-chevron { width: 12px; font-size: 10px; color: var(--text-tertiary); transition: transform var(--duration-fast); }
+.topo-chevron.open { transform: rotate(90deg); }
+.topo-chevron-placeholder { width: 12px; display: inline-block; }
+.topo-type-icon { width: 16px; text-align: center; }
+.topo-label { flex: 1; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topo-count { font-size: 11px; color: var(--text-secondary); background: var(--bg-secondary); padding: 1px 8px; border-radius: var(--radius-pill); }
+.topo-status { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.topo-status.status-online { background: var(--color-green); }
+.topo-status.status-maintenance { background: var(--color-orange); }
+.topo-status.status-offline { background: var(--color-red); }
+.topo-empty { padding: 24px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
+.topology-tree.compact .topo-tree-body { max-height: 360px; }
+
+/* ---- 数据中心统计卡 ---- */
+.dc-card { transition: box-shadow var(--duration-base), border-color var(--duration-base); }
+
+/* ---- 跨视图聚焦高亮（拓扑树点击跳转定位）---- */
+.focused, tr.focused > td {
+  animation: focus-pulse 2.2s ease-out;
+}
+.dc-card.focused { border-color: var(--color-blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-blue) 22%, transparent); }
+@keyframes focus-pulse {
+  0% { background: color-mix(in srgb, var(--color-blue) 22%, transparent); }
+  100% { background: transparent; }
+}
+
+/* ---- 主机行（可展开）---- */
+.host-row { cursor: pointer; }
+.host-row:hover { background: var(--bg-secondary); }
+.host-row .chevron { width: 14px; font-size: 11px; color: var(--text-tertiary); transition: transform var(--duration-fast); }
+.host-row .chevron.open { transform: rotate(90deg); }
+.host-detail-row > td { background: var(--bg-secondary); padding: 0 !important; }
+.host-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 16px 20px; }
+@media (max-width: 880px) { .host-detail { grid-template-columns: 1fr; } }
+.host-hw { display: flex; flex-direction: column; gap: 8px; }
+.hw-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; padding: 6px 10px; background: var(--bg-primary); border-radius: var(--radius-sm); }
+.hw-k { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.hw-v { font-family: var(--font-mono); text-align: right; }
+.host-vms-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.host-vm-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.host-vm-chip {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 5px 10px;
+  background: var(--bg-primary); border: 1px solid var(--separator); border-radius: var(--radius-pill);
+}
+.host-vm-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); }
+.host-vm-chip.st-running .dot { background: var(--color-green); }
+.host-vm-chip.st-paused .dot { background: var(--color-orange); }
+.host-vm-chip.st-stopped .dot { background: var(--color-gray); }
+
+/* ---- 信息提示块（向导/迁移）---- */
+.info-alert {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-top: 4px;
+  background: color-mix(in srgb, var(--color-blue) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-blue) 24%, transparent);
+  border-radius: var(--radius-md); font-size: 13px; line-height: 1.55; color: var(--text-primary);
+}
+.info-alert > i { color: var(--color-blue); margin-top: 2px; }
+
+/* ---- 级联删除阻止 ---- */
+.block-children { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--separator); }
+
+/* ---- 大尺寸 modal + 双列表单 ---- */
+.modal-dialog.modal-lg { width: 600px; }
+.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+
+/* ---- 添加主机向导：步骤条 ---- */
+.host-wizard-body { min-height: 240px; }
+.wiz-steps { display: flex; align-items: center; gap: 6px; padding: 14px 22px; border-bottom: 1px solid var(--separator); }
+.wiz-step { display: flex; align-items: center; gap: 8px; flex: 1; opacity: 0.55; transition: opacity var(--duration-base); }
+.wiz-step.active, .wiz-step.done { opacity: 1; }
+.wiz-step-dot {
+  width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; background: var(--bg-secondary); color: var(--text-secondary); flex: none;
+}
+.wiz-step.active .wiz-step-dot { background: var(--color-blue); color: #fff; }
+.wiz-step.done .wiz-step-dot { background: var(--color-green); color: #fff; }
+.wiz-step-label { font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+/* ---- 向导：环境预检 ---- */
+.precheck-list { display: flex; flex-direction: column; gap: 4px; }
+.precheck-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--bg-secondary); }
+.precheck-ic { width: 18px; text-align: center; }
+.precheck-name { flex: 1; font-size: 14px; font-weight: 500; }
+.precheck-result { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); }
+.precheck-result.ok { color: var(--color-green); }
+
+/* ---- 向导：纳管部署进度 ---- */
+.deploy-box { padding: 8px 0; }
+.deploy-bar { height: 10px; border-radius: 5px; }
+.deploy-pct { text-align: center; font-size: 24px; font-weight: 800; margin: 14px 0 6px; font-family: var(--font-mono); }
+.deploy-msg { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14px; color: var(--text-secondary); min-height: 22px; }
+.deploy-msg.ok { color: var(--color-green); }
+.deploy-msg.err { color: var(--color-red); }
+
+/* ---- 虚拟机迁移：目标主机选择 ---- */
+.mig-target-list { display: flex; flex-direction: column; gap: 10px; }
+.mig-target {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer;
+  border: 1.5px solid var(--separator); border-radius: var(--radius-md); transition: all var(--duration-fast);
+}
+.mig-target:hover { border-color: var(--color-blue); }
+.mig-target.active { border-color: var(--color-blue); background: color-mix(in srgb, var(--color-blue) 8%, transparent); }
+.mig-target input[type="radio"] { width: 16px; height: 16px; accent-color: var(--color-blue); flex: none; }
+.mig-target-main { flex: 1; min-width: 0; }
+.mig-target-name { font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.mig-target-meta { font-size: 12px; font-family: var(--font-mono); margin-top: 3px; }
+.mig-target-free { text-align: right; font-size: 12px; line-height: 1.6; flex: none; }

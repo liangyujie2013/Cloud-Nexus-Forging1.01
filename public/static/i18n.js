@@ -138,6 +138,36 @@ const dict = {
     // 拓扑补充
     topo_full_hint: '数据中心 → 集群 → 主机 → 虚拟机 四层拓扑（点击展开）',
     pin_numa: '绑核 NUMA',
+    // ===== 资源拓扑树 =====
+    topo_tree_title: '资源拓扑',
+    topo_belongs: '归属',
+    // ===== 添加主机向导（节点纳管）=====
+    hw_title: '添加主机到集群',
+    hw_step1: '选择集群', hw_step2: '连接信息', hw_step3: '环境预检', hw_step4: '纳管部署',
+    hw_datacenter: '数据中心', hw_target_cluster: '目标集群',
+    hw_select_dc: '请选择数据中心', hw_select_cluster: '请选择目标集群', hw_select_dc_first: '请先选择数据中心',
+    hw_cluster_info: '集群说明', hw_cluster_ha: 'HA 状态', hw_cluster_hosts: '当前主机',
+    hw_hostname: '主机名', hw_mgmt_ip: '管理 IP', hw_ssh_port: 'SSH 端口', hw_ssh_user: 'SSH 用户', hw_ssh_pass: 'SSH 密码',
+    hw_err_ip: 'IP 地址格式不正确', hw_err_ip_dup: '该 IP 已被其他主机占用',
+    hw_precheck_hint: '正在检查目标主机的虚拟化环境与连通性',
+    hw_check_net: '网络连通性检查', hw_check_virt: 'CPU 虚拟化支持', hw_check_mem: '内存容量检查', hw_check_ssh: 'SSH 连接验证',
+    hw_check_wait: '等待检查', hw_check_running: '检查中…',
+    hw_dep_connect: '正在连接主机…', hw_dep_virt: '安装虚拟化组件…', hw_dep_vswitch: '配置虚拟交换机…',
+    hw_dep_agent: '部署管理 Agent…', hw_dep_register: '注册到集群…', hw_dep_sync: '同步网络配置…', hw_dep_done: '部署完成！',
+    hw_dep_ready: '点击「开始部署」执行节点纳管', hw_dep_success: '主机 {host} 已成功加入集群 {cluster}', hw_dep_failed: '部署失败，请检查连接信息', 
+    hw_prev: '上一步', hw_next: '下一步', hw_run_precheck: '开始预检', hw_start_deploy: '开始部署', hw_finish: '完成',
+    hw_add_host: '添加主机',
+    // ===== 主机硬件型号 =====
+    host_nic_model: '网卡', host_raid_model: 'RAID 卡', host_disk_model: '硬盘',
+    host_cluster: '所属集群', host_dc: '所属数据中心', host_vms_running: '运行中 VM',
+    // ===== VM 迁移（同集群约束）=====
+    mig_title: '虚拟机迁移', mig_select_target: '请选择迁移目标主机', mig_no_target: '当前集群内没有其他可用主机进行迁移',
+    mig_same_cluster: '仅可迁移至同集群内的在线主机', mig_cpu_free: 'CPU 余量', mig_mem_free: '内存余量',
+    mig_in_progress: '正在将 {vm} 迁移到 {host}…', mig_success: '{vm} 已成功迁移到 {host}', mig_start: '开始迁移',
+    // ===== 级联删除校验 =====
+    del_blocked_title: '无法删除', del_dc_has_cluster: '数据中心下仍有集群，请先移除集群',
+    del_cluster_has_host: '集群下仍有主机，请先移除主机', del_host_has_vm: '主机上仍有运行中的虚拟机，请先迁移或关机',
+    del_blocked_children: '关联对象', op_remove: '移除',
 
     // GPU 补充
     gpu_vgpu: 'vGPU',
@@ -430,6 +460,36 @@ const dict = {
 
     topo_full_hint: 'Datacenter → Cluster → Host → VM four-tier topology (click to expand)',
     pin_numa: 'Pinned NUMA',
+    // ===== Resource topology tree =====
+    topo_tree_title: 'Resource Topology',
+    topo_belongs: 'Belongs to',
+    // ===== Add Host Wizard =====
+    hw_title: 'Add Host to Cluster',
+    hw_step1: 'Select Cluster', hw_step2: 'Connection', hw_step3: 'Pre-check', hw_step4: 'Provision',
+    hw_datacenter: 'Datacenter', hw_target_cluster: 'Target Cluster',
+    hw_select_dc: 'Select a datacenter', hw_select_cluster: 'Select a target cluster', hw_select_dc_first: 'Select a datacenter first',
+    hw_cluster_info: 'Cluster', hw_cluster_ha: 'HA', hw_cluster_hosts: 'Current hosts',
+    hw_hostname: 'Hostname', hw_mgmt_ip: 'Management IP', hw_ssh_port: 'SSH Port', hw_ssh_user: 'SSH User', hw_ssh_pass: 'SSH Password',
+    hw_err_ip: 'Invalid IP address', hw_err_ip_dup: 'IP already used by another host',
+    hw_precheck_hint: 'Checking virtualization environment and connectivity',
+    hw_check_net: 'Network connectivity', hw_check_virt: 'CPU virtualization support', hw_check_mem: 'Memory capacity', hw_check_ssh: 'SSH connection',
+    hw_check_wait: 'Waiting', hw_check_running: 'Checking…',
+    hw_dep_connect: 'Connecting to host…', hw_dep_virt: 'Installing virtualization…', hw_dep_vswitch: 'Configuring virtual switch…',
+    hw_dep_agent: 'Deploying management agent…', hw_dep_register: 'Registering to cluster…', hw_dep_sync: 'Syncing network config…', hw_dep_done: 'Provision complete!',
+    hw_dep_ready: 'Click "Start Provision" to onboard the node', hw_dep_success: 'Host {host} joined cluster {cluster}', hw_dep_failed: 'Provision failed, please check connection',
+    hw_prev: 'Back', hw_next: 'Next', hw_run_precheck: 'Run Pre-check', hw_start_deploy: 'Start Provision', hw_finish: 'Finish',
+    hw_add_host: 'Add Host',
+    // ===== Host hardware =====
+    host_nic_model: 'NIC', host_raid_model: 'RAID', host_disk_model: 'Disk',
+    host_cluster: 'Cluster', host_dc: 'Datacenter', host_vms_running: 'Running VMs',
+    // ===== VM migration =====
+    mig_title: 'Migrate VM', mig_select_target: 'Select target host', mig_no_target: 'No other available host in this cluster',
+    mig_same_cluster: 'Only online hosts within the same cluster', mig_cpu_free: 'CPU free', mig_mem_free: 'Mem free',
+    mig_in_progress: 'Migrating {vm} to {host}…', mig_success: '{vm} migrated to {host}', mig_start: 'Start Migration',
+    // ===== Cascade delete checks =====
+    del_blocked_title: 'Cannot Delete', del_dc_has_cluster: 'Datacenter still has clusters, remove them first',
+    del_cluster_has_host: 'Cluster still has hosts, remove them first', del_host_has_vm: 'Host still has running VMs, migrate or stop them first',
+    del_blocked_children: 'Related objects', op_remove: 'Remove',
 
     gpu_vgpu: 'vGPU',
 

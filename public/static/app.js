@@ -22,6 +22,8 @@ const App = {
     AccessControlView: V.AccessControlView,
     SystemView: V.SystemView,
     VMWizard: V.VMWizard,
+    HostWizard: V.HostWizard,
+    TopologyTree: V.TopologyTree,
   },
   setup() {
     const locale = window.i18n
@@ -141,11 +143,38 @@ const App = {
     const wizardOpen = ref(false)
     const onOpenWizard = () => (wizardOpen.value = true)
 
+    // ---- 添加主机向导（由基础设施/拓扑树通过自定义事件触发，可携带预设集群）----
+    const hostWizardOpen = ref(false)
+    const hostWizardPreset = ref(0)
+    const onOpenHostWizard = (e) => {
+      hostWizardPreset.value = (e && e.detail && e.detail.presetClusterId) || 0
+      hostWizardOpen.value = true
+    }
+    const onHostWizardDone = () => { hostWizardOpen.value = false }
+
+    // ---- 跨视图导航（资源拓扑树点击节点 → 切换模块/子页 + 高亮目标）----
+    const currentFocus = ref(null)
+    const onNavigate = (e) => {
+      const d = e && e.detail
+      if (!d) return
+      go(d.module, d.tab)
+      // 携带聚焦信息（focusType/focusId），透传给目标视图实现高亮定位
+      currentFocus.value = { focusType: d.focusType, focusId: d.focusId, _ts: Date.now() }
+    }
+
     onMounted(async () => {
       notifications.value = await api('/notifications')
+      // 预加载统一拓扑数据（数据中心/集群/主机/虚拟机的层级血缘）
+      if (window.cnfTopology) window.cnfTopology.fetchAll()
       window.addEventListener('cnf:open-vm-wizard', onOpenWizard)
+      window.addEventListener('cnf:open-host-wizard', onOpenHostWizard)
+      window.addEventListener('cnf:navigate', onNavigate)
     })
-    onBeforeUnmount(() => window.removeEventListener('cnf:open-vm-wizard', onOpenWizard))
+    onBeforeUnmount(() => {
+      window.removeEventListener('cnf:open-vm-wizard', onOpenWizard)
+      window.removeEventListener('cnf:open-host-wizard', onOpenHostWizard)
+      window.removeEventListener('cnf:navigate', onNavigate)
+    })
 
     return {
       locale, themeState, THEMES: window.THEMES,
@@ -154,7 +183,7 @@ const App = {
       notifications, notifOpen, unreadCount, markAllRead, notifIcon,
       userOpen, searchText, onSearch,
       setTheme, themeLabel, setLocale,
-      wizardOpen, t,
+      wizardOpen, hostWizardOpen, hostWizardPreset, onHostWizardDone, currentFocus, t,
     }
   },
   template: `
@@ -271,11 +300,12 @@ const App = {
       </header>
 
       <main class="content">
-        <component :is="currentComponent" :tab="currentTab" :search="searchText"></component>
+        <component :is="currentComponent" :tab="currentTab" :search="searchText" :focus="currentFocus"></component>
       </main>
     </div>
 
     <VMWizard v-if="wizardOpen" @close="wizardOpen=false"></VMWizard>
+    <HostWizard v-if="hostWizardOpen" :preset-cluster-id="hostWizardPreset" @close="hostWizardOpen=false" @done="onHostWizardDone"></HostWizard>
   </div>`,
 }
 
