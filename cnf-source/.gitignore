@@ -1,0 +1,8 @@
+bin/
+dist/
+*.tar.gz
+.env
+/etc/cnf/
+vendor/
+*.test
+*.out

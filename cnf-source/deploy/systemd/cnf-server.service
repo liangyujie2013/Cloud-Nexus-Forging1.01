@@ -1,0 +1,28 @@
+[Unit]
+Description=CNFv1.0 Control Plane Server
+Documentation=https://github.com/cnf/cnfv1
+After=network-online.target postgresql-16.service redis.service libvirtd.service
+Wants=network-online.target
+Requires=postgresql-16.service
+
+[Service]
+Type=simple
+User=cnf
+Group=cnf
+WorkingDirectory=/opt/cnf
+EnvironmentFile=-/etc/cnf/server.env
+Environment=CNF_LISTEN_ADDR=:8080
+Environment=CNF_DATABASE_URL=postgres://cnf:cnf@127.0.0.1:5432/cnfv1?sslmode=disable
+Environment=CNF_REDIS_URL=redis://127.0.0.1:6379/0
+ExecStart=/opt/cnf/bin/cnf-server
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cnf /var/log/cnf
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

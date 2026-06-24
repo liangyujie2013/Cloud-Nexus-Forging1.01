@@ -1,0 +1,21 @@
+[Unit]
+Description=CNFv1.0 Host Agent (libvirt/KVM bridge)
+Documentation=https://github.com/cnf/cnfv1
+After=network-online.target libvirtd.service openvswitch.service
+Wants=network-online.target
+Requires=libvirtd.service
+
+[Service]
+Type=simple
+# Agent 需要操作 libvirt/KVM，以 root 运行但启用能力裁剪
+User=root
+WorkingDirectory=/opt/cnf
+EnvironmentFile=-/etc/cnf/agent.env
+Environment=CNF_AGENT_LISTEN=:9090
+ExecStart=/opt/cnf/bin/cnf-agent
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
