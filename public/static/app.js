@@ -63,8 +63,8 @@ const App = {
         { key: 'topology', label: 'nav_net_topology' },
       ] },
       { key: 'monitoring', icon: 'fa-chart-line', label: 'nav_mod_monitoring', children: [
+        { key: 'overview', label: 'nav_mon_overview' },
         { key: 'realtime', label: 'nav_mon_realtime' },
-        { key: 'history', label: 'nav_mon_history' },
         { key: 'rules', label: 'nav_mon_rules' },
       ] },
       { key: 'access', icon: 'fa-user-shield', label: 'nav_mod_access', children: [

@@ -175,6 +175,26 @@ const dict = {
     // 存储补充
     st_capacity: '容量', st_read_iops: '读 IOPS', st_write_iops: '写 IOPS',
     st_latency: '延迟', st_active: '活跃', st_shared: '共享存储', st_local: '本地存储',
+    // —— 存储池创建向导 / CRUD ——
+    sp_pools: '存储池', sp_add: '新建存储池', sp_create_title: '新建存储池', sp_cluster: '所属集群',
+    sp_name: '存储池名称', sp_name_ph: '如 prod-ssd-pool', sp_type: '存储类型', sp_capacity: '容量 (TB)',
+    sp_volumes: '卷数', sp_free: '可用', sp_delete: '删除存储池',
+    sp_type_local: '本地目录', sp_type_local_d: '宿主机本地磁盘/目录，不可共享，性能最高',
+    sp_type_nfs: 'NFS 共享', sp_type_nfs_d: '基于 NFS 协议的网络共享存储，可多主机共享',
+    sp_type_iscsi: 'iSCSI', sp_type_iscsi_d: 'IP-SAN 块存储，通过 iSCSI Target 提供',
+    sp_type_fc: 'FC 光纤', sp_type_fc_d: '光纤通道 SAN，企业级高吞吐低延迟',
+    sp_type_dist: '分布式存储', sp_type_dist_d: '横向扩展的分布式块存储，三副本高可用',
+    sp_f_target_path: '本地路径', sp_f_nfs_server: 'NFS 服务器', sp_f_nfs_export: '导出路径',
+    sp_f_iscsi_portal: 'iSCSI Portal', sp_f_iscsi_iqn: 'Target IQN',
+    sp_f_fc_wwpn: 'WWPN', sp_f_dist_monitors: '监视器地址', sp_f_dist_pool: '存储池名',
+    sp_step_type: '选择类型', sp_step_conn: '连接参数', sp_step_basic: '基本信息',
+    sp_conn_hint: '请填写该存储类型所需的连接参数', sp_del_has_vol: '存储池上仍有卷，请先删除卷',
+    // —— 卷管理 CRUD ——
+    vol_create_title: '新建卷', vol_create: '创建', vol_delete: '删除卷', vol_del_attached: '卷已挂载到运行中虚拟机',
+    vol_no_vm: '不挂载（独立卷）', vol_iops_ph: '0 表示不限制',
+    // —— 快照操作 ——
+    snap_revert_confirm: '确认回滚 {vm} 到快照「{name}」？回滚后当前未保存的状态将丢失。',
+    snap_del_confirm: '确认删除快照「{name}」？', snap_del_current: '当前快照不可删除',
 
     // 迁移控制台补充
     mig_console_title: '发起热迁移', mig_target_host: '目标宿主机',
@@ -227,7 +247,7 @@ const dict = {
     nav_avail_ha: 'HA 配置', nav_avail_migration: '迁移中心', nav_avail_backup: '备份恢复',
     nav_storage_pools: '存储池', nav_storage_volumes: '卷管理', nav_storage_snapshots: '快照树',
     nav_net_vswitch: '虚拟交换机', nav_net_vlan: 'VLAN 配置', nav_net_topology: '网络拓扑',
-    nav_mon_realtime: '实时监控', nav_mon_history: '历史性能', nav_mon_rules: '告警规则',
+    nav_mon_overview: '总览', nav_mon_realtime: '实时监控', nav_mon_history: '历史性能', nav_mon_rules: '告警规则',
     nav_acc_users: '用户管理', nav_acc_roles: '角色权限', nav_acc_audit: '操作审计',
     nav_sys_config: '基础配置', nav_sys_license: 'License 管理', nav_sys_about: '关于系统',
 
@@ -263,7 +283,7 @@ const dict = {
     // ===== 通用操作 / 工具栏 / CRUD / 对话框 =====
     op_new: '新建', op_edit: '编辑', op_delete: '删除', op_batch: '批量操作',
     op_filter: '筛选', op_search: '搜索', op_refresh: '刷新', op_reset: '重置',
-    op_confirm: '确定', op_cancel: '取消', op_save: '保存', op_close: '关闭',
+    op_confirm: '确定', op_failed: '操作被阻止', op_cancel: '取消', op_save: '保存', op_close: '关闭',
     op_selected_n: '已选 {n} 项', op_batch_delete: '批量删除', op_batch_start: '批量启动', op_batch_stop: '批量关机',
     op_select_all: '全选', op_actions: '操作', op_no_data: '暂无数据',
     op_total_n: '共 {n} 条', op_page_prev: '上一页', op_page_next: '下一页', op_page_of: '第 {c}/{t} 页',
@@ -323,7 +343,17 @@ const dict = {
     // ===== 监控 · 告警规则 =====
     rule_title: '告警规则', rule_add: '新建规则', rule_name: '规则名', rule_metric: '监控指标',
     rule_condition: '触发条件', rule_severity: '级别', rule_triggered: '触发次数', rule_channel: '通知渠道', rule_enabled: '启用',
-    sev_critical: '严重', sev_warning: '警告',
+    sev_critical: '严重', sev_warning: '警告', sev_info: '提示',
+    // —— 监控总览 KPI / 健康度 / 图表 ——
+    mon_overview: '总览', mon_health: '系统健康度', mon_health_healthy: '健康', mon_health_warning: '亚健康', mon_health_critical: '告警',
+    mon_kpi_hosts: '在线主机', mon_kpi_vms: '运行虚拟机', mon_kpi_cpu: '集群 CPU', mon_kpi_mem: '集群内存',
+    mon_kpi_storage: '存储用量', mon_kpi_alerts: '活跃告警', mon_kpi_gpu: 'GPU 占用', mon_kpi_overcommit: 'vCPU 超分',
+    mon_chart_cpumem: 'CPU / 内存利用率趋势', mon_chart_net: '网络吞吐 (Mbps)', mon_chart_iops: '存储 IOPS 趋势',
+    mon_net_in: '入向', mon_net_out: '出向', mon_realtime_hosts: '主机实时负载', mon_no_alerts: '无活跃告警',
+    // —— 告警规则 CRUD ——
+    rule_create_title: '新建告警规则', rule_edit_title: '编辑告警规则', rule_metric_ph: '如 host.cpu_usage',
+    rule_cond_ph: '如 > 90% 持续 5 分钟', rule_del_confirm: '确认删除告警规则「{name}」？',
+    rule_op_edit: '编辑', rule_op_del: '删除', rule_op_toggle: '启用/停用',
 
     // ===== 访问控制 · 用户 / 审计 =====
     acc_users_title: '用户列表', acc_add_user: '新建用户', acc_username: '用户名', acc_display_name: '显示名',
@@ -495,6 +525,26 @@ const dict = {
 
     st_capacity: 'Capacity', st_read_iops: 'Read IOPS', st_write_iops: 'Write IOPS',
     st_latency: 'Latency', st_active: 'Active', st_shared: 'Shared Storage', st_local: 'Local Storage',
+    // —— Storage pool wizard / CRUD ——
+    sp_pools: 'Storage Pools', sp_add: 'New Storage Pool', sp_create_title: 'New Storage Pool', sp_cluster: 'Cluster',
+    sp_name: 'Pool Name', sp_name_ph: 'e.g. prod-ssd-pool', sp_type: 'Storage Type', sp_capacity: 'Capacity (TB)',
+    sp_volumes: 'Volumes', sp_free: 'Free', sp_delete: 'Delete Pool',
+    sp_type_local: 'Local Directory', sp_type_local_d: 'Host-local disk/directory, non-shared, highest performance',
+    sp_type_nfs: 'NFS Share', sp_type_nfs_d: 'NFS network share, shareable across hosts',
+    sp_type_iscsi: 'iSCSI', sp_type_iscsi_d: 'IP-SAN block storage via iSCSI target',
+    sp_type_fc: 'FC SAN', sp_type_fc_d: 'Fibre Channel SAN, enterprise high-throughput low-latency',
+    sp_type_dist: 'Distributed', sp_type_dist_d: 'Scale-out distributed block storage, 3-replica HA',
+    sp_f_target_path: 'Local Path', sp_f_nfs_server: 'NFS Server', sp_f_nfs_export: 'Export Path',
+    sp_f_iscsi_portal: 'iSCSI Portal', sp_f_iscsi_iqn: 'Target IQN',
+    sp_f_fc_wwpn: 'WWPN', sp_f_dist_monitors: 'Monitors', sp_f_dist_pool: 'Pool Name',
+    sp_step_type: 'Select Type', sp_step_conn: 'Connection', sp_step_basic: 'Basics',
+    sp_conn_hint: 'Provide the connection parameters for this storage type', sp_del_has_vol: 'Pool still has volumes, delete them first',
+    // —— Volume CRUD ——
+    vol_create_title: 'New Volume', vol_create: 'Create', vol_delete: 'Delete Volume', vol_del_attached: 'Volume attached to running VM',
+    vol_no_vm: 'Unattached', vol_iops_ph: '0 = unlimited',
+    // —— Snapshot ops ——
+    snap_revert_confirm: 'Revert {vm} to snapshot "{name}"? Unsaved current state will be lost.',
+    snap_del_confirm: 'Delete snapshot "{name}"?', snap_del_current: 'Current snapshot cannot be deleted',
 
     mig_console_title: 'Start Live Migration', mig_target_host: 'Target Host',
     mig_live2: 'Live migration (zero downtime)', mig_storage2: 'Storage migration (non-shared disk)',
@@ -544,7 +594,7 @@ const dict = {
     nav_avail_ha: 'HA Config', nav_avail_migration: 'Migration', nav_avail_backup: 'Backup',
     nav_storage_pools: 'Storage Pools', nav_storage_volumes: 'Volumes', nav_storage_snapshots: 'Snapshots',
     nav_net_vswitch: 'vSwitches', nav_net_vlan: 'VLANs', nav_net_topology: 'Topology',
-    nav_mon_realtime: 'Real-time', nav_mon_history: 'History', nav_mon_rules: 'Alert Rules',
+    nav_mon_overview: 'Overview', nav_mon_realtime: 'Real-time', nav_mon_history: 'History', nav_mon_rules: 'Alert Rules',
     nav_acc_users: 'Users', nav_acc_roles: 'Roles & Privileges', nav_acc_audit: 'Audit Log',
     nav_sys_config: 'General', nav_sys_license: 'License', nav_sys_about: 'About',
 
@@ -580,7 +630,7 @@ const dict = {
     // ===== Common ops / toolbar / CRUD / dialog =====
     op_new: 'New', op_edit: 'Edit', op_delete: 'Delete', op_batch: 'Batch',
     op_filter: 'Filter', op_search: 'Search', op_refresh: 'Refresh', op_reset: 'Reset',
-    op_confirm: 'OK', op_cancel: 'Cancel', op_save: 'Save', op_close: 'Close',
+    op_confirm: 'OK', op_failed: 'Operation Blocked', op_cancel: 'Cancel', op_save: 'Save', op_close: 'Close',
     op_selected_n: '{n} selected', op_batch_delete: 'Batch Delete', op_batch_start: 'Batch Start', op_batch_stop: 'Batch Stop',
     op_select_all: 'Select All', op_actions: 'Actions', op_no_data: 'No data',
     op_total_n: '{n} total', op_page_prev: 'Prev', op_page_next: 'Next', op_page_of: 'Page {c}/{t}',
@@ -639,7 +689,15 @@ const dict = {
     // ===== Monitoring alert rules =====
     rule_title: 'Alert Rules', rule_add: 'New Rule', rule_name: 'Rule', rule_metric: 'Metric',
     rule_condition: 'Condition', rule_severity: 'Severity', rule_triggered: 'Triggered', rule_channel: 'Channel', rule_enabled: 'Enabled',
-    sev_critical: 'Critical', sev_warning: 'Warning',
+    sev_critical: 'Critical', sev_warning: 'Warning', sev_info: 'Info',
+    mon_overview: 'Overview', mon_health: 'System Health', mon_health_healthy: 'Healthy', mon_health_warning: 'Degraded', mon_health_critical: 'Critical',
+    mon_kpi_hosts: 'Hosts Online', mon_kpi_vms: 'Running VMs', mon_kpi_cpu: 'Cluster CPU', mon_kpi_mem: 'Cluster Memory',
+    mon_kpi_storage: 'Storage Usage', mon_kpi_alerts: 'Active Alerts', mon_kpi_gpu: 'GPU Utilization', mon_kpi_overcommit: 'vCPU Overcommit',
+    mon_chart_cpumem: 'CPU / Memory Utilization Trend', mon_chart_net: 'Network Throughput (Mbps)', mon_chart_iops: 'Storage IOPS Trend',
+    mon_net_in: 'Inbound', mon_net_out: 'Outbound', mon_realtime_hosts: 'Host Realtime Load', mon_no_alerts: 'No active alerts',
+    rule_create_title: 'New Alert Rule', rule_edit_title: 'Edit Alert Rule', rule_metric_ph: 'e.g. host.cpu_usage',
+    rule_cond_ph: 'e.g. > 90% for 5 min', rule_del_confirm: 'Delete alert rule "{name}"?',
+    rule_op_edit: 'Edit', rule_op_del: 'Delete', rule_op_toggle: 'Enable / Disable',
 
     // ===== Access control =====
     acc_users_title: 'Users', acc_add_user: 'New User', acc_username: 'Username', acc_display_name: 'Display Name',

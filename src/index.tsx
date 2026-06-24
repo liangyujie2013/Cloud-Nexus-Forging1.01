@@ -315,18 +315,147 @@ app.get(`${API}/backup-jobs`, (c) => c.json(mockData.backup_jobs))
 
 // ============================================================================
 //  模块 5 · 存储管理 storage：存储池 / 卷管理 / 快照树
+//
+//  完整存储添加逻辑（与真实虚拟化平台一致）：
+//    存储池(后端，须选类型+连接参数) ──► 卷(在池上分配的虚拟磁盘) ──► 挂载给虚拟机
+//    · 支持类型：local 本地目录 / nfs / iscsi / fc 光纤 / distributed 分布式
+//    · 删除约束：池上仍有卷 → 阻止；卷已挂载到运行中 VM → 阻止
 // ============================================================================
-app.get(`${API}/storage-pools`, (c) => c.json(mockData.storage_pools))
+
+// 存储池支持的类型（前端创建向导据此渲染连接参数表单）
+const STORAGE_POOL_TYPES = [
+  { type: 'local', shared: false, fields: ['target_path'] },
+  { type: 'nfs', shared: true, fields: ['nfs_server', 'nfs_export'] },
+  { type: 'iscsi', shared: true, fields: ['iscsi_portal', 'iscsi_iqn'] },
+  { type: 'fc', shared: true, fields: ['fc_wwpn'] },
+  { type: 'distributed', shared: true, fields: ['dist_monitors', 'dist_pool'] },
+]
+
+// 存储池（带聚合统计 + 集群归属名 + 卷数量）
+function computeStoragePools() {
+  return mockData.storage_pools.map((p) => {
+    const poolVols = mockData.volumes.filter((v) => v.pool === p.name)
+    const cl = mockData.clusters.find((c2) => c2.id === p.cluster_id)
+    return {
+      ...p,
+      cluster_name: cl?.name || '未分配',
+      volume_count: poolVols.length,
+      free_tb: +(p.capacity_tb - p.used_tb).toFixed(1),
+      usage_pct: Math.round((p.used_tb / p.capacity_tb) * 100),
+    }
+  })
+}
+
+app.get(`${API}/storage-pool-types`, (c) => c.json(STORAGE_POOL_TYPES))
+app.get(`${API}/storage-pools`, (c) => c.json(computeStoragePools()))
 app.get(`${API}/volumes`, (c) => c.json(mockData.volumes))
 app.get(`${API}/snapshots`, (c) => c.json(mockData.snapshots))
+
+// ---- 创建存储池（必选类型 + 类型对应连接参数 + 集群归属；名称去重）----
+app.post(`${API}/storage-pools`, async (c) => {
+  const b = await c.req.json<any>()
+  if (!b.name || !b.type) return c.json({ error: '名称与类型必填', code: 'INVALID' }, 400)
+  if (mockData.storage_pools.find((p) => p.name === b.name))
+    return c.json({ error: `存储池名称 ${b.name} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  const typeDef = STORAGE_POOL_TYPES.find((t) => t.type === b.type)
+  if (!typeDef) return c.json({ error: '不支持的存储类型', code: 'BAD_TYPE' }, 400)
+  const pool = {
+    id: Date.now(),
+    cluster_id: Number(b.cluster_id) || 1,
+    name: b.name,
+    type: b.type,
+    capacity_tb: Number(b.capacity_tb) || 10,
+    used_tb: 0,
+    shared: typeDef.shared,
+    status: 'active',
+    read_iops: 0, write_iops: 0, latency: 0,
+    conn: b.conn || {},
+  }
+  mockData.storage_pools.push(pool as any)
+  return c.json({ ...pool, message: `存储池 ${pool.name}（${pool.type.toUpperCase()}）已创建` })
+})
+
+// ---- 删除存储池（约束：池上仍有卷则阻止）----
+app.delete(`${API}/storage-pools/:id`, (c) => {
+  const id = Number(c.req.param('id'))
+  const pool = mockData.storage_pools.find((p) => p.id === id)
+  if (!pool) return c.json({ error: '存储池不存在', code: 'NOT_FOUND' }, 404)
+  const vols = mockData.volumes.filter((v) => v.pool === pool.name)
+  if (vols.length > 0)
+    return c.json({ error: `存储池上仍有 ${vols.length} 个卷，请先删除卷`, code: 'HAS_VOLUMES', children: vols.map((v) => v.name) }, 409)
+  mockData.storage_pools = mockData.storage_pools.filter((p) => p.id !== id)
+  return c.json({ id, deleted: true, message: '存储池已删除' })
+})
+
+// ---- 创建卷（选池 + 格式 + 容量 + 总线；可选挂载 VM；名称去重）----
+app.post(`${API}/volumes`, async (c) => {
+  const b = await c.req.json<any>()
+  if (!b.name || !b.pool) return c.json({ error: '名称与存储池必填', code: 'INVALID' }, 400)
+  if (mockData.volumes.find((v) => v.name === b.name))
+    return c.json({ error: `卷名称 ${b.name} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  const pool = mockData.storage_pools.find((p) => p.name === b.pool)
+  if (!pool) return c.json({ error: '目标存储池不存在', code: 'POOL_NOT_FOUND' }, 404)
+  const vol = {
+    id: Date.now(),
+    name: b.name, pool: b.pool, vm: b.vm || '-',
+    format: b.format || 'qcow2',
+    size_gb: Number(b.size_gb) || 20,
+    used_gb: 0,
+    bus: b.bus || 'virtio-scsi',
+    iops_limit: Number(b.iops_limit) || 0,
+  }
+  mockData.volumes.push(vol as any)
+  return c.json({ ...vol, message: `卷 ${vol.name}（${vol.size_gb}GB / ${vol.format}）已在 ${vol.pool} 创建` })
+})
+
+// ---- 删除卷（约束：已挂载到运行中 VM 则阻止）----
+app.delete(`${API}/volumes/:id`, (c) => {
+  const id = Number(c.req.param('id'))
+  const vol = mockData.volumes.find((v) => v.id === id)
+  if (!vol) return c.json({ error: '卷不存在', code: 'NOT_FOUND' }, 404)
+  const attachedVm = mockData.vms.find((v) => v.name === vol.vm && v.status === 'running')
+  if (attachedVm)
+    return c.json({ error: `卷已挂载到运行中的虚拟机 ${attachedVm.name}，请先卸载或关机`, code: 'ATTACHED_RUNNING', children: [attachedVm.name] }, 409)
+  mockData.volumes = mockData.volumes.filter((v) => v.id !== id)
+  return c.json({ id, deleted: true, message: '卷已删除' })
+})
+
+// ---- 创建快照 ----
 app.post(`${API}/snapshots`, async (c) => {
-  const body = await c.req.json<{ vm: string; name: string; with_memory?: boolean; quiesce?: boolean }>()
-  return c.json({
-    id: 999, vm: body.vm, name: body.name,
-    with_memory: !!body.with_memory, quiesce: !!body.quiesce,
-    status: 'success',
-    message: '（原型）快照已创建' + (body.with_memory ? '（含内存+NVRAM）' : '（仅磁盘）'),
-  })
+  const b = await c.req.json<{ vm: string; name: string; description?: string; with_memory?: boolean; quiesce?: boolean }>()
+  const vm = mockData.vms.find((v) => v.name === b.vm)
+  // 同一 VM 的当前快照置为非当前
+  mockData.snapshots.forEach((s) => { if (s.vm === b.vm) s.current = false })
+  const snap = {
+    id: Date.now(), vm_id: vm?.id || 0, vm: b.vm, name: b.name, description: b.description || '',
+    with_memory: !!b.with_memory, quiesce: !!b.quiesce,
+    size_gb: b.with_memory ? +(vm ? vm.mem_gb * 0.4 + 4 : 64).toFixed(1) : +(Math.random() * 8 + 2).toFixed(1),
+    parent: mockData.snapshots.filter((s) => s.vm === b.vm).slice(-1)[0]?.name || null,
+    created_at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    current: true,
+  }
+  mockData.snapshots.push(snap as any)
+  return c.json({ ...snap, message: '快照已创建' + (b.with_memory ? '（含内存+NVRAM）' : '（仅磁盘）') })
+})
+
+// ---- 回滚到快照（该快照置为当前）----
+app.post(`${API}/snapshots/:id/revert`, (c) => {
+  const id = Number(c.req.param('id'))
+  const snap = mockData.snapshots.find((s) => s.id === id)
+  if (!snap) return c.json({ error: '快照不存在', code: 'NOT_FOUND' }, 404)
+  mockData.snapshots.forEach((s) => { if (s.vm === snap.vm) s.current = false })
+  snap.current = true
+  return c.json({ id, vm: snap.vm, name: snap.name, message: `已回滚 ${snap.vm} 到快照「${snap.name}」` })
+})
+
+// ---- 删除快照（约束：当前快照不可删）----
+app.delete(`${API}/snapshots/:id`, (c) => {
+  const id = Number(c.req.param('id'))
+  const snap = mockData.snapshots.find((s) => s.id === id)
+  if (!snap) return c.json({ error: '快照不存在', code: 'NOT_FOUND' }, 404)
+  if (snap.current) return c.json({ error: '当前快照不可删除，请先回滚到其他快照', code: 'IS_CURRENT' }, 409)
+  mockData.snapshots = mockData.snapshots.filter((s) => s.id !== id)
+  return c.json({ id, deleted: true, message: '快照已删除' })
 })
 
 // ============================================================================
@@ -371,7 +500,93 @@ app.get(`${API}/network/topology`, (c) => {
 // ============================================================================
 //  模块 7 · 监控告警 monitoring：实时监控 / 历史性能 / 告警规则
 // ============================================================================
+
+// ---- 监控总览：集群级关键指标聚合（KPI 卡 + 健康度）----
+app.get(`${API}/monitoring/overview`, (c) => {
+  const hosts = mockData.hosts
+  const onlineHosts = hosts.filter((h) => h.status === 'connected')
+  const vms = mockData.vms
+  const totalVcpus = hosts.reduce((s, h) => s + h.vcpus, 0)
+  const usedVcpus = vms.filter((v) => v.status === 'running').reduce((s, v) => s + v.vcpus, 0)
+  const totalMemGb = hosts.reduce((s, h) => s + h.mem_total_gb, 0)
+  const usedMemGb = hosts.reduce((s, h) => s + h.mem_used_gb, 0)
+  const totalCapTb = mockData.storage_pools.reduce((s, p) => s + p.capacity_tb, 0)
+  const usedCapTb = mockData.storage_pools.reduce((s, p) => s + p.used_tb, 0)
+  const avgCpu = onlineHosts.length ? Math.round(onlineHosts.reduce((s, h) => s + h.cpu_usage, 0) / onlineHosts.length) : 0
+  const activeAlerts = mockData.alert_rules.filter((r) => r.enabled && r.triggered > 0).reduce((s, r) => s + r.triggered, 0)
+  return c.json({
+    kpis: {
+      hosts_online: onlineHosts.length, hosts_total: hosts.length,
+      vms_running: vms.filter((v) => v.status === 'running').length, vms_total: vms.length,
+      cpu_usage_pct: avgCpu,
+      mem_usage_pct: Math.round((usedMemGb / totalMemGb) * 100),
+      vcpu_overcommit: +(usedVcpus / totalVcpus).toFixed(2),
+      storage_usage_pct: Math.round((usedCapTb / totalCapTb) * 100),
+      storage_used_tb: +usedCapTb.toFixed(1), storage_total_tb: +totalCapTb.toFixed(1),
+      active_alerts: activeAlerts,
+      gpus_total: mockData.gpus.length,
+      gpus_busy: mockData.gpus.filter((g) => g.status === 'assigned').length,
+    },
+    // 健康度评分（综合 CPU/内存/存储/告警）
+    health: (() => {
+      let score = 100
+      if (avgCpu > 80) score -= 15; else if (avgCpu > 65) score -= 6
+      const memPct = Math.round((usedMemGb / totalMemGb) * 100)
+      if (memPct > 85) score -= 15; else if (memPct > 70) score -= 6
+      score -= activeAlerts * 5
+      score = Math.max(40, score)
+      return { score, level: score >= 85 ? 'healthy' : score >= 65 ? 'warning' : 'critical' }
+    })(),
+  })
+})
+
+// ---- 历史性能时序（最近 N 个采样点，用于折线图）----
+app.get(`${API}/monitoring/history`, (c) => {
+  const points = Number(c.req.query('points')) || 24
+  const now = Date.now()
+  const seed = (base: number, amp: number, i: number, phase = 0) =>
+    Math.max(0, Math.min(100, +(base + amp * Math.sin((i / 4) + phase) + (Math.random() - 0.5) * 6).toFixed(1)))
+  const series = Array.from({ length: points }, (_, i) => {
+    const idx = points - 1 - i
+    return {
+      t: new Date(now - idx * 3600_000).toISOString().slice(11, 16),
+      cpu: seed(58, 14, i, 0),
+      mem: seed(64, 8, i, 1),
+      net_in: +(Math.max(0, 420 + 180 * Math.sin(i / 3) + (Math.random() - 0.5) * 120)).toFixed(0),
+      net_out: +(Math.max(0, 310 + 140 * Math.sin(i / 3 + 1) + (Math.random() - 0.5) * 100)).toFixed(0),
+      iops: +(Math.max(0, 38000 + 12000 * Math.sin(i / 5) + (Math.random() - 0.5) * 8000)).toFixed(0),
+    }
+  })
+  return c.json({ points, series })
+})
+
+// ---- 告警规则 CRUD ----
 app.get(`${API}/alert-rules`, (c) => c.json(mockData.alert_rules))
+app.post(`${API}/alert-rules`, async (c) => {
+  const b = await c.req.json<any>()
+  if (!b.name || !b.metric) return c.json({ error: '名称与指标必填', code: 'INVALID' }, 400)
+  const rule = {
+    id: Date.now(), name: b.name, metric: b.metric,
+    condition: b.condition || '> 80%', severity: b.severity || 'warning',
+    triggered: 0, channel: b.channel || '邮件', enabled: b.enabled !== false,
+  }
+  mockData.alert_rules.push(rule as any)
+  return c.json({ ...rule, message: `告警规则「${rule.name}」已创建` })
+})
+app.put(`${API}/alert-rules/:id`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const b = await c.req.json<any>()
+  const rule = mockData.alert_rules.find((r) => r.id === id)
+  if (!rule) return c.json({ error: '规则不存在', code: 'NOT_FOUND' }, 404)
+  Object.assign(rule, b)
+  return c.json({ ...rule, message: '告警规则已更新' })
+})
+app.delete(`${API}/alert-rules/:id`, (c) => {
+  const id = Number(c.req.param('id'))
+  mockData.alert_rules = mockData.alert_rules.filter((r) => r.id !== id)
+  return c.json({ id, deleted: true, message: '告警规则已删除' })
+})
+
 app.get(`${API}/notifications`, (c) => c.json(mockData.notifications))
 // 一次性指标快照（SSE 不可用时回退）
 app.get(`${API}/monitoring/metrics`, (c) => c.json(genMetrics()))
