@@ -210,6 +210,11 @@ app.post(`${API}/clusters`, async (c) => {
     ha_enabled: b.ha_enabled !== false, drs_enabled: !!b.drs_enabled,
     overcommit_cpu: Number(b.overcommit_cpu) || 4.0, status: 'healthy',
     created_at: new Date().toISOString(), hosts: 0, vms: 0, evc_mode: b.evc_mode || '-',
+    // 时间同步（NTP）：HA 时间一致性基础。internal=集群内部 NTP 源（推荐，不依赖外网），external=外部源
+    ntp_mode: b.ntp_mode === 'external' ? 'external' : 'internal',
+    ntp_internal_server: b.ntp_internal_server || '',
+    ntp_servers: Array.isArray(b.ntp_servers) ? b.ntp_servers : (b.ntp_servers ? String(b.ntp_servers).split(',').map((s: string) => s.trim()).filter(Boolean) : []),
+    max_clock_offset_ms: Number(b.max_clock_offset_ms) || 100,
   }
   mockData.clusters.push(cl as any)
   return c.json({ ...cl, datacenter_name: dc.name, message: `集群 ${cl.name} 已在 ${dc.name} 创建` })
@@ -228,6 +233,11 @@ app.put(`${API}/clusters/:id`, async (c) => {
   if (b.drs_enabled !== undefined) cl.drs_enabled = b.drs_enabled
   if (b.overcommit_cpu !== undefined) cl.overcommit_cpu = Number(b.overcommit_cpu)
   if (b.datacenter_id) { const dc = mockData.datacenters.find((d) => d.id === Number(b.datacenter_id)); if (dc) cl.datacenter_id = dc.id }
+  // NTP / 时间同步配置更新
+  if (b.ntp_mode !== undefined) (cl as any).ntp_mode = b.ntp_mode === 'external' ? 'external' : 'internal'
+  if (b.ntp_internal_server !== undefined) (cl as any).ntp_internal_server = b.ntp_internal_server
+  if (b.ntp_servers !== undefined) (cl as any).ntp_servers = Array.isArray(b.ntp_servers) ? b.ntp_servers : String(b.ntp_servers).split(',').map((s: string) => s.trim()).filter(Boolean)
+  if (b.max_clock_offset_ms !== undefined) (cl as any).max_clock_offset_ms = Number(b.max_clock_offset_ms) || 100
   return c.json({ ...cl, message: '集群已更新' })
 })
 

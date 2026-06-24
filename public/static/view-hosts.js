@@ -185,6 +185,7 @@ const HostsView = {
         { key: 'libvirt_service', icon: 'fa-server', ...c.libvirt_service },
         { key: 'resource_availability', icon: 'fa-gauge-high', ...c.resource_availability },
         { key: 'fencing_capability', icon: 'fa-plug-circle-bolt', ...c.fencing_capability },
+        { key: 'time_sync', icon: 'fa-clock', ...c.time_sync },
       ]
     })
     const haStatusColor = (s) => (s === 'pass' ? C.green : s === 'warn' ? C.orange : C.red)
@@ -485,6 +486,12 @@ const HostsView = {
               <template v-else-if="ck.key==='fencing_capability'">
                 <span>IPMI: <b>{{ ck.ipmi_accessible ? 'OK' : 'N/A' }}</b></span>
                 <span>{{ t('ha_fence_agent') }}: <b>{{ ck.fence_agent_configured ? 'OK' : 'N/A' }}</b></span>
+              </template>
+              <template v-else-if="ck.key==='time_sync'">
+                <span>{{ t('ha_clock_offset') }}: <b>{{ ck.clock_offset_ms == null ? '—' : ck.clock_offset_ms + 'ms' }}</b></span>
+                <span>{{ t('ha_offset_thresh') }}: <b>{{ ck.max_offset_ms }}ms</b></span>
+                <span v-if="ck.is_ntp_server" class="hw-chip" style="background:rgba(0,122,255,.12);color:var(--color-blue)"><i class="fas fa-server"></i> {{ t('ha_ntp_server') }}</span>
+                <span v-else>{{ t('ha_ntp_source') }}: <b>{{ ck.ntp_source }}</b></span>
               </template>
             </div>
           </div>

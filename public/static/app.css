@@ -911,3 +911,8 @@
 .dgs-item { padding: 10px 4px; background: var(--bg-secondary); border-radius: var(--radius-md); }
 .dgs-num { font-size: 22px; font-weight: 700; line-height: 1.1; }
 .dgs-item .muted { font-size: 12px; margin-top: 2px; }
+
+/* ===== 集群创建/编辑：时间同步（NTP）配置区 ===== */
+.ntp-fieldset { margin-top: 16px; padding: 14px; border: 1px solid var(--separator); border-radius: var(--radius-md); background: var(--bg-secondary); }
+.ntp-legend { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+.ntp-legend i { color: var(--color-blue); }

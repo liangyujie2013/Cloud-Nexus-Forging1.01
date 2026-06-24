@@ -301,6 +301,10 @@ const dict = {
     dc_desc: '描述', dc_desc_ph: '用途 / 备注（可选）',
     cl_create: '新建集群', cl_edit: '编辑集群', cl_name_ph: '如：生产集群 Prod-A',
     cl_desc_ph: '用途 / 备注（可选）', cl_ha: 'HA 高可用',
+    cl_ntp_title: '时间同步（NTP）', cl_ntp_hint: '启用 HA 时强烈建议，确保各主机时间一致',
+    cl_ntp_mode: 'NTP 模式', cl_ntp_internal: '内部 NTP 源（集群内主机授时，推荐）', cl_ntp_external: '外部 NTP 源',
+    cl_ntp_offset: '最大时钟偏移 (ms)', cl_ntp_server: '内部 NTP 服务端', cl_ntp_auto: '自动选择（首台在线主机）',
+    cl_ntp_servers: '外部 NTP 服务器', cl_ntp_no_host: '集群尚无主机，纳管主机后可指定其一作为内部 NTP 服务端（暂自动选择）。',
 
     // ===== 用户管理（完整 CRUD + 配额）=====
     user_st_active: '正常', user_st_disabled: '已禁用', user_st_locked: '已锁定',
@@ -426,8 +430,9 @@ const dict = {
     hw_storage_dev: '存储设备', hw_dev_name: '设备', hw_capacity: '容量', hw_interface: '接口', hw_rpm: '转速', hw_temp: '温度', hw_usage: '使用率',
     hw_pci_dev: 'PCI 设备', hw_dev_class: '设备类别', hw_driver: '驱动', hw_passthrough: '可直通',
     ha_health_score: 'HA 健康分', ha_last_check: '最后检查', ha_interval: '检查间隔', ha_enabled_on: 'HA 已启用', ha_enabled_off: 'HA 未启用',
-    ha_check_network_heartbeat: '网络心跳', ha_check_storage_heartbeat: '存储心跳', ha_check_libvirt_service: '虚拟化服务', ha_check_resource_availability: '资源可用性', ha_check_fencing_capability: 'Fencing（STONITH）',
+    ha_check_network_heartbeat: '网络心跳', ha_check_storage_heartbeat: '存储心跳', ha_check_libvirt_service: '虚拟化服务', ha_check_resource_availability: '资源可用性', ha_check_fencing_capability: 'Fencing（STONITH）', ha_check_time_sync: '时间同步（NTP）',
     ha_resp: '响应时间', ha_loss: '丢包率', ha_fails: '连续失败', ha_lat: '延迟', ha_lock: '锁文件', ha_failover_cap: '故障转移容量', ha_fence_agent: 'Fence 代理',
+    ha_clock_offset: '时钟偏移', ha_offset_thresh: '偏移阈值', ha_ntp_server: '内部 NTP 服务端', ha_ntp_source: 'NTP 源',
     ha_events: '最近 HA 事件', ha_affected: '受影响虚拟机', ha_no_events: '近期无 HA 事件',
     ha_overall_healthy: '健康', ha_overall_degraded: '降级', ha_overall_failed: '故障',
   },
@@ -701,6 +706,10 @@ const dict = {
     dc_desc: 'Description', dc_desc_ph: 'Purpose / notes (optional)',
     cl_create: 'New Cluster', cl_edit: 'Edit Cluster', cl_name_ph: 'e.g. Prod Cluster Prod-A',
     cl_desc_ph: 'Purpose / notes (optional)', cl_ha: 'HA',
+    cl_ntp_title: 'Time Sync (NTP)', cl_ntp_hint: 'Strongly recommended with HA to keep host clocks consistent',
+    cl_ntp_mode: 'NTP Mode', cl_ntp_internal: 'Internal NTP source (host-served, recommended)', cl_ntp_external: 'External NTP source',
+    cl_ntp_offset: 'Max Clock Offset (ms)', cl_ntp_server: 'Internal NTP Server', cl_ntp_auto: 'Auto (first online host)',
+    cl_ntp_servers: 'External NTP Servers', cl_ntp_no_host: 'No hosts yet; after adding hosts you can designate one as the internal NTP server (auto for now).',
 
     // ===== User management (full CRUD + quota) =====
     user_st_active: 'Active', user_st_disabled: 'Disabled', user_st_locked: 'Locked',
@@ -822,8 +831,9 @@ const dict = {
     hw_storage_dev: 'Storage Devices', hw_dev_name: 'Device', hw_capacity: 'Capacity', hw_interface: 'Interface', hw_rpm: 'RPM', hw_temp: 'Temp', hw_usage: 'Usage',
     hw_pci_dev: 'PCI Devices', hw_dev_class: 'Class', hw_driver: 'Driver', hw_passthrough: 'Passthrough',
     ha_health_score: 'HA Health Score', ha_last_check: 'Last check', ha_interval: 'Check interval', ha_enabled_on: 'HA Enabled', ha_enabled_off: 'HA Disabled',
-    ha_check_network_heartbeat: 'Network Heartbeat', ha_check_storage_heartbeat: 'Storage Heartbeat', ha_check_libvirt_service: 'Virtualization Service', ha_check_resource_availability: 'Resource Availability', ha_check_fencing_capability: 'Fencing (STONITH)',
+    ha_check_network_heartbeat: 'Network Heartbeat', ha_check_storage_heartbeat: 'Storage Heartbeat', ha_check_libvirt_service: 'Virtualization Service', ha_check_resource_availability: 'Resource Availability', ha_check_fencing_capability: 'Fencing (STONITH)', ha_check_time_sync: 'Time Sync (NTP)',
     ha_resp: 'Response', ha_loss: 'Packet Loss', ha_fails: 'Consec. Failures', ha_lat: 'Latency', ha_lock: 'Lock File', ha_failover_cap: 'Failover Capacity', ha_fence_agent: 'Fence Agent',
+    ha_clock_offset: 'Clock Offset', ha_offset_thresh: 'Offset Threshold', ha_ntp_server: 'Internal NTP Server', ha_ntp_source: 'NTP Source',
     ha_events: 'Recent HA Events', ha_affected: 'Affected VMs', ha_no_events: 'No recent HA events',
     ha_overall_healthy: 'Healthy', ha_overall_degraded: 'Degraded', ha_overall_failed: 'Failed',
   },

@@ -63,8 +63,10 @@ const InfrastructureView = {
     //  集群：创建 / 编辑对话框
     // ============================================================
     const clDlg = ref({ open: false, mode: 'create', id: null, form: {}, err: {}, saving: false })
-    const openClCreate = () => { clDlg.value = { open: true, mode: 'create', id: null, form: { name: '', datacenter_id: (datacenters.value[0] && datacenters.value[0].id) || '', description: '', ha_enabled: true, drs_enabled: false, overcommit_cpu: 4.0 }, err: {}, saving: false } }
-    const openClEdit = (cl) => { clDlg.value = { open: true, mode: 'edit', id: cl.id, form: { name: cl.name, datacenter_id: cl.datacenter_id, description: cl.description || '', ha_enabled: cl.ha_enabled, drs_enabled: cl.drs_enabled, overcommit_cpu: cl.overcommit_cpu }, err: {}, saving: false } }
+    const openClCreate = () => { clDlg.value = { open: true, mode: 'create', id: null, form: { name: '', datacenter_id: (datacenters.value[0] && datacenters.value[0].id) || '', description: '', ha_enabled: true, drs_enabled: false, overcommit_cpu: 4.0, ntp_mode: 'internal', ntp_internal_server: '', ntp_servers: 'pool.ntp.org, ntp.aliyun.com', max_clock_offset_ms: 100 }, err: {}, saving: false } }
+    const openClEdit = (cl) => { clDlg.value = { open: true, mode: 'edit', id: cl.id, form: { name: cl.name, datacenter_id: cl.datacenter_id, description: cl.description || '', ha_enabled: cl.ha_enabled, drs_enabled: cl.drs_enabled, overcommit_cpu: cl.overcommit_cpu, ntp_mode: cl.ntp_mode || 'internal', ntp_internal_server: cl.ntp_internal_server || '', ntp_servers: Array.isArray(cl.ntp_servers) ? cl.ntp_servers.join(', ') : (cl.ntp_servers || ''), max_clock_offset_ms: cl.max_clock_offset_ms || 100 }, err: {}, saving: false } }
+    // 内部 NTP 源候选：当前编辑集群下的主机（创建时尚无主机，下拉为空，提示纳管后再指定）
+    const clNtpHosts = computed(() => clDlg.value.id ? hosts.value.filter((h) => h.cluster_id === clDlg.value.id) : [])
     const saveCl = async () => {
       const f = clDlg.value.form; const err = {}
       if (!f.name || !f.name.trim()) err.name = t('op_required')
@@ -132,7 +134,7 @@ const InfrastructureView = {
       expandedHost, toggleHost, blockDlg, addHost,
       delDatacenter, delCluster, delHost,
       dcDlg, openDcCreate, openDcEdit, saveDc,
-      clDlg, openClCreate, openClEdit, saveCl,
+      clDlg, openClCreate, openClEdit, saveCl, clNtpHosts,
       focusId, focusType, sharesLabel, t,
     }
   },
@@ -343,6 +345,38 @@ const InfrastructureView = {
               <div class="form-row" style="justify-content:flex-end">
                 <label class="switch-row"><input type="checkbox" v-model="clDlg.form.ha_enabled"> {{ t('cl_ha') }}</label>
                 <label class="switch-row"><input type="checkbox" v-model="clDlg.form.drs_enabled"> {{ t('nav_drs') }}</label>
+              </div>
+            </div>
+
+            <!-- 时间同步（NTP）：HA 时间一致性基础，启用 HA 时强烈建议配置内部 NTP 源 -->
+            <div class="ntp-fieldset" v-if="clDlg.form.ha_enabled">
+              <div class="ntp-legend"><i class="fas fa-clock"></i> {{ t('cl_ntp_title') }}<span class="muted" style="font-weight:400;font-size:12px;margin-left:6px">{{ t('cl_ntp_hint') }}</span></div>
+              <div class="form-grid-2">
+                <div class="form-row">
+                  <label>{{ t('cl_ntp_mode') }}</label>
+                  <select v-model="clDlg.form.ntp_mode">
+                    <option value="internal">{{ t('cl_ntp_internal') }}</option>
+                    <option value="external">{{ t('cl_ntp_external') }}</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label>{{ t('cl_ntp_offset') }}</label>
+                  <input type="number" min="10" max="5000" step="10" v-model.number="clDlg.form.max_clock_offset_ms" placeholder="100">
+                </div>
+              </div>
+              <!-- 内部源：从本集群主机中指定一台作为 NTP 服务端 -->
+              <div class="form-row" v-if="clDlg.form.ntp_mode==='internal'">
+                <label>{{ t('cl_ntp_server') }}</label>
+                <select v-model="clDlg.form.ntp_internal_server" v-if="clNtpHosts.length">
+                  <option value="">{{ t('cl_ntp_auto') }}</option>
+                  <option v-for="h in clNtpHosts" :key="h.id" :value="h.name">{{ h.name }} · {{ h.ip }}</option>
+                </select>
+                <div v-else class="hosts-pick-hint"><i class="fas fa-circle-info"></i> {{ t('cl_ntp_no_host') }}</div>
+              </div>
+              <!-- 外部源：填写外部 NTP 服务器列表 -->
+              <div class="form-row" v-else>
+                <label>{{ t('cl_ntp_servers') }}</label>
+                <input v-model="clDlg.form.ntp_servers" placeholder="pool.ntp.org, ntp.aliyun.com">
               </div>
             </div>
           </div>

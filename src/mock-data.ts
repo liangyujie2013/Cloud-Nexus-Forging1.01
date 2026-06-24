@@ -13,9 +13,9 @@ export const mockData = {
   ],
   // ===================== 基础设施 · 集群（归属数据中心）=====================
   clusters: [
-    { id: 1, datacenter_id: 1, name: '生产集群 Prod-A', description: '核心业务生产集群', ha_enabled: true, drs_enabled: true, overcommit_cpu: 4.0, status: 'healthy', created_at: '2026-01-16T08:00:00Z', hosts: 4, vms: 28, evc_mode: 'CPU 基线 Gen3' },
-    { id: 2, datacenter_id: 1, name: 'GPU 计算集群 GPU-Compute', description: 'AI 训练 / 推理 GPU 集群', ha_enabled: true, drs_enabled: false, overcommit_cpu: 1.0, status: 'healthy', created_at: '2026-01-17T08:00:00Z', hosts: 2, vms: 10, evc_mode: 'CPU 基线 Gen4' },
-    { id: 3, datacenter_id: 2, name: '测试集群 Test-B', description: '开发测试沙箱集群', ha_enabled: false, drs_enabled: false, overcommit_cpu: 8.0, status: 'healthy', created_at: '2026-02-21T08:00:00Z', hosts: 0, vms: 0, evc_mode: '-' },
+    { id: 1, datacenter_id: 1, name: '生产集群 Prod-A', description: '核心业务生产集群', ha_enabled: true, drs_enabled: true, overcommit_cpu: 4.0, status: 'healthy', created_at: '2026-01-16T08:00:00Z', hosts: 4, vms: 28, evc_mode: 'CPU 基线 Gen3', ntp_mode: 'internal', ntp_internal_server: 'node-prod-01', ntp_servers: ['node-prod-01'], max_clock_offset_ms: 100 },
+    { id: 2, datacenter_id: 1, name: 'GPU 计算集群 GPU-Compute', description: 'AI 训练 / 推理 GPU 集群', ha_enabled: true, drs_enabled: false, overcommit_cpu: 1.0, status: 'healthy', created_at: '2026-01-17T08:00:00Z', hosts: 2, vms: 10, evc_mode: 'CPU 基线 Gen4', ntp_mode: 'internal', ntp_internal_server: 'gpu-node-01', ntp_servers: ['gpu-node-01'], max_clock_offset_ms: 100 },
+    { id: 3, datacenter_id: 2, name: '测试集群 Test-B', description: '开发测试沙箱集群', ha_enabled: false, drs_enabled: false, overcommit_cpu: 8.0, status: 'healthy', created_at: '2026-02-21T08:00:00Z', hosts: 0, vms: 0, evc_mode: '-', ntp_mode: 'external', ntp_internal_server: '', ntp_servers: ['pool.ntp.org', 'ntp.aliyun.com'], max_clock_offset_ms: 500 },
   ],
   // ===================== 基础设施 · 宿主机（归属集群，冗余 datacenter_id）=====================
   // 硬件型号（CPU / 网卡 NIC / RAID 卡 / 硬盘）均为真实环境型号。
@@ -464,7 +464,35 @@ export function getHostHA(id: number) {
     message: !haEnabled ? '集群未启用 HA，Fencing 仅配置未激活' : maint ? '主机处于维护模式，Fencing 暂时挂起' : 'IPMI 可达，fence_ipmilan 已配置',
   }
 
-  const checks = { network_heartbeat, storage_heartbeat, libvirt_service, resource_availability, fencing_capability }
+  // 时间同步（NTP / Chrony）—— HA 时间一致性的基础：
+  // 各主机须与集群内部 NTP 源对时，时钟偏移超阈值会导致心跳超时判定、
+  // fencing 时序、存储锁租约出错，因此把它作为 HA 的一项独立检查。
+  const offsetThresholdMs = cl?.max_clock_offset_ms ?? 100   // 集群可容忍的最大时钟偏移
+  const isNtpServer = cl?.ntp_mode === 'internal' && cl?.ntp_internal_server === host.name
+  const clockOffsetMs = offline ? null : isNtpServer ? 0 : +((hashSeed(id, 7) - 0.5) * offsetThresholdMs * 1.6).toFixed(1)
+  const offsetAbs = clockOffsetMs == null ? Infinity : Math.abs(clockOffsetMs)
+  const ntpSource = cl?.ntp_mode === 'internal'
+    ? `内部 NTP 源 ${cl?.ntp_internal_server || '—'}`
+    : `外部 NTP：${(cl?.ntp_servers || []).join(', ') || '未配置'}`
+  const time_sync = {
+    status: offline ? 'fail' : offsetAbs > offsetThresholdMs ? 'warn' : 'pass',
+    ntp_mode: cl?.ntp_mode || 'external',
+    ntp_source: ntpSource,
+    is_ntp_server: isNtpServer,
+    synchronized: !offline && offsetAbs <= offsetThresholdMs,
+    clock_offset_ms: clockOffsetMs,
+    max_offset_ms: offsetThresholdMs,
+    stratum: isNtpServer ? 3 : 4,
+    message: offline
+      ? 'NTP 服务不可达，无法校验时钟偏移'
+      : isNtpServer
+        ? `本机为集群内部 NTP 服务端，向其余主机提供统一时间源（stratum 3）`
+        : offsetAbs > offsetThresholdMs
+          ? `时钟偏移 ${clockOffsetMs}ms 超过阈值 ${offsetThresholdMs}ms，可能影响 HA 仲裁时序`
+          : `已与${ntpSource}同步，时钟偏移 ${clockOffsetMs}ms（阈值 ${offsetThresholdMs}ms）`,
+  }
+
+  const checks = { network_heartbeat, storage_heartbeat, libvirt_service, resource_availability, fencing_capability, time_sync }
   // 健康分：每个 fail -20，warn -8
   let score = 100
   Object.values(checks).forEach((ch: any) => { if (ch.status === 'fail') score -= 20; else if (ch.status === 'warn') score -= 8 })
