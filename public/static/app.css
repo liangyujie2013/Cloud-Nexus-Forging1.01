@@ -793,3 +793,56 @@
 .mon-toggle.on > span { transform: translateX(16px); }
 .mon-check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 6px; cursor: pointer; }
 .mon-check input { width: 16px; height: 16px; accent-color: var(--color-blue); }
+
+/* =============================================================================
+   主机管理 v2.0 —— 主机卡片 / 详情 Tab / 硬件表格 / HA 面板
+   ========================================================================== */
+.host-filter-select { padding: 7px 12px; border: 1px solid var(--separator); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; cursor: pointer; }
+.host-tile { cursor: pointer; transition: all var(--duration-fast); display: flex; flex-direction: column; gap: 10px; }
+.host-tile:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(0,0,0,.09); }
+.ht-head { display: flex; align-items: center; justify-content: space-between; }
+.ht-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.ht-meta { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); }
+.ht-cpu { font-size: 12px; color: var(--text-tertiary); }
+.ht-bars { display: flex; flex-direction: column; gap: 8px; }
+.ht-foot { display: flex; align-items: center; gap: 12px; font-size: 12px; padding-top: 4px; border-top: 1px solid var(--separator); margin-top: 2px; flex-wrap: wrap; }
+.detail-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+/* segmented detail tabs */
+.seg-tabs { display: flex; gap: 4px; background: var(--bg-secondary); border: 1px solid var(--separator); border-radius: var(--radius-md); padding: 4px; margin-bottom: 18px; overflow-x: auto; }
+.seg-tabs button { flex: none; border: none; background: transparent; cursor: pointer; font: 600 13px/1 var(--font-system); color: var(--text-secondary); padding: 9px 16px; border-radius: var(--radius-sm); transition: all var(--duration-fast); display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.seg-tabs button:hover { color: var(--text-primary); }
+.seg-tabs button.active { background: var(--bg-elevated); color: var(--color-blue); box-shadow: var(--shadow-sm); }
+/* info rows */
+.info-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--separator); font-size: 13px; }
+.info-row:last-child { border-bottom: none; }
+.info-row > span { color: var(--text-secondary); }
+/* hardware sections */
+.hw-section-title { font-size: 14px; font-weight: 700; margin: 22px 2px 12px; display: flex; align-items: center; gap: 8px; }
+.hw-cpu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px 24px; }
+.hw-cpu-grid > div { display: flex; flex-direction: column; gap: 3px; }
+.hw-cpu-grid .muted { font-size: 12px; }
+.hw-cpu-grid strong { font-size: 14px; }
+.hw-cpu-grid .hw-feats { grid-column: 1 / -1; }
+.hw-cpu-grid .hw-feats > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.hw-chip { display: inline-block; padding: 2px 9px; background: var(--bg-secondary); border: 1px solid var(--separator); border-radius: var(--radius-pill); font: 600 11px/1.6 var(--font-mono); color: var(--text-secondary); }
+/* HA panel */
+.ha-score-panel { display: flex; align-items: center; gap: 28px; margin-bottom: 20px; }
+.ha-score-info h3 { font-size: 22px; margin: 0 0 8px; }
+.ha-score-info .muted { font-size: 13px; line-height: 1.9; }
+.ha-checks-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.ha-check-card { display: flex; flex-direction: column; gap: 8px; }
+.hc-head { display: flex; align-items: center; gap: 10px; }
+.hc-head i { font-size: 18px; width: 22px; text-align: center; }
+.hc-head strong { font-size: 14px; flex: 1; }
+.hc-badge { font: 700 11px/1 var(--font-mono); padding: 4px 9px; border-radius: var(--radius-pill); }
+.hc-msg { font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5; }
+.hc-metrics { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-tertiary); }
+.hc-metrics b { color: var(--text-primary); font-family: var(--font-mono); }
+/* HA timeline */
+.ha-timeline { display: flex; flex-direction: column; gap: 4px; }
+.ha-event { display: flex; gap: 14px; padding: 10px 4px; }
+.hev-dot { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; flex: none; }
+.hev-body { flex: 1; }
+.hev-desc { font-size: 14px; font-weight: 500; }
+.block-list { margin: 10px 0 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
+.block-list li { margin: 3px 0; }

@@ -9,7 +9,7 @@
 // =============================================================================
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { mockData, genMetrics } from './mock-data'
+import { mockData, genMetrics, getHostHardware, getHostHA, getClusterHAStatus } from './mock-data'
 import { buildDomainXML, type VMConfig } from './libvirt-xml'
 
 const app = new Hono()
@@ -157,6 +157,35 @@ app.post(`${API}/hosts`, async (c) => {
   return c.json({ ...newHost, cluster_name: cluster.name, message: `主机 ${newHost.name} 已加入集群 ${cluster.name}` })
 })
 
+// ---- 创建数据中心 ----
+app.post(`${API}/datacenters`, async (c) => {
+  const b = await c.req.json<any>()
+  if (!b.name) return c.json({ error: '数据中心名称必填', code: 'INVALID' }, 400)
+  if (mockData.datacenters.find((d) => d.name === b.name))
+    return c.json({ error: `数据中心名称 ${b.name} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  const dc = {
+    id: Date.now(), name: b.name, location: b.location || '—',
+    timezone: b.timezone || 'Asia/Shanghai', description: b.description || '',
+    status: 'online', created_at: new Date().toISOString(), clusters: 0, hosts: 0, vms: 0,
+  }
+  mockData.datacenters.push(dc as any)
+  return c.json({ ...dc, message: `数据中心 ${dc.name} 已创建` })
+})
+// ---- 编辑数据中心 ----
+app.put(`${API}/datacenters/:id`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const dc = mockData.datacenters.find((d) => d.id === id)
+  if (!dc) return c.json({ error: '数据中心不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<any>()
+  if (b.name && b.name !== dc.name && mockData.datacenters.find((d) => d.name === b.name))
+    return c.json({ error: `数据中心名称 ${b.name} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  if (b.name) dc.name = b.name
+  if (b.location !== undefined) dc.location = b.location
+  if (b.timezone) dc.timezone = b.timezone
+  if (b.description !== undefined) dc.description = b.description
+  return c.json({ ...dc, message: '数据中心已更新' })
+})
+
 // ---- 删除数据中心：级联校验（有集群则阻止）----
 app.delete(`${API}/datacenters/:id`, (c) => {
   const id = Number(c.req.param('id'))
@@ -166,6 +195,40 @@ app.delete(`${API}/datacenters/:id`, (c) => {
   }
   mockData.datacenters = mockData.datacenters.filter((d) => d.id !== id)
   return c.json({ id, deleted: true, message: '数据中心已删除' })
+})
+
+// ---- 创建集群（须归属数据中心）----
+app.post(`${API}/clusters`, async (c) => {
+  const b = await c.req.json<any>()
+  if (!b.name || !b.datacenter_id) return c.json({ error: '集群名称与所属数据中心必填', code: 'INVALID' }, 400)
+  if (mockData.clusters.find((cl) => cl.name === b.name))
+    return c.json({ error: `集群名称 ${b.name} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  const dc = mockData.datacenters.find((d) => d.id === Number(b.datacenter_id))
+  if (!dc) return c.json({ error: '所属数据中心不存在', code: 'DC_NOT_FOUND' }, 404)
+  const cl = {
+    id: Date.now(), datacenter_id: dc.id, name: b.name, description: b.description || '',
+    ha_enabled: b.ha_enabled !== false, drs_enabled: !!b.drs_enabled,
+    overcommit_cpu: Number(b.overcommit_cpu) || 4.0, status: 'healthy',
+    created_at: new Date().toISOString(), hosts: 0, vms: 0, evc_mode: b.evc_mode || '-',
+  }
+  mockData.clusters.push(cl as any)
+  return c.json({ ...cl, datacenter_name: dc.name, message: `集群 ${cl.name} 已在 ${dc.name} 创建` })
+})
+// ---- 编辑集群 ----
+app.put(`${API}/clusters/:id`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const cl = mockData.clusters.find((x) => x.id === id)
+  if (!cl) return c.json({ error: '集群不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<any>()
+  if (b.name && b.name !== cl.name && mockData.clusters.find((x) => x.name === b.name))
+    return c.json({ error: `集群名称 ${b.name} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  if (b.name) cl.name = b.name
+  if (b.description !== undefined) cl.description = b.description
+  if (b.ha_enabled !== undefined) cl.ha_enabled = b.ha_enabled
+  if (b.drs_enabled !== undefined) cl.drs_enabled = b.drs_enabled
+  if (b.overcommit_cpu !== undefined) cl.overcommit_cpu = Number(b.overcommit_cpu)
+  if (b.datacenter_id) { const dc = mockData.datacenters.find((d) => d.id === Number(b.datacenter_id)); if (dc) cl.datacenter_id = dc.id }
+  return c.json({ ...cl, message: '集群已更新' })
 })
 
 // ---- 删除集群：级联校验（有主机则阻止）----
@@ -188,6 +251,36 @@ app.delete(`${API}/hosts/:id`, (c) => {
   }
   mockData.hosts = mockData.hosts.filter((h) => h.id !== id)
   return c.json({ id, deleted: true, message: '主机已移除' })
+})
+
+// ---- 主机硬件深度详情（CPU 拓扑 / 网卡 / 存储设备 / PCI 设备 / HA）----
+app.get(`${API}/hosts/:id/hardware`, (c) => {
+  const hw = getHostHardware(Number(c.req.param('id')))
+  if (!hw) return c.json({ error: '主机不存在', code: 'NOT_FOUND' }, 404)
+  return c.json(hw)
+})
+// ---- 主机 HA 状态（五项检查 + 健康分 + 事件）----
+app.get(`${API}/hosts/:id/ha-status`, (c) => {
+  const ha = getHostHA(Number(c.req.param('id')))
+  if (!ha) return c.json({ error: '主机不存在', code: 'NOT_FOUND' }, 404)
+  return c.json(ha)
+})
+// ---- 切换主机维护模式（维护中不接收新 VM / 触发 DRS 撤离）----
+app.post(`${API}/hosts/:id/maintenance`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const host = mockData.hosts.find((h) => h.id === id)
+  if (!host) return c.json({ error: '主机不存在', code: 'NOT_FOUND' }, 404)
+  const body = await c.req.json<{ enabled?: boolean }>().catch(() => ({} as any))
+  const enable = body.enabled ?? !host.maintenance_mode
+  if (enable) {
+    const runningVMs = mockData.vms.filter((v) => v.host_id === id && v.status === 'running')
+    if (runningVMs.length > 0)
+      return c.json({ error: `主机上仍有 ${runningVMs.length} 台运行中的虚拟机，请先迁移`, code: 'HAS_RUNNING_VM', children: runningVMs.map((x) => x.name) }, 409)
+  }
+  host.maintenance_mode = enable
+  host.status = enable ? 'maintenance' : 'connected'
+  if (enable) { host.cpu_usage = 0; host.mem_used_gb = 0; host.mem_usage = 0 }
+  return c.json({ id, maintenance_mode: enable, status: host.status, message: enable ? `主机 ${host.name} 已进入维护模式` : `主机 ${host.name} 已退出维护模式` })
 })
 
 // ============================================================================
@@ -313,13 +406,42 @@ app.get(`${API}/migrations/progress`, (c) => {
 // 备份恢复
 app.get(`${API}/backup-jobs`, (c) => c.json(mockData.backup_jobs))
 
+// ---- 集群 HA 总览（聚合所有主机的 HA 判定）----
+app.get(`${API}/ha/cluster-status`, (c) => c.json(getClusterHAStatus()))
+// ---- 启用集群 HA ----
+app.post(`${API}/ha/enable`, async (c) => {
+  const b = await c.req.json<{ cluster_id: number; enabled?: boolean }>().catch(() => ({} as any))
+  const cl = mockData.clusters.find((x) => x.id === Number(b.cluster_id))
+  if (!cl) return c.json({ error: '集群不存在', code: 'NOT_FOUND' }, 404)
+  cl.ha_enabled = b.enabled ?? true
+  return c.json({ cluster_id: cl.id, ha_enabled: cl.ha_enabled, message: cl.ha_enabled ? `集群 ${cl.name} HA 已启用` : `集群 ${cl.name} HA 已停用` })
+})
+// ---- 测试 STONITH / Fencing 配置 ----
+app.post(`${API}/ha/test-fencing`, async (c) => {
+  const b = await c.req.json<{ host_id?: number }>().catch(() => ({} as any))
+  const host = mockData.hosts.find((h) => h.id === Number(b.host_id))
+  return c.json({ host_id: b.host_id, host_name: host?.name, ipmi_reachable: true, fence_agent: 'fence_ipmilan', test_result: 'pass', message: `（原型）对 ${host?.name || '主机'} 的 Fencing 测试通过：IPMI 可达，电源控制正常` })
+})
+
 // ============================================================================
 //  模块 5 · 存储管理 storage：存储池 / 卷管理 / 快照树
 //
+//  ★ 存储归属模型（务必明确，避免歧义）：
+//    存储池「挂载给集群(cluster)」，由该集群内的「所有宿主机」共享挂载使用，
+//    而非挂给管理平台、也非挂给单台主机。
+//      · 共享类型 (nfs/iscsi/fc/distributed)：平台自动在集群所有主机上挂载，
+//        是「批量添加」——选一次集群 = 集群内全部主机自动配置。
+//      · 本地类型 (local)：仅属于单台主机（须指定 host_id），不可跨主机共享。
+//
 //  完整存储添加逻辑（与真实虚拟化平台一致）：
-//    存储池(后端，须选类型+连接参数) ──► 卷(在池上分配的虚拟磁盘) ──► 挂载给虚拟机
-//    · 支持类型：local 本地目录 / nfs / iscsi / fc 光纤 / distributed 分布式
-//    · 删除约束：池上仍有卷 → 阻止；卷已挂载到运行中 VM → 阻止
+//    存储池(选类型+连接参数+目标集群) ──► 卷/磁盘(在池上分配) ──► 挂载给虚拟机
+//
+//  磁盘迁移（storage migration）：
+//    · 共享存储上的磁盘：随 VM 在线迁移到「同集群」其他主机，无需拷盘（仅切换计算节点）。
+//    · 跨存储池迁移：需拷贝底层数据到目标池（storage vMotion）。
+//    · 约束：目标池必须能被目标主机访问（共享池=同集群即可；本地池=必须同主机）。
+//
+//  删除约束：池上仍有卷 → 阻止；卷已挂载到运行中 VM → 阻止。
 // ============================================================================
 
 // 存储池支持的类型（前端创建向导据此渲染连接参数表单）
@@ -456,6 +578,103 @@ app.delete(`${API}/snapshots/:id`, (c) => {
   if (snap.current) return c.json({ error: '当前快照不可删除，请先回滚到其他快照', code: 'IS_CURRENT' }, 409)
   mockData.snapshots = mockData.snapshots.filter((s) => s.id !== id)
   return c.json({ id, deleted: true, message: '快照已删除' })
+})
+
+// ---- iSCSI 存储池（平台自动化配置：用户填参数，平台自动在所有主机执行）----
+app.get(`${API}/storage/iscsi/pools`, (c) => c.json(mockData.iscsi_pools))
+app.post(`${API}/storage/iscsi/pools`, async (c) => {
+  const b = await c.req.json<any>()
+  if (!b.name || !b.iscsi_config?.target_portal || !b.iscsi_config?.target_iqn)
+    return c.json({ error: '存储池名称、Target Portal、IQN 必填', code: 'INVALID' }, 400)
+  if (mockData.iscsi_pools.find((p) => p.name === b.name) || mockData.storage_pools.find((p) => p.name === b.name))
+    return c.json({ error: `存储池名称 ${b.name} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  const cl = mockData.clusters.find((x) => x.id === Number(b.cluster_id)) || mockData.clusters[0]
+  const totalHosts = mockData.hosts.filter((h) => h.cluster_id === cl.id).length
+  const pool = {
+    id: Date.now(), name: b.name, type: 'iscsi', cluster_id: cl.id, cluster_name: cl.name, status: 'active',
+    iscsi_config: { target_portal: b.iscsi_config.target_portal, target_iqn: b.iscsi_config.target_iqn, lun_id: Number(b.iscsi_config.lun_id) || 0, auth_method: b.iscsi_config.auth_method || 'none', chap_username: b.iscsi_config.chap_username },
+    auto_config_status: { total_hosts: totalHosts, configured_hosts: totalHosts, failed_hosts: [], last_config_time: new Date().toISOString().slice(0, 16).replace('T', ' ') },
+    capacity: { total_gb: Number(b.capacity_gb) || 10240, available_gb: Number(b.capacity_gb) || 10240, used_gb: 0 },
+  }
+  mockData.iscsi_pools.push(pool as any)
+  // 同时登记到统一存储池列表，便于卷创建选择
+  mockData.storage_pools.push({ id: pool.id, cluster_id: cl.id, name: pool.name, type: 'iscsi', capacity_tb: +(pool.capacity.total_gb / 1024).toFixed(1), used_tb: 0, shared: true, status: 'active', read_iops: 0, write_iops: 0, latency: 0 } as any)
+  return c.json({ ...pool, message: `iSCSI 存储池 ${pool.name} 已创建，自动配置 ${totalHosts} 台主机` })
+})
+// iSCSI 自动配置进度（依据 start 计算渐进，逐台主机点亮）
+app.get(`${API}/storage/iscsi/pools/:id/status`, (c) => {
+  const id = Number(c.req.param('id'))
+  const pool = mockData.iscsi_pools.find((p) => p.id === id)
+  const total = pool?.auto_config_status.total_hosts || mockData.hosts.filter((h) => h.cluster_id === (pool?.cluster_id || 1)).length
+  const start = Number(c.req.query('start') || Date.now())
+  const elapsed = (Date.now() - start) / 1000
+  const perHost = 2.5
+  const configured = Math.min(total, Math.floor(elapsed / perHost) + 1)
+  const clHosts = mockData.hosts.filter((h) => h.cluster_id === (pool?.cluster_id || 1)).slice(0, total)
+  const STAGES = ['installing', 'configuring', 'discovering', 'logging_in', 'creating_pool', 'done']
+  const hostStatus = clHosts.map((h, i) => {
+    let status = 'pending'
+    if (i < configured - 1) status = 'done'
+    else if (i === configured - 1) status = STAGES[Math.min(STAGES.length - 1, Math.floor((elapsed % perHost) / (perHost / STAGES.length)))]
+    return { hostname: h.hostname, status, error: null }
+  })
+  return c.json({ pool_id: id, total_hosts: total, configured_hosts: configured >= total ? total : configured - 1, hosts: hostStatus, done: configured >= total })
+})
+
+// ---- 独立虚拟磁盘管理（创建 / 挂载 / 卸载 / 删除）----
+app.get(`${API}/storage/volumes`, (c) => c.json(mockData.virtual_disks))
+app.post(`${API}/storage/volumes`, async (c) => {
+  const b = await c.req.json<any>()
+  if (!b.name || !b.storage_pool_id || !b.size_gb) return c.json({ error: '磁盘名称、存储池、容量必填', code: 'INVALID' }, 400)
+  if (mockData.virtual_disks.find((d) => d.name === b.name)) return c.json({ error: `磁盘名称 ${b.name} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  const pool = mockData.storage_pools.find((p) => p.id === Number(b.storage_pool_id))
+  if (!pool) return c.json({ error: '目标存储池不存在', code: 'POOL_NOT_FOUND' }, 404)
+  const thin = b.provisioning === 'thin'
+  const disk = {
+    id: Date.now(), name: b.name, storage_pool_id: pool.id, storage_pool_name: pool.name,
+    format: thin ? 'qcow2' : 'raw', provisioning: thin ? 'thin' : 'thick',
+    size_gb: Number(b.size_gb), allocated_gb: thin ? 1 : Number(b.size_gb),
+    shared_disk: !!b.shared_disk, encryption_enabled: !!b.encryption_enabled,
+    status: 'available', attached_vms: [],
+    created_at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    last_modified: new Date().toISOString().slice(0, 16).replace('T', ' '),
+  }
+  mockData.virtual_disks.push(disk as any)
+  return c.json({ ...disk, message: `磁盘 ${disk.name}（${disk.size_gb}GB / ${disk.provisioning === 'thin' ? '精简' : '厚'}置备）已创建` })
+})
+app.post(`${API}/storage/volumes/:id/attach`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const disk = mockData.virtual_disks.find((d) => d.id === id)
+  if (!disk) return c.json({ error: '磁盘不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<{ vm_id: number; bus_type?: string }>()
+  const vm = mockData.vms.find((v) => v.id === Number(b.vm_id))
+  if (!vm) return c.json({ error: '目标虚拟机不存在', code: 'VM_NOT_FOUND' }, 404)
+  if (!disk.shared_disk && disk.attached_vms.length > 0)
+    return c.json({ error: '非共享磁盘已被挂载，请先卸载或启用共享', code: 'ALREADY_ATTACHED' }, 409)
+  if (disk.attached_vms.find((a) => a.vm_id === vm.id))
+    return c.json({ error: '该磁盘已挂载到此虚拟机', code: 'ALREADY_ATTACHED' }, 409)
+  disk.attached_vms.push({ vm_id: vm.id, vm_name: vm.name, bus_type: (b.bus_type as any) || 'virtio' } as any)
+  disk.status = 'attached'
+  return c.json({ ...disk, message: `磁盘 ${disk.name} 已挂载到 ${vm.name}` })
+})
+app.post(`${API}/storage/volumes/:id/detach`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const disk = mockData.virtual_disks.find((d) => d.id === id)
+  if (!disk) return c.json({ error: '磁盘不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<{ vm_id: number }>().catch(() => ({} as any))
+  if (b.vm_id) disk.attached_vms = disk.attached_vms.filter((a) => a.vm_id !== Number(b.vm_id))
+  else disk.attached_vms = []
+  if (disk.attached_vms.length === 0) disk.status = 'available'
+  return c.json({ ...disk, message: '磁盘已卸载' })
+})
+app.delete(`${API}/storage/volumes/:id`, (c) => {
+  const id = Number(c.req.param('id'))
+  const disk = mockData.virtual_disks.find((d) => d.id === id)
+  if (!disk) return c.json({ error: '磁盘不存在', code: 'NOT_FOUND' }, 404)
+  if (disk.attached_vms.length > 0)
+    return c.json({ error: `磁盘已挂载到 ${disk.attached_vms.length} 台虚拟机，请先卸载`, code: 'ATTACHED', children: disk.attached_vms.map((a) => a.vm_name) }, 409)
+  mockData.virtual_disks = mockData.virtual_disks.filter((d) => d.id !== id)
+  return c.json({ id, deleted: true, message: '磁盘已删除' })
 })
 
 // ============================================================================
@@ -615,6 +834,75 @@ app.get(`${API}/monitoring/metrics/stream`, (c) => {
 //  模块 8 · 访问控制 access：用户管理 / 角色权限 / 操作审计
 // ============================================================================
 app.get(`${API}/users`, (c) => c.json(mockData.users))
+app.get(`${API}/user-roles`, (c) => c.json(mockData.user_roles))
+
+// ---- 创建用户（用户名去重 + 必填校验 + 资源配额）----
+app.post(`${API}/users`, async (c) => {
+  const b = await c.req.json<any>()
+  if (!b.username || !b.display_name || !b.email) return c.json({ error: '用户名、显示名、邮箱必填', code: 'INVALID' }, 400)
+  if (!/^[A-Za-z0-9_]+$/.test(b.username)) return c.json({ error: '用户名只能包含英文字母、数字和下划线', code: 'BAD_USERNAME' }, 400)
+  if (mockData.users.find((u) => u.username === b.username)) return c.json({ error: `用户名 ${b.username} 已存在`, code: 'NAME_DUPLICATE' }, 409)
+  const role = mockData.user_roles.find((r) => r.id === Number(b.role_id)) || mockData.user_roles[3]
+  const user = {
+    id: Date.now(), username: b.username, display_name: b.display_name, email: b.email, phone: b.phone || '',
+    role_id: role.id, role_name: role.name, role_keys: [role.key], source: 'local',
+    status: 'active', is_active: true,
+    last_login_at: '—', last_login: '—', created_at: new Date().toISOString().slice(0, 10),
+    resource_quota: {
+      max_vms: Number(b.resource_quota?.max_vms) || 0, max_vcpus: Number(b.resource_quota?.max_vcpus) || 0,
+      max_memory_gb: Number(b.resource_quota?.max_memory_gb) || 0, max_storage_gb: Number(b.resource_quota?.max_storage_gb) || 0,
+    },
+    resource_usage: { current_vms: 0, current_vcpus: 0, current_memory_gb: 0, current_storage_gb: 0 },
+  }
+  mockData.users.push(user as any)
+  return c.json({ ...user, message: `用户 ${user.display_name} 已创建` })
+})
+
+// ---- 编辑用户（基本信息 / 角色 / 配额；密码可选）----
+app.patch(`${API}/users/:id`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const u = mockData.users.find((x) => x.id === id)
+  if (!u) return c.json({ error: '用户不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<any>()
+  if (b.display_name) u.display_name = b.display_name
+  if (b.email) u.email = b.email
+  if (b.phone !== undefined) u.phone = b.phone
+  if (b.role_id) { const role = mockData.user_roles.find((r) => r.id === Number(b.role_id)); if (role) { u.role_id = role.id; u.role_name = role.name; u.role_keys = [role.key] } }
+  if (b.status) { u.status = b.status; u.is_active = b.status === 'active' }
+  if (b.resource_quota) u.resource_quota = { ...u.resource_quota, ...Object.fromEntries(Object.entries(b.resource_quota).map(([k, v]) => [k, Number(v) || 0])) }
+  return c.json({ ...u, message: '用户已更新' })
+})
+
+// ---- 删除用户（约束：有运行中 VM 则阻止）----
+app.delete(`${API}/users/:id`, (c) => {
+  const id = Number(c.req.param('id'))
+  const u = mockData.users.find((x) => x.id === id)
+  if (!u) return c.json({ error: '用户不存在', code: 'NOT_FOUND' }, 404)
+  if (u.resource_usage && u.resource_usage.current_vms > 0)
+    return c.json({ error: `该用户名下仍有 ${u.resource_usage.current_vms} 台运行中的虚拟机，请先转移或删除`, code: 'HAS_RUNNING_VM', children: [`${u.resource_usage.current_vms} 台虚拟机`] }, 409)
+  mockData.users = mockData.users.filter((x) => x.id !== id)
+  return c.json({ id, deleted: true, message: '用户已删除' })
+})
+
+// ---- 启用 / 禁用账号 ----
+app.post(`${API}/users/:id/status`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const u = mockData.users.find((x) => x.id === id)
+  if (!u) return c.json({ error: '用户不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<{ status?: string }>().catch(() => ({} as any))
+  u.status = b.status || (u.status === 'active' ? 'disabled' : 'active')
+  u.is_active = u.status === 'active'
+  return c.json({ id, status: u.status, message: u.status === 'active' ? '账号已启用' : '账号已禁用' })
+})
+
+// ---- 重置密码 ----
+app.post(`${API}/users/:id/reset-password`, (c) => {
+  const id = Number(c.req.param('id'))
+  const u = mockData.users.find((x) => x.id === id)
+  if (!u) return c.json({ error: '用户不存在', code: 'NOT_FOUND' }, 404)
+  return c.json({ id, message: `用户 ${u.display_name} 的密码已重置（原型：临时密码已发送至 ${u.email}）` })
+})
+
 app.get(`${API}/roles`, (c) => c.json(mockData.roles))
 app.post(`${API}/roles`, async (c) => {
   const body = await c.req.json<{ key: string; privileges: string[] }>()
@@ -668,6 +956,7 @@ app.get('/', (c) => {
   <!-- 9 模块视图 -->
   <script src="/static/view-dashboard.js"></script>
   <script src="/static/view-infrastructure.js"></script>
+  <script src="/static/view-hosts.js"></script>
   <script src="/static/view-compute.js"></script>
   <script src="/static/view-availability.js"></script>
   <script src="/static/view-storage.js"></script>

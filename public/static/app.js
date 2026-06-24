@@ -14,6 +14,7 @@ const App = {
   components: {
     DashboardView: V.DashboardView,
     InfrastructureView: V.InfrastructureView,
+    HostsView: V.HostsView,
     ComputeView: V.ComputeView,
     AvailabilityView: V.AvailabilityView,
     StorageView: V.StorageView,
@@ -39,8 +40,11 @@ const App = {
       { key: 'infrastructure', icon: 'fa-sitemap', label: 'nav_mod_infrastructure', children: [
         { key: 'datacenter', label: 'nav_infra_datacenter' },
         { key: 'clusters', label: 'nav_infra_clusters' },
-        { key: 'hosts', label: 'nav_infra_hosts' },
         { key: 'pools', label: 'nav_infra_pools' },
+      ] },
+      { key: 'hosts', icon: 'fa-server', label: 'nav_mod_hosts', children: [
+        { key: 'list', label: 'nav_hosts_list' },
+        { key: 'detail', label: 'nav_hosts_detail' },
       ] },
       { key: 'compute', icon: 'fa-desktop', label: 'nav_mod_compute', children: [
         { key: 'vms', label: 'nav_compute_vms' },
@@ -81,7 +85,7 @@ const App = {
 
     // 模块 key → 视图组件名
     const componentMap = {
-      dashboard: 'DashboardView', infrastructure: 'InfrastructureView', compute: 'ComputeView',
+      dashboard: 'DashboardView', infrastructure: 'InfrastructureView', hosts: 'HostsView', compute: 'ComputeView',
       availability: 'AvailabilityView', storage: 'StorageView', network: 'NetworkView',
       monitoring: 'MonitoringView', access: 'AccessControlView', system: 'SystemView',
     }
@@ -161,6 +165,14 @@ const App = {
       // 携带聚焦信息（focusType/focusId），透传给目标视图实现高亮定位
       currentFocus.value = { focusType: d.focusType, focusId: d.focusId, _ts: Date.now() }
     }
+    // 视图内部切换子标签（如主机列表↔主机详情），保留视图内部状态不重建组件
+    const onGoto = (e) => {
+      const d = e && e.detail
+      if (!d) return
+      currentModule.value = d.module
+      expanded.value = d.module
+      currentTab.value = d.tab
+    }
 
     onMounted(async () => {
       notifications.value = await api('/notifications')
@@ -169,11 +181,13 @@ const App = {
       window.addEventListener('cnf:open-vm-wizard', onOpenWizard)
       window.addEventListener('cnf:open-host-wizard', onOpenHostWizard)
       window.addEventListener('cnf:navigate', onNavigate)
+      window.addEventListener('cnf:goto', onGoto)
     })
     onBeforeUnmount(() => {
       window.removeEventListener('cnf:open-vm-wizard', onOpenWizard)
       window.removeEventListener('cnf:open-host-wizard', onOpenHostWizard)
       window.removeEventListener('cnf:navigate', onNavigate)
+      window.removeEventListener('cnf:goto', onGoto)
     })
 
     return {

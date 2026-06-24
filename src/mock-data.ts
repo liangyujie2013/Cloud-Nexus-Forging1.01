@@ -151,13 +151,31 @@ export const mockData = {
     },
   ],
 
-  // ===================== 访问控制 · 用户 =====================
+  // ===================== 访问控制 · 用户（含资源配额 + 用量）=====================
+  // role_id/role_name：1 超级管理员 / 2 系统管理员 / 3 运维工程师 / 4 只读用户
   users: [
-    { id: 1, username: 'administrator', display_name: '系统管理员', email: 'administrator@cnf.local', role_keys: ['role_admin'], source: 'local', is_active: true, last_login: '2026-06-24 09:31', created_at: '2026-01-15' },
-    { id: 2, username: 'ops-wang', display_name: '王运维', email: 'ops-wang@cnf.local', role_keys: ['role_vm_admin'], source: 'ldap', is_active: true, last_login: '2026-06-24 08:50', created_at: '2026-02-01' },
-    { id: 3, username: 'dev-zhang', display_name: '张开发', email: 'dev-zhang@cnf.local', role_keys: ['role_vm_user'], source: 'ldap', is_active: true, last_login: '2026-06-23 17:22', created_at: '2026-03-10' },
-    { id: 4, username: 'net-li', display_name: '李网络', email: 'net-li@cnf.local', role_keys: ['role_network'], source: 'local', is_active: true, last_login: '2026-06-22 11:05', created_at: '2026-03-12' },
-    { id: 5, username: 'audit', display_name: '审计员', email: 'audit@cnf.local', role_keys: ['role_readonly'], source: 'local', is_active: false, last_login: '2026-05-30 14:40', created_at: '2026-04-01' },
+    { id: 1, username: 'administrator', display_name: '系统管理员', email: 'administrator@cnf.local', phone: '138-0000-0001', role_id: 1, role_name: '超级管理员', role_keys: ['role_admin'], source: 'local', status: 'active', is_active: true, last_login_at: '2026-06-24 09:31', last_login: '2026-06-24 09:31', created_at: '2026-01-15',
+      resource_quota: { max_vms: 9999, max_vcpus: 9999, max_memory_gb: 99999, max_storage_gb: 999999 },
+      resource_usage: { current_vms: 8, current_vcpus: 114, current_memory_gb: 764, current_storage_gb: 4820 } },
+    { id: 2, username: 'ops-wang', display_name: '王运维', email: 'ops-wang@cnf.local', phone: '138-0000-0002', role_id: 3, role_name: '运维工程师', role_keys: ['role_vm_admin'], source: 'ldap', status: 'active', is_active: true, last_login_at: '2026-06-24 08:50', last_login: '2026-06-24 08:50', created_at: '2026-02-01',
+      resource_quota: { max_vms: 50, max_vcpus: 200, max_memory_gb: 1024, max_storage_gb: 8192 },
+      resource_usage: { current_vms: 12, current_vcpus: 88, current_memory_gb: 416, current_storage_gb: 2360 } },
+    { id: 3, username: 'dev-zhang', display_name: '张开发', email: 'dev-zhang@cnf.local', phone: '138-0000-0003', role_id: 4, role_name: '只读用户', role_keys: ['role_vm_user'], source: 'ldap', status: 'active', is_active: true, last_login_at: '2026-06-23 17:22', last_login: '2026-06-23 17:22', created_at: '2026-03-10',
+      resource_quota: { max_vms: 10, max_vcpus: 40, max_memory_gb: 128, max_storage_gb: 1024 },
+      resource_usage: { current_vms: 3, current_vcpus: 12, current_memory_gb: 36, current_storage_gb: 240 } },
+    { id: 4, username: 'net-li', display_name: '李网络', email: 'net-li@cnf.local', phone: '138-0000-0004', role_id: 2, role_name: '系统管理员', role_keys: ['role_network'], source: 'local', status: 'active', is_active: true, last_login_at: '2026-06-22 11:05', last_login: '2026-06-22 11:05', created_at: '2026-03-12',
+      resource_quota: { max_vms: 30, max_vcpus: 120, max_memory_gb: 512, max_storage_gb: 4096 },
+      resource_usage: { current_vms: 0, current_vcpus: 0, current_memory_gb: 0, current_storage_gb: 0 } },
+    { id: 5, username: 'audit', display_name: '审计员', email: 'audit@cnf.local', phone: '138-0000-0005', role_id: 4, role_name: '只读用户', role_keys: ['role_readonly'], source: 'local', status: 'disabled', is_active: false, last_login_at: '2026-05-30 14:40', last_login: '2026-05-30 14:40', created_at: '2026-04-01',
+      resource_quota: { max_vms: 0, max_vcpus: 0, max_memory_gb: 0, max_storage_gb: 0 },
+      resource_usage: { current_vms: 0, current_vcpus: 0, current_memory_gb: 0, current_storage_gb: 0 } },
+  ],
+  // 角色字典（用户管理表单使用）
+  user_roles: [
+    { id: 1, name: '超级管理员', key: 'role_admin' },
+    { id: 2, name: '系统管理员', key: 'role_sysadmin' },
+    { id: 3, name: '运维工程师', key: 'role_ops' },
+    { id: 4, name: '只读用户', key: 'role_readonly' },
   ],
   // ===================== 访问控制 · 操作审计 =====================
   audit_logs: [
@@ -232,6 +250,30 @@ export const mockData = {
     { id: 4, name: 'cache-redis-01-disk0', pool: 'prod-nfs-pool', vm: 'cache-redis-01', format: 'qcow2', size_gb: 60, used_gb: 22, bus: 'virtio-scsi', iops_limit: 8000 },
   ],
 
+  // ===================== 存储管理 · iSCSI 存储池（自动化配置）=====================
+  iscsi_pools: [
+    {
+      id: 1, name: 'iscsi-prod-fast', type: 'iscsi', cluster_id: 1, cluster_name: '生产集群 Prod-A', status: 'active',
+      iscsi_config: { target_portal: '192.168.10.50:3260', target_iqn: 'iqn.2024-01.com.storage:prod.target1', lun_id: 0, auth_method: 'chap', chap_username: 'cnf-prod' },
+      auto_config_status: { total_hosts: 4, configured_hosts: 4, failed_hosts: [], last_config_time: '2026-06-20 14:30' },
+      capacity: { total_gb: 20480, available_gb: 5320, used_gb: 15160 },
+    },
+    {
+      id: 2, name: 'iscsi-gpu-scratch', type: 'iscsi', cluster_id: 2, cluster_name: 'GPU 计算集群 GPU-Compute', status: 'active',
+      iscsi_config: { target_portal: '192.168.20.60:3260', target_iqn: 'iqn.2024-01.com.storage:gpu.scratch', lun_id: 2, auth_method: 'none' },
+      auto_config_status: { total_hosts: 2, configured_hosts: 2, failed_hosts: [], last_config_time: '2026-06-21 10:05' },
+      capacity: { total_gb: 10240, available_gb: 7100, used_gb: 3140 },
+    },
+  ],
+
+  // ===================== 存储管理 · 独立虚拟磁盘（可挂载/卸载）=====================
+  virtual_disks: [
+    { id: 1, name: 'data-disk-db01', storage_pool_id: 2, storage_pool_name: 'prod-iscsi-fast', format: 'raw', provisioning: 'thick', size_gb: 500, allocated_gb: 500, shared_disk: false, encryption_enabled: true, status: 'attached', attached_vms: [{ vm_id: 2, vm_name: 'db-postgres-01', bus_type: 'virtio', boot_order: 2 }], created_at: '2026-03-01 10:00', last_modified: '2026-06-20 08:30' },
+    { id: 2, name: 'shared-gfs-vol', storage_pool_id: 1, storage_pool_name: 'prod-nfs-pool', format: 'raw', provisioning: 'thick', size_gb: 1000, allocated_gb: 1000, shared_disk: true, encryption_enabled: false, status: 'attached', attached_vms: [{ vm_id: 1, vm_name: 'web-prod-01', bus_type: 'scsi' }, { vm_id: 3, vm_name: 'app-server-01', bus_type: 'scsi' }], created_at: '2026-03-05 11:20', last_modified: '2026-06-18 16:00' },
+    { id: 3, name: 'thin-cache-disk', storage_pool_id: 1, storage_pool_name: 'prod-nfs-pool', format: 'qcow2', provisioning: 'thin', size_gb: 200, allocated_gb: 38, shared_disk: false, encryption_enabled: false, status: 'available', attached_vms: [], created_at: '2026-05-10 09:00', last_modified: '2026-06-22 12:00' },
+    { id: 4, name: 'ai-scratch-nvme', storage_pool_id: 3, storage_pool_name: 'gpu-local-nvme', format: 'raw', provisioning: 'thick', size_gb: 2000, allocated_gb: 2000, shared_disk: false, encryption_enabled: false, status: 'attached', attached_vms: [{ vm_id: 5, vm_name: 'ai-training-01', bus_type: 'virtio', boot_order: 3 }], created_at: '2026-02-10 08:00', last_modified: '2026-06-23 06:00' },
+  ],
+
   // ===================== 可用性管理 · 备份恢复 =====================
   backup_jobs: [
     { id: 1, target_vm: 'db-postgres-01', schedule: '每日 03:00', mode: 'snapshot', retention: '保留 14 份', last_run: '2026-06-24 03:00', last_status: 'success', last_size_gb: 312 },
@@ -257,6 +299,212 @@ export const mockData = {
     { id: 4, level: 'info', title: 'db-postgres-01 每日备份完成（312 GB）', time: '2026-06-24 03:01', read: true },
     { id: 5, level: 'warning', title: 'License 节点用量 6/16，VM 用量 8/500', time: '2026-06-23 23:00', read: true },
   ],
+}
+
+// =============================================================================
+//  主机硬件深度详情（CPU 拓扑 / 网卡 / 存储设备 / PCI 设备）——按主机 ID 派生
+//  真实硬件型号，确定性生成（同一主机每次返回一致）。
+// =============================================================================
+const HW_PROFILES: Record<number, any> = {
+  // node-prod-01..04 (Intel Xeon Gold 6248R)
+  default: {
+    cpu: { model: 'Intel Xeon Gold 6248R', vendor: 'Intel', sockets: 2, cores_per_socket: 24, threads_per_core: 2, base_freq_ghz: 3.0, max_freq_ghz: 4.0, cache_l3_mb: 35.75, numa_nodes: 2, virtualization_features: ['vmx', 'sse4_2', 'avx2', 'avx512f', 'aes'] },
+    nics: [
+      { name: 'eno1', type: 'physical', vendor: 'Intel', model: 'X710-DA2', speed_gbps: 10, driver: 'i40e', pci: '0000:18:00.0' },
+      { name: 'eno2', type: 'physical', vendor: 'Intel', model: 'X710-DA2', speed_gbps: 10, driver: 'i40e', pci: '0000:18:00.1' },
+      { name: 'bond0', type: 'bond', vendor: 'Intel', model: 'X710-DA2 (LACP)', speed_gbps: 20, driver: 'bonding', pci: '-', members: ['eno1', 'eno2'] },
+    ],
+    disks: [
+      { device_name: 'nvme0n1', type: 'NVMe', vendor: 'Samsung', model: 'PM9A3 1.92TB', capacity_gb: 1920, interface: 'NVMe PCIe 4.0 x4', rpm: null },
+      { device_name: 'nvme1n1', type: 'NVMe', vendor: 'Samsung', model: 'PM9A3 1.92TB', capacity_gb: 1920, interface: 'NVMe PCIe 4.0 x4', rpm: null },
+      { device_name: 'sda', type: 'SSD', vendor: 'Intel', model: 'D3-S4610 480GB', capacity_gb: 480, interface: 'SATA 6Gb/s', rpm: null },
+    ],
+    pci: [
+      { vendor: 'Broadcom', device_name: 'MegaRAID 9560-8i', device_class: 'RAID controller', driver: 'megaraid_sas', passthrough_capable: false, numa_node: 0 },
+      { vendor: 'Intel', device_name: 'X710 for 10GbE SFP+', device_class: 'Ethernet controller', driver: 'i40e', passthrough_capable: true, numa_node: 0 },
+    ],
+  },
+  platinum: {
+    cpu: { model: 'Intel Xeon Platinum 8358', vendor: 'Intel', sockets: 2, cores_per_socket: 32, threads_per_core: 2, base_freq_ghz: 2.6, max_freq_ghz: 3.4, cache_l3_mb: 48, numa_nodes: 2, virtualization_features: ['vmx', 'sse4_2', 'avx2', 'avx512f', 'avx512_bf16', 'aes'] },
+    nics: [
+      { name: 'ens3f0', type: 'physical', vendor: 'Mellanox', model: 'ConnectX-6 Dx', speed_gbps: 100, driver: 'mlx5_core', pci: '0000:3b:00.0' },
+      { name: 'ens3f1', type: 'physical', vendor: 'Mellanox', model: 'ConnectX-6 Dx', speed_gbps: 100, driver: 'mlx5_core', pci: '0000:3b:00.1' },
+      { name: 'bond0', type: 'bond', vendor: 'Mellanox', model: 'ConnectX-6 Dx (LACP)', speed_gbps: 200, driver: 'bonding', pci: '-', members: ['ens3f0', 'ens3f1'] },
+    ],
+    disks: [
+      { device_name: 'nvme0n1', type: 'NVMe', vendor: 'Intel', model: 'D7-P5520 3.84TB', capacity_gb: 3840, interface: 'NVMe PCIe 4.0 x4', rpm: null },
+      { device_name: 'nvme1n1', type: 'NVMe', vendor: 'Intel', model: 'D7-P5520 3.84TB', capacity_gb: 3840, interface: 'NVMe PCIe 4.0 x4', rpm: null },
+      { device_name: 'sdb', type: 'HDD', vendor: 'Seagate', model: 'Exos X18 16TB', capacity_gb: 16000, interface: 'SAS 12Gb/s', rpm: 7200 },
+    ],
+    pci: [
+      { vendor: 'NVIDIA', device_name: 'A100 80GB PCIe', device_class: 'Display controller', driver: 'nvidia', passthrough_capable: true, numa_node: 0 },
+      { vendor: 'NVIDIA', device_name: 'A100 80GB PCIe', device_class: 'Display controller', driver: 'nvidia', passthrough_capable: true, numa_node: 1 },
+      { vendor: 'Mellanox', device_name: 'ConnectX-6 Dx', device_class: 'Ethernet controller', driver: 'mlx5_core', passthrough_capable: true, numa_node: 0 },
+      { vendor: 'Broadcom', device_name: 'MegaRAID 9560-16i', device_class: 'RAID controller', driver: 'megaraid_sas', passthrough_capable: false, numa_node: 1 },
+    ],
+  },
+}
+
+function hashSeed(n: number, salt = 0) {
+  const x = Math.sin(n * 999 + salt * 37) * 10000
+  return x - Math.floor(x)
+}
+
+/** 主机硬件深度详情（确定性派生，含实时流量/温度/IOPS）。 */
+export function getHostHardware(id: number) {
+  const host = mockData.hosts.find((h) => h.id === id)
+  if (!host) return null
+  const cl = mockData.clusters.find((c) => c.id === host.cluster_id)
+  const isGpu = host.gpus > 0
+  const prof = isGpu ? HW_PROFILES.platinum : HW_PROFILES.default
+  const macFor = (i: number) => `00:1a:2b:${(host.id * 16 + i).toString(16).padStart(2, '0')}:4d:${(60 + i).toString(16).padStart(2, '0')}`
+  const ipBase = host.ip.split('.').slice(0, 3).join('.')
+
+  const network_interfaces = prof.nics.map((n: any, i: number) => {
+    const up = host.status === 'connected' && (n.type === 'bond' || i < 2)
+    return {
+      name: n.name, type: n.type, vendor: n.vendor, model: n.model,
+      mac_address: macFor(i), speed_gbps: n.speed_gbps,
+      link_status: up ? 'up' : 'down',
+      ip_address: n.type === 'bond' ? host.ip : (i === 0 ? `${ipBase}.${100 + host.id}` : undefined),
+      driver: n.driver, pci_address: n.pci,
+      bond_members: n.members,
+      rx_bytes_per_sec: up ? Math.round(hashSeed(host.id, i) * n.speed_gbps * 1e8 * 0.4) : 0,
+      tx_bytes_per_sec: up ? Math.round(hashSeed(host.id, i + 10) * n.speed_gbps * 1e8 * 0.3) : 0,
+    }
+  })
+
+  const storage_devices = prof.disks.map((d: any, i: number) => {
+    const usage = Math.round(20 + hashSeed(host.id, i + 20) * 60)
+    const temp = Math.round((d.type === 'NVMe' ? 38 : d.type === 'SSD' ? 32 : 36) + hashSeed(host.id, i + 30) * 10)
+    return {
+      device_name: d.device_name, type: d.type, vendor: d.vendor, model: d.model,
+      serial_number: `S${(host.id * 1000 + i * 7).toString().padStart(6, '0')}NA0${host.id}${i}`,
+      capacity_gb: d.capacity_gb, interface: d.interface, rpm: d.rpm,
+      temperature_celsius: temp,
+      smart_status: temp > 55 ? 'warning' : 'healthy',
+      usage_percent: usage,
+      read_iops: d.type === 'NVMe' ? Math.round(40000 + hashSeed(host.id, i) * 60000) : d.type === 'SSD' ? Math.round(8000 + hashSeed(host.id, i) * 12000) : Math.round(150 + hashSeed(host.id, i) * 200),
+      write_iops: d.type === 'NVMe' ? Math.round(30000 + hashSeed(host.id, i + 5) * 50000) : d.type === 'SSD' ? Math.round(6000 + hashSeed(host.id, i + 5) * 9000) : Math.round(120 + hashSeed(host.id, i + 5) * 180),
+    }
+  })
+
+  const pci_devices = prof.pci.map((p: any, i: number) => ({
+    pci_address: `0000:${(7 + i * 0x20).toString(16).padStart(2, '0')}:00.0`,
+    vendor: p.vendor, device_name: p.device_name, device_class: p.device_class,
+    driver: p.driver, iommu_group: 10 + i, passthrough_capable: p.passthrough_capable, numa_node: p.numa_node,
+  }))
+
+  return {
+    id: host.id, hostname: host.hostname, ip_address: host.ip,
+    cluster_name: cl?.name || '未分配',
+    status: host.status === 'connected' ? 'online' : host.status === 'maintenance' ? 'maintenance' : 'offline',
+    cpu_info: {
+      ...prof.cpu,
+      total_threads: prof.cpu.sockets * prof.cpu.cores_per_socket * prof.cpu.threads_per_core,
+      current_usage_percent: host.cpu_usage,
+    },
+    mem_total_gb: host.mem_total_gb, mem_used_gb: host.mem_used_gb,
+    network_interfaces, storage_devices, pci_devices,
+    ha_status: getHostHA(id),
+  }
+}
+
+/** 主机 HA 判定（五项检查 + 健康分 + 事件历史），确定性派生。 */
+export function getHostHA(id: number) {
+  const host = mockData.hosts.find((h) => h.id === id)
+  if (!host) return null
+  const cl = mockData.clusters.find((c) => c.id === host.cluster_id)
+  const haEnabled = !!cl?.ha_enabled
+  const maint = host.status === 'maintenance'
+  const offline = host.status !== 'connected' && !maint  // 维护模式不视为宕机
+
+  // 网络心跳
+  const netMs = offline ? 0 : +(0.4 + hashSeed(id, 1) * 1.8).toFixed(1)
+  const netLoss = offline ? 100 : +(hashSeed(id, 2) * 0.4).toFixed(2)
+  const netFails = offline ? 3 : 0
+  const network_heartbeat = {
+    status: offline ? 'fail' : netLoss > 0.3 ? 'warn' : 'pass',
+    last_response_ms: netMs, response_time_ms: netMs, packet_loss_percent: netLoss,
+    consecutive_failures: netFails,
+    message: offline ? '连续 3 次心跳无响应（30s），疑似主机宕机' : '管理网心跳正常，每 10s 探测一次',
+  }
+  // 存储心跳
+  const stLat = offline ? 0 : +(0.8 + hashSeed(id, 3) * 2.5).toFixed(1)
+  const storage_heartbeat = {
+    status: offline ? 'fail' : stLat > 2.5 ? 'warn' : 'pass',
+    shared_storage_accessible: !offline,
+    lock_file_writable: !offline,
+    storage_latency_ms: stLat,
+    failed_storage_pools: offline ? ['prod-iscsi-fast'] : [],
+    message: offline ? '共享存储锁文件超过 60s 未更新，判定存储隔离' : '共享存储锁文件心跳正常',
+  }
+  // libvirt 服务
+  const libvirt_service = {
+    status: offline ? 'fail' : 'pass',
+    service_running: !offline, api_responsive: !offline,
+    vm_count_accessible: mockData.vms.filter((v) => v.host_id === id).length,
+    version: 'libvirt 9.0.0 / QEMU 7.2.0',
+    message: offline ? 'libvirtd 服务不可达' : 'libvirtd 运行中，API 响应正常',
+  }
+  // 资源可用性
+  const cpuFree = 100 - host.cpu_usage
+  const memFree = +(host.mem_total_gb * (1 - host.mem_used_gb / host.mem_total_gb)).toFixed(0)
+  const resource_availability = {
+    status: offline ? 'fail' : cpuFree < 15 || memFree < 32 ? 'warn' : 'pass',
+    cpu_available_percent: offline ? 0 : cpuFree,
+    memory_available_gb: offline ? 0 : memFree,
+    can_accept_failover_vms: offline ? 0 : Math.max(0, Math.floor(memFree / 16)),
+    message: offline ? '主机离线，无法接收故障转移' : `可接收约 ${Math.max(0, Math.floor(memFree / 16))} 台标准 VM 故障转移`,
+  }
+  // STONITH / Fencing
+  const fencing_capability = {
+    status: maint ? 'warn' : 'pass',
+    ipmi_accessible: true, power_control_available: true, fence_agent_configured: haEnabled,
+    message: !haEnabled ? '集群未启用 HA，Fencing 仅配置未激活' : maint ? '主机处于维护模式，Fencing 暂时挂起' : 'IPMI 可达，fence_ipmilan 已配置',
+  }
+
+  const checks = { network_heartbeat, storage_heartbeat, libvirt_service, resource_availability, fencing_capability }
+  // 健康分：每个 fail -20，warn -8
+  let score = 100
+  Object.values(checks).forEach((ch: any) => { if (ch.status === 'fail') score -= 20; else if (ch.status === 'warn') score -= 8 })
+  score = Math.max(0, score)
+  const overall = offline ? 'failed' : score >= 90 ? 'healthy' : score >= 70 ? 'degraded' : 'failed'
+
+  const recent_events = offline
+    ? [
+        { timestamp: new Date(Date.now() - 120000).toISOString(), event_type: 'fence', description: `对 ${host.name} 执行 STONITH 电源隔离`, affected_vms: [] },
+        { timestamp: new Date(Date.now() - 90000).toISOString(), event_type: 'failover', description: `${host.name} 上的 VM 已在集群内重启`, affected_vms: mockData.vms.filter((v) => v.host_id === id).map((v) => v.name) },
+      ]
+    : [
+        { timestamp: new Date(Date.now() - 3600_000).toISOString(), event_type: 'recovery', description: 'HA 健康检查全部通过', affected_vms: [] },
+      ]
+
+  return {
+    enabled: haEnabled,
+    overall_status: overall,
+    health_score: score,
+    last_check_time: new Date().toISOString(),
+    check_interval_seconds: 10,
+    checks, recent_events,
+  }
+}
+
+/** 集群 HA 总览（聚合所有主机 HA 状态）。 */
+export function getClusterHAStatus() {
+  return mockData.clusters.map((cl) => {
+    const clHosts = mockData.hosts.filter((h) => h.cluster_id === cl.id)
+    const haList = clHosts.map((h) => getHostHA(h.id)!).filter(Boolean)
+    const avg = haList.length ? Math.round(haList.reduce((s, x) => s + x.health_score, 0) / haList.length) : 0
+    return {
+      cluster_id: cl.id, cluster_name: cl.name, ha_enabled: cl.ha_enabled,
+      host_failures_tolerated: cl.ha_enabled ? 1 : 0,
+      avg_health_score: avg,
+      healthy_hosts: haList.filter((x) => x.overall_status === 'healthy').length,
+      total_hosts: clHosts.length,
+      hosts: clHosts.map((h) => ({ id: h.id, name: h.name, ...getHostHA(h.id)! })),
+    }
+  })
 }
 
 /** 生成实时监控指标（带随机抖动，供 SSE 推送）。 */

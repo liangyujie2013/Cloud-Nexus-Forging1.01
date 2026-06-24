@@ -377,6 +377,24 @@ const dict = {
     lic_price: '价格', lic_feat_max_nodes: '最大节点数', lic_feat_max_vms: '最大虚拟机数',
     lic_feat_ha: '高可用 HA', lic_feat_migration: '热迁移 / 在线迁移', lic_feat_vlan: 'VLAN / SDN',
     lic_feat_storage: '存储后端', lic_feat_roles: '自定义角色', lic_feat_audit: '操作审计', lic_feat_api: 'API 访问',
+    // ===== 主机管理 v2.0 (zh) =====
+    nav_mod_hosts: '主机管理', nav_hosts_list: '主机列表', nav_hosts_detail: '主机详情',
+    host_search_ph: '搜索主机名 / IP / 集群', host_filter_all: '全部状态',
+    host_st_online: '在线', host_st_maint: '维护中', host_st_offline: '离线',
+    host_enter_maint: '进入维护模式', host_exit_maint: '退出维护模式', host_back: '返回列表',
+    host_maint_blocked: '无法进入维护模式 —— 主机上仍有运行中的虚拟机，请先迁移或关闭它们。',
+    host_tab_overview: '概览', host_tab_hardware: '硬件', host_tab_ha: 'HA 状态', host_tab_monitor: '监控', host_tab_vms: '虚拟机',
+    host_threads: '线程', host_sockets: '物理 CPU', host_no_vms: '该主机上没有虚拟机', host_perf_trend: '性能趋势（最近一小时）',
+    hw_cpu_topo: 'CPU 拓扑', hw_model: '型号', hw_vendor: '厂商', hw_sockets: '物理路数', hw_cores_socket: '每路核心数',
+    hw_threads_total: '总线程数', hw_freq: '频率', hw_virt_feat: '虚拟化特性',
+    hw_nics: '网络接口', hw_nic_name: '名称', hw_type: '类型', hw_vendor_model: '厂商 / 型号', hw_speed: '速率', hw_link: '链路', hw_traffic: '实时流量（收/发）',
+    hw_storage_dev: '存储设备', hw_dev_name: '设备', hw_capacity: '容量', hw_interface: '接口', hw_rpm: '转速', hw_temp: '温度', hw_usage: '使用率',
+    hw_pci_dev: 'PCI 设备', hw_dev_class: '设备类别', hw_driver: '驱动', hw_passthrough: '可直通',
+    ha_health_score: 'HA 健康分', ha_last_check: '最后检查', ha_interval: '检查间隔', ha_enabled_on: 'HA 已启用', ha_enabled_off: 'HA 未启用',
+    ha_check_network_heartbeat: '网络心跳', ha_check_storage_heartbeat: '存储心跳', ha_check_libvirt_service: '虚拟化服务', ha_check_resource_availability: '资源可用性', ha_check_fencing_capability: 'Fencing（STONITH）',
+    ha_resp: '响应时间', ha_loss: '丢包率', ha_fails: '连续失败', ha_lat: '延迟', ha_lock: '锁文件', ha_failover_cap: '故障转移容量', ha_fence_agent: 'Fence 代理',
+    ha_events: '最近 HA 事件', ha_affected: '受影响虚拟机', ha_no_events: '近期无 HA 事件',
+    ha_overall_healthy: '健康', ha_overall_degraded: '降级', ha_overall_failed: '故障',
   },
   en: {
     brand_name: 'Cloud Nexus Forging', brand_abbr: 'CNF', brand_version: 'v1.0.1',
@@ -721,6 +739,24 @@ const dict = {
     lic_price: 'Price', lic_feat_max_nodes: 'Max Nodes', lic_feat_max_vms: 'Max VMs',
     lic_feat_ha: 'High Availability', lic_feat_migration: 'Live Migration', lic_feat_vlan: 'VLAN / SDN',
     lic_feat_storage: 'Storage Backend', lic_feat_roles: 'Custom Roles', lic_feat_audit: 'Audit Log', lic_feat_api: 'API Access',
+    // ===== Host Management v2.0 (en) =====
+    nav_mod_hosts: 'Host Management', nav_hosts_list: 'Host List', nav_hosts_detail: 'Host Detail',
+    host_search_ph: 'Search hostname / IP / cluster', host_filter_all: 'All Status',
+    host_st_online: 'Online', host_st_maint: 'Maintenance', host_st_offline: 'Offline',
+    host_enter_maint: 'Enter Maintenance', host_exit_maint: 'Exit Maintenance', host_back: 'Back to List',
+    host_maint_blocked: 'Cannot enter maintenance — host still has running VMs. Migrate or stop them first.',
+    host_tab_overview: 'Overview', host_tab_hardware: 'Hardware', host_tab_ha: 'HA Status', host_tab_monitor: 'Monitoring', host_tab_vms: 'Virtual Machines',
+    host_threads: 'Threads', host_sockets: 'Sockets', host_no_vms: 'No virtual machines on this host', host_perf_trend: 'Performance Trend (last hour)',
+    hw_cpu_topo: 'CPU Topology', hw_model: 'Model', hw_vendor: 'Vendor', hw_sockets: 'Sockets', hw_cores_socket: 'Cores / Socket',
+    hw_threads_total: 'Total Threads', hw_freq: 'Frequency', hw_virt_feat: 'Virtualization Features',
+    hw_nics: 'Network Interfaces', hw_nic_name: 'Name', hw_type: 'Type', hw_vendor_model: 'Vendor / Model', hw_speed: 'Speed', hw_link: 'Link', hw_traffic: 'Traffic (Rx/Tx)',
+    hw_storage_dev: 'Storage Devices', hw_dev_name: 'Device', hw_capacity: 'Capacity', hw_interface: 'Interface', hw_rpm: 'RPM', hw_temp: 'Temp', hw_usage: 'Usage',
+    hw_pci_dev: 'PCI Devices', hw_dev_class: 'Class', hw_driver: 'Driver', hw_passthrough: 'Passthrough',
+    ha_health_score: 'HA Health Score', ha_last_check: 'Last check', ha_interval: 'Check interval', ha_enabled_on: 'HA Enabled', ha_enabled_off: 'HA Disabled',
+    ha_check_network_heartbeat: 'Network Heartbeat', ha_check_storage_heartbeat: 'Storage Heartbeat', ha_check_libvirt_service: 'Virtualization Service', ha_check_resource_availability: 'Resource Availability', ha_check_fencing_capability: 'Fencing (STONITH)',
+    ha_resp: 'Response', ha_loss: 'Packet Loss', ha_fails: 'Consec. Failures', ha_lat: 'Latency', ha_lock: 'Lock File', ha_failover_cap: 'Failover Capacity', ha_fence_agent: 'Fence Agent',
+    ha_events: 'Recent HA Events', ha_affected: 'Affected VMs', ha_no_events: 'No recent HA events',
+    ha_overall_healthy: 'Healthy', ha_overall_degraded: 'Degraded', ha_overall_failed: 'Failed',
   },
 }
 
@@ -756,6 +792,32 @@ document.documentElement.setAttribute('lang', locale.value === 'en' ? 'en' : 'zh
 window.i18n = reactive({ locale })
 window.t = t
 window.setLocale = setLocale
+
+// ---- 全局时间格式化：一律采用浏览器本地时区 ----
+// 入参可为 ISO 字符串 / 时间戳 / 'YYYY-MM-DD HH:mm'，输出本地化字符串。
+window.cnfFmtTime = function (input, opts) {
+  if (input === undefined || input === null || input === '' || input === '—' || input === '-') return '—'
+  let d
+  if (typeof input === 'number') d = new Date(input)
+  else if (/^\d{4}-\d{2}-\d{2}[ T]/.test(String(input))) d = new Date(String(input).replace(' ', 'T'))
+  else d = new Date(input)
+  if (isNaN(d.getTime())) return String(input)
+  const loc = (window.i18n && window.i18n.locale) === 'en' ? 'en-US' : 'zh-CN'
+  const mode = (opts && opts.mode) || 'datetime'
+  if (mode === 'date') return d.toLocaleDateString(loc)
+  if (mode === 'time') return d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  if (mode === 'relative') {
+    const diff = (Date.now() - d.getTime()) / 1000
+    const isEn = loc === 'en-US'
+    if (diff < 60) return isEn ? 'just now' : '刚刚'
+    if (diff < 3600) return Math.floor(diff / 60) + (isEn ? ' min ago' : ' 分钟前')
+    if (diff < 86400) return Math.floor(diff / 3600) + (isEn ? ' h ago' : ' 小时前')
+    return Math.floor(diff / 86400) + (isEn ? ' d ago' : ' 天前')
+  }
+  return d.toLocaleString(loc, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+// 当前本地时间（响应式时钟用）
+window.cnfNow = () => new Date()
 window.cnfTheme = reactive({ theme })
 window.setTheme = setTheme
 window.THEMES = ['light', 'dim', 'dark']
