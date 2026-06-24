@@ -57,13 +57,17 @@ const AccessControlView = {
     // ============================================================
     //  用户 创建 / 编辑 对话框
     // ============================================================
+    // 默认配额：按角色给出合理预设（精简表单——多数场景无需手填）
     const blankQuota = () => ({ max_vms: 10, max_vcpus: 40, max_memory_gb: 128, max_storage_gb: 1000 })
+    const showQuota = ref(false)   // 资源配额折叠为「高级设置」，默认收起
     const userDlg = ref({ open: false, mode: 'create', id: null, form: {}, err: {}, saving: false })
     const openUserCreate = () => {
+      showQuota.value = false
       userDlg.value = { open: true, mode: 'create', id: null, saving: false, err: {},
         form: { username: '', display_name: '', email: '', phone: '', password: '', password2: '', role_id: 4, resource_quota: blankQuota() } }
     }
     const openUserEdit = (u) => {
+      showQuota.value = false
       userDlg.value = { open: true, mode: 'edit', id: u.id, saving: false, err: {},
         form: { username: u.username, display_name: u.display_name, email: u.email, phone: u.phone || '', password: '', password2: '', role_id: u.role_id, resource_quota: { ...u.resource_quota } } }
     }
@@ -129,7 +133,7 @@ const AccessControlView = {
 
     return { props, users, roles, userRoles, privileges, assignments, auditLogs, selRole,
       hasPriv, roleName, roleNamesOf, resultBadge,
-      userStatusMeta, fmtTime, userDlg, openUserCreate, openUserEdit, saveUser,
+      userStatusMeta, fmtTime, userDlg, showQuota, openUserCreate, openUserEdit, saveUser,
       toggleUserStatus, resetPwd, blockDlg, confirmDlg, askDeleteUser, doDeleteUser, t }
   },
   template: `
@@ -210,8 +214,13 @@ const AccessControlView = {
                   <option v-for="r in userRoles" :key="r.id" :value="r.id">{{ r.name }}</option>
                 </select>
               </div>
-              <div class="quota-fieldset">
-                <div class="quota-legend"><i class="fas fa-gauge-high"></i> {{ t('user_quota') }}</div>
+              <!-- 资源配额：折叠为「高级设置」，默认收起，避免表单过长 -->
+              <div class="advanced-toggle" @click="showQuota=!showQuota">
+                <i class="fas" :class="showQuota?'fa-chevron-down':'fa-chevron-right'"></i>
+                {{ t('user_quota_advanced') }}
+                <span class="muted" style="font-weight:400;font-size:12px">· {{ t('user_quota_default_hint') }}</span>
+              </div>
+              <div v-show="showQuota" class="quota-fieldset">
                 <div class="form-grid-2">
                   <div class="form-row"><label>{{ t('user_max_vms') }}</label><input type="number" min="0" v-model.number="userDlg.form.resource_quota.max_vms"></div>
                   <div class="form-row"><label>{{ t('user_max_vcpus') }}</label><input type="number" min="0" v-model.number="userDlg.form.resource_quota.max_vcpus"></div>

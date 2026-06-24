@@ -69,6 +69,8 @@ const HostsView = {
       selectedId.value = null; detail.value = null; ha.value = null
       window.dispatchEvent(new CustomEvent('cnf:goto', { detail: { module: 'hosts', tab: 'list' } }))
     }
+    // 添加主机：复用全局主机纳管向导（与基础设施一致）
+    const addHost = () => window.dispatchEvent(new CustomEvent('cnf:open-host-wizard', { detail: { presetClusterId: 0 } }))
 
     // react to nav tab changes (e.g. user clicks "主机列表")
     watch(() => props.tab, (nv) => {
@@ -154,7 +156,7 @@ const HostsView = {
     const showDetailView = computed(() => props.tab === 'detail' && selectedId.value && detail.value)
 
     return {
-      props, hosts, filteredHosts, search, statusFilter, statusMeta, openDetail, backToList,
+      props, hosts, filteredHosts, search, statusFilter, statusMeta, openDetail, backToList, addHost,
       selectedId, detail, ha, detailTab, loading, showDetailView, detailHost, detailVMs,
       toggleMaintenance, maintBusy, blockDlg,
       haCheckList, haStatusColor, haStatusText, overallColor, overallText, evIcon, evColor,
@@ -165,7 +167,12 @@ const HostsView = {
   <div>
     <!-- ====================== LIST ====================== -->
     <template v-if="!showDetailView">
+      <!-- 主机详情 tab 但未选中主机：引导选择（区别于主机列表）-->
+      <div v-if="props.tab==='detail'" class="hosts-pick-hint">
+        <i class="fas fa-circle-info"></i> {{ t('host_pick_hint') }}
+      </div>
       <div class="toolbar">
+        <button v-if="props.tab==='list'" class="apple-btn apple-btn--primary" @click="addHost"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
         <div class="toolbar-search"><i class="fas fa-magnifying-glass"></i><input v-model="search" :placeholder="t('host_search_ph')"></div>
         <select class="host-filter-select" v-model="statusFilter">
           <option value="">{{ t('host_filter_all') }}</option>
@@ -198,10 +205,14 @@ const HostsView = {
             <span class="muted"><i class="fas fa-desktop"></i> {{ h.vm_running }}/{{ h.vm_count }} VM</span>
             <span class="muted" v-if="h.gpus"><i class="fas fa-microchip" style="color:#76b900"></i> {{ h.gpus }} GPU</span>
             <div class="spacer"></div>
-            <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click.stop="toggleMaintenance(h)">
+            <!-- 主机列表 tab：维护模式切换；主机详情 tab：查看详情 -->
+            <button v-if="props.tab==='list'" class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click.stop="toggleMaintenance(h)">
               <i v-if="maintBusy===h.id" class="fas fa-spinner fa-spin"></i>
               <i v-else :class="h.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
               {{ h.status==='maintenance' ? t('host_exit_maint') : t('host_enter_maint') }}
+            </button>
+            <button v-else class="apple-btn apple-btn--ghost apple-btn--sm" @click.stop="openDetail(h.id)">
+              <i class="fas fa-arrow-right"></i> {{ t('host_view_detail') }}
             </button>
           </div>
         </div>

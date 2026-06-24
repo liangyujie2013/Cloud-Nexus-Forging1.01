@@ -788,6 +788,25 @@ app.post(`${API}/vswitches`, async (c) => {
     message: `（原型）二层虚拟交换机「${body.name}」已创建，上联：${uplink}`,
   })
 })
+// ---- 创建 VLAN（VLAN ID 1~4094 去重 + 必填校验）----
+app.post(`${API}/vlans`, async (c) => {
+  const b = await c.req.json<any>()
+  const vid = Number(b.vlan_id)
+  if (!vid || vid < 1 || vid > 4094) return c.json({ error: 'VLAN ID 须为 1~4094', code: 'INVALID' }, 400)
+  if (!b.name) return c.json({ error: 'VLAN 名称必填', code: 'INVALID' }, 400)
+  if (mockData.vlans.find((v) => v.vlan_id === vid))
+    return c.json({ error: `VLAN ID ${vid} 已存在`, code: 'VLAN_DUPLICATE' }, 409)
+  const vlan = {
+    id: Date.now(), vswitch: b.vswitch || (mockData.vswitches[0]?.name || ''),
+    vlan_id: vid, name: b.name, subnet: b.subnet || '—', gateway: b.gateway || '—',
+    dhcp: !!b.dhcp, vms: 0,
+  }
+  mockData.vlans.push(vlan as any)
+  // 同步把 VLAN ID 登记到所属虚拟交换机
+  const sw = mockData.vswitches.find((s) => s.name === vlan.vswitch)
+  if (sw && !sw.vlans.includes(vid)) sw.vlans.push(vid)
+  return c.json({ ...vlan, message: `VLAN ${vid}（${vlan.name}）已创建` })
+})
 // 网络拓扑：虚拟交换机 → VLAN
 app.get(`${API}/network/topology`, (c) => {
   const tree = mockData.vswitches.map((sw) => ({

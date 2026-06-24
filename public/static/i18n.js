@@ -303,6 +303,7 @@ const dict = {
     // ===== 用户管理（完整 CRUD + 配额）=====
     user_st_active: '正常', user_st_disabled: '已禁用', user_st_locked: '已锁定',
     user_edit: '编辑用户', user_quota: '资源配额', user_disable: '禁用', user_enable: '启用',
+    user_quota_advanced: '高级设置 · 资源配额', user_quota_default_hint: '默认按角色分配，可展开自定义',
     user_reset_pwd: '重置密码', user_username_rule: '仅限英文字母、数字和下划线',
     user_email_invalid: '请输入有效的邮箱地址', user_pwd_rule: '密码至少 6 位', user_pwd_mismatch: '两次密码不一致',
     user_display_ph: '如：张运维', user_phone: '手机号', user_password: '密码', user_password2: '确认密码',
@@ -356,6 +357,12 @@ const dict = {
     vlan_title: 'VLAN 列表', vlan_add: '新建 VLAN', vlan_vswitch: '所属交换机', vlan_id: 'VLAN ID',
     vlan_name: '名称', vlan_subnet: '子网', vlan_gateway: '网关', vlan_dhcp: 'DHCP', vlan_vms: '台虚拟机',
     net_topo_hint: '展开交换机查看其承载的 VLAN 与虚拟机分布。',
+    // MTU 自定义
+    sw_mtu_standard: '标准', sw_mtu_jumbo: '巨型帧', sw_mtu_hint: '可填 576~9216 任意值，常用 1500 / 9000',
+    sw_mtu_range: 'MTU 须为 576~9216',
+    // VLAN 创建
+    vlan_id_range: 'VLAN ID 须为 1~4094', vlan_id_dup: '该 VLAN ID 已存在', vlan_id_hint: '取值范围 1~4094',
+    vlan_name_ph: '如：业务前端 VLAN', vlan_subnet_invalid: '请输入有效 CIDR，如 10.10.1.0/24', vlan_dhcp_enable: '启用 DHCP',
 
     // ===== 监控 · 告警规则 =====
     rule_title: '告警规则', rule_add: '新建规则', rule_name: '规则名', rule_metric: '监控指标',
@@ -399,6 +406,7 @@ const dict = {
     host_search_ph: '搜索主机名 / IP / 集群', host_filter_all: '全部状态',
     host_st_online: '在线', host_st_maint: '维护中', host_st_offline: '离线',
     host_enter_maint: '进入维护模式', host_exit_maint: '退出维护模式', host_back: '返回列表',
+    host_pick_hint: '请选择一台主机查看其概览 / 硬件 / HA 状态 / 虚拟机详情。', host_view_detail: '查看详情',
     host_maint_blocked: '无法进入维护模式 —— 主机上仍有运行中的虚拟机，请先迁移或关闭它们。',
     host_tab_overview: '概览', host_tab_hardware: '硬件', host_tab_ha: 'HA 状态', host_tab_monitor: '监控', host_tab_vms: '虚拟机',
     host_threads: '线程', host_sockets: '物理 CPU', host_no_vms: '该主机上没有虚拟机', host_perf_trend: '性能趋势（最近一小时）',
@@ -685,6 +693,7 @@ const dict = {
     // ===== User management (full CRUD + quota) =====
     user_st_active: 'Active', user_st_disabled: 'Disabled', user_st_locked: 'Locked',
     user_edit: 'Edit User', user_quota: 'Resource Quota', user_disable: 'Disable', user_enable: 'Enable',
+    user_quota_advanced: 'Advanced · Resource Quota', user_quota_default_hint: 'Defaults by role, expand to customize',
     user_reset_pwd: 'Reset Password', user_username_rule: 'Letters, digits and underscore only',
     user_email_invalid: 'Please enter a valid email', user_pwd_rule: 'Password must be at least 6 chars', user_pwd_mismatch: 'Passwords do not match',
     user_display_ph: 'e.g. John Ops', user_phone: 'Phone', user_password: 'Password', user_password2: 'Confirm Password',
@@ -737,6 +746,12 @@ const dict = {
     vlan_title: 'VLANs', vlan_add: 'New VLAN', vlan_vswitch: 'vSwitch', vlan_id: 'VLAN ID',
     vlan_name: 'Name', vlan_subnet: 'Subnet', vlan_gateway: 'Gateway', vlan_dhcp: 'DHCP', vlan_vms: 'VMs',
     net_topo_hint: 'Expand a switch to see its VLANs and VM distribution.',
+    // MTU custom
+    sw_mtu_standard: 'Standard', sw_mtu_jumbo: 'Jumbo', sw_mtu_hint: 'Any value 576~9216, commonly 1500 / 9000',
+    sw_mtu_range: 'MTU must be 576~9216',
+    // VLAN create
+    vlan_id_range: 'VLAN ID must be 1~4094', vlan_id_dup: 'This VLAN ID already exists', vlan_id_hint: 'Range 1~4094',
+    vlan_name_ph: 'e.g. Frontend VLAN', vlan_subnet_invalid: 'Enter valid CIDR, e.g. 10.10.1.0/24', vlan_dhcp_enable: 'Enable DHCP',
 
     // ===== Monitoring alert rules =====
     rule_title: 'Alert Rules', rule_add: 'New Rule', rule_name: 'Rule', rule_metric: 'Metric',
@@ -778,6 +793,7 @@ const dict = {
     host_search_ph: 'Search hostname / IP / cluster', host_filter_all: 'All Status',
     host_st_online: 'Online', host_st_maint: 'Maintenance', host_st_offline: 'Offline',
     host_enter_maint: 'Enter Maintenance', host_exit_maint: 'Exit Maintenance', host_back: 'Back to List',
+    host_pick_hint: 'Select a host to view its overview / hardware / HA status / VMs.', host_view_detail: 'View Details',
     host_maint_blocked: 'Cannot enter maintenance — host still has running VMs. Migrate or stop them first.',
     host_tab_overview: 'Overview', host_tab_hardware: 'Hardware', host_tab_ha: 'HA Status', host_tab_monitor: 'Monitoring', host_tab_vms: 'Virtual Machines',
     host_threads: 'Threads', host_sockets: 'Sockets', host_no_vms: 'No virtual machines on this host', host_perf_trend: 'Performance Trend (last hour)',

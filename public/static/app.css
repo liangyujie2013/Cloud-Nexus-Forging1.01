@@ -852,4 +852,35 @@
 .quota-fieldset { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--separator); border-radius: var(--radius-md); background: var(--bg-secondary); }
 .quota-legend { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
 .quota-legend i { color: var(--color-blue); margin-right: 5px; }
+/* 高级设置折叠头：点击展开/收起资源配额，缩短默认表单长度 */
+.advanced-toggle {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 14px; padding: 8px 2px;
+  font-size: 13px; font-weight: 600; color: var(--color-blue);
+  cursor: pointer; user-select: none;
+  transition: color var(--duration-fast) ease;
+}
+.advanced-toggle:hover { color: var(--color-indigo); }
+.advanced-toggle i { font-size: 11px; width: 12px; text-align: center; }
+.advanced-toggle .muted { color: var(--text-tertiary); }
+.advanced-toggle + .quota-fieldset { margin-top: 6px; }
 .block-children { margin-top: 8px; }
+
+/* ===== 主机详情 tab 未选中主机时的引导提示条 ===== */
+.hosts-pick-hint {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; margin-bottom: 12px;
+  background: var(--color-blue-soft, rgba(0,122,255,.08)); color: var(--color-blue);
+  border: 1px solid rgba(0,122,255,.2); border-radius: var(--radius-md); font-size: 13px;
+}
+
+/* ===== 创建虚拟交换机：MTU 预设快捷选择芯片 ===== */
+.mtu-presets { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.mtu-chip {
+  padding: 5px 12px; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--separator); border-radius: var(--radius-pill);
+  background: var(--bg-primary); color: var(--text-primary); transition: all var(--duration-fast);
+}
+.mtu-chip:hover { border-color: var(--color-blue); }
+.mtu-chip.active { background: var(--color-blue); color: #fff; border-color: var(--color-blue); }
+.mtu-chip.active .muted { color: rgba(255,255,255,.85); }
