@@ -158,7 +158,11 @@ const InfrastructureView = {
                   <div><i class="fas fa-building" style="color:var(--color-blue)"></i> <strong>{{ dc.name }}</strong>
                     <div class="muted" style="font-size:12px;margin-top:2px">{{ dc.location }} · {{ dc.description }}</div>
                   </div>
-                  <span class="apple-badge apple-badge--running"><span class="dot"></span>{{ dc.status }}</span>
+                  <div class="flex" style="gap:6px;align-items:center">
+                    <span class="apple-badge apple-badge--running"><span class="dot"></span>{{ dc.status }}</span>
+                    <button class="icon-btn" :title="t('op_edit')" @click="openDcEdit(dc)"><i class="fas fa-pen"></i></button>
+                    <button class="icon-btn danger" :title="t('op_delete')" @click="delDatacenter(dc)"><i class="fas fa-trash"></i></button>
+                  </div>
                 </div>
                 <div class="gpu-stats">
                   <div class="gpu-stat"><div class="k">{{ t('nav_infra_clusters') }}</div><div class="v">{{ dc.cluster_count }}</div></div>
@@ -173,6 +177,11 @@ const InfrastructureView = {
 
       <!-- ===== clusters：集群管理（显示所属数据中心 + 聚合统计 + 添加主机/删除校验）===== -->
       <template v-else-if="props.tab==='clusters'">
+        <div class="crud-toolbar">
+          <button class="apple-btn apple-btn--primary" @click="openClCreate"><i class="fas fa-plus"></i> {{ t('cl_create') }}</button>
+          <div class="spacer"></div>
+          <span class="muted" style="font-size:13px">{{ clusters.length }} {{ t('nav_infra_clusters') }}</span>
+        </div>
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
             <thead><tr>
@@ -190,6 +199,7 @@ const InfrastructureView = {
                 <td><strong>{{ c.vm_running }}</strong><span class="muted">/{{ c.vm_count }}</span></td>
                 <td>
                   <button class="icon-btn" :title="t('hw_add_host')" @click="addHost(c.id)"><i class="fas fa-plus"></i></button>
+                  <button class="icon-btn" :title="t('op_edit')" @click="openClEdit(c)"><i class="fas fa-pen"></i></button>
                   <button class="icon-btn danger" :title="t('op_delete')" @click="delCluster(c)"><i class="fas fa-trash"></i></button>
                 </td>
               </tr>
@@ -276,6 +286,72 @@ const InfrastructureView = {
           </div>
         </div>
       </template>
+
+      <!-- ===== 数据中心 创建/编辑 对话框 ===== -->
+      <div v-if="dcDlg.open" class="modal-mask" @click.self="dcDlg.open=false">
+        <div class="modal-dialog">
+          <div class="modal-head"><i class="fas fa-building" style="color:var(--color-blue)"></i> {{ dcDlg.mode==='create' ? t('dc_create') : t('dc_edit') }}</div>
+          <div class="modal-body">
+            <div class="form-row">
+              <label class="req">{{ t('name') }}</label>
+              <input :class="{invalid:dcDlg.err.name}" v-model="dcDlg.form.name" :placeholder="t('dc_name_ph')">
+              <div v-if="dcDlg.err.name" class="form-err">{{ dcDlg.err.name }}</div>
+            </div>
+            <div class="form-grid-2">
+              <div class="form-row"><label>{{ t('dc_location') }}</label><input  v-model="dcDlg.form.location" :placeholder="t('dc_location_ph')"></div>
+              <div class="form-row"><label>{{ t('dc_timezone') }}</label>
+                <select  v-model="dcDlg.form.timezone">
+                  <option value="Asia/Shanghai">Asia/Shanghai (UTC+8)</option>
+                  <option value="Asia/Tokyo">Asia/Tokyo (UTC+9)</option>
+                  <option value="Europe/London">Europe/London (UTC+0)</option>
+                  <option value="America/New_York">America/New_York (UTC-5)</option>
+                  <option value="UTC">UTC</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row"><label>{{ t('dc_desc') }}</label><textarea  rows="2" v-model="dcDlg.form.description" :placeholder="t('dc_desc_ph')"></textarea></div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--ghost" @click="dcDlg.open=false">{{ t('op_cancel') }}</button>
+            <button class="apple-btn apple-btn--primary" :disabled="dcDlg.saving" @click="saveDc"><i v-if="dcDlg.saving" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 集群 创建/编辑 对话框 ===== -->
+      <div v-if="clDlg.open" class="modal-mask" @click.self="clDlg.open=false">
+        <div class="modal-dialog">
+          <div class="modal-head"><i class="fas fa-layer-group" style="color:var(--color-indigo)"></i> {{ clDlg.mode==='create' ? t('cl_create') : t('cl_edit') }}</div>
+          <div class="modal-body">
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label class="req">{{ t('name') }}</label>
+                <input :class="{invalid:clDlg.err.name}" v-model="clDlg.form.name" :placeholder="t('cl_name_ph')">
+                <div v-if="clDlg.err.name" class="form-err">{{ clDlg.err.name }}</div>
+              </div>
+              <div class="form-row">
+                <label class="req">{{ t('host_dc') }}</label>
+                <select :class="{invalid:clDlg.err.datacenter_id}" v-model="clDlg.form.datacenter_id">
+                  <option v-for="dc in datacenters" :key="dc.id" :value="dc.id">{{ dc.name }}</option>
+                </select>
+                <div v-if="clDlg.err.datacenter_id" class="form-err">{{ clDlg.err.datacenter_id }}</div>
+              </div>
+            </div>
+            <div class="form-row"><label>{{ t('dc_desc') }}</label><input  v-model="clDlg.form.description" :placeholder="t('cl_desc_ph')"></div>
+            <div class="form-grid-2">
+              <div class="form-row"><label>CPU {{ t('cc_cpu_over') }}</label><input  type="number" step="0.5" min="1" v-model.number="clDlg.form.overcommit_cpu"></div>
+              <div class="form-row" style="justify-content:flex-end">
+                <label class="switch-row"><input type="checkbox" v-model="clDlg.form.ha_enabled"> {{ t('cl_ha') }}</label>
+                <label class="switch-row"><input type="checkbox" v-model="clDlg.form.drs_enabled"> {{ t('nav_drs') }}</label>
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--ghost" @click="clDlg.open=false">{{ t('op_cancel') }}</button>
+            <button class="apple-btn apple-btn--primary" :disabled="clDlg.saving" @click="saveCl"><i v-if="clDlg.saving" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+          </div>
+        </div>
+      </div>
 
       <!-- 级联删除阻止对话框 -->
       <div v-if="blockDlg.open" class="modal-mask" @click.self="blockDlg.open=false">

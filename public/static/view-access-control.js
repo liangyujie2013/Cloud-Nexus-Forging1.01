@@ -4,22 +4,26 @@
 //          / audit 操作审计。CNF 企业级角色/权限（Roles/Privileges）模型。
 // =============================================================================
 (function () {
-const { ref, onMounted, watch } = Vue
+const { ref, onMounted, watch, computed } = Vue
 const api = window.api
 const t = window.t
+const toast = window.cnfToast
+const fmt = window.cnfFmtTime
 
 const AccessControlView = {
   props: { tab: { type: String, default: 'users' } },
   setup(props) {
     const users = ref([])
     const roles = ref([])
+    const userRoles = ref([])   // 用户角色（1超管/2系统管理员/3运维/4只读）
     const privileges = ref([])
     const assignments = ref([])
     const auditLogs = ref([])
     const selRole = ref(null)
 
     const load = async () => {
-      if (!users.value.length) users.value = await api('/users')
+      users.value = await api('/users')
+      if (!userRoles.value.length) userRoles.value = await api('/user-roles')
       if (!roles.value.length) {
         roles.value = await api('/roles')
         if (roles.value.length) selRole.value = roles.value[0]
@@ -40,32 +44,213 @@ const AccessControlView = {
       denied: { cls: 'apple-badge--warning', label: t('acc_result_denied') },
     }[r] || { cls: '', label: r })
 
-    return { props, users, roles, privileges, assignments, auditLogs, selRole, hasPriv, roleName, roleNamesOf, resultBadge, t }
+    // ============================================================
+    //  用户状态徽标
+    // ============================================================
+    const userStatusMeta = (s) => ({
+      active: { cls: 'apple-badge--running', label: t('user_st_active') },
+      disabled: { cls: 'apple-badge--stopped', label: t('user_st_disabled') },
+      locked: { cls: 'apple-badge--warning', label: t('user_st_locked') },
+    }[s] || { cls: 'apple-badge--stopped', label: s })
+    const fmtTime = (v) => (v && v !== '—' && v !== '-') ? fmt(v, { mode: 'datetime' }) : '—'
+
+    // ============================================================
+    //  用户 创建 / 编辑 对话框
+    // ============================================================
+    const blankQuota = () => ({ max_vms: 10, max_vcpus: 40, max_memory_gb: 128, max_storage_gb: 1000 })
+    const userDlg = ref({ open: false, mode: 'create', id: null, form: {}, err: {}, saving: false })
+    const openUserCreate = () => {
+      userDlg.value = { open: true, mode: 'create', id: null, saving: false, err: {},
+        form: { username: '', display_name: '', email: '', phone: '', password: '', password2: '', role_id: 4, resource_quota: blankQuota() } }
+    }
+    const openUserEdit = (u) => {
+      userDlg.value = { open: true, mode: 'edit', id: u.id, saving: false, err: {},
+        form: { username: u.username, display_name: u.display_name, email: u.email, phone: u.phone || '', password: '', password2: '', role_id: u.role_id, resource_quota: { ...u.resource_quota } } }
+    }
+    const saveUser = async () => {
+      const f = userDlg.value.form; const err = {}; const isCreate = userDlg.value.mode === 'create'
+      if (isCreate) {
+        if (!f.username || !f.username.trim()) err.username = t('op_required')
+        else if (!/^[A-Za-z0-9_]+$/.test(f.username)) err.username = t('user_username_rule')
+      }
+      if (!f.display_name || !f.display_name.trim()) err.display_name = t('op_required')
+      if (!f.email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email)) err.email = t('user_email_invalid')
+      if (isCreate) {
+        if (!f.password || f.password.length < 6) err.password = t('user_pwd_rule')
+        else if (f.password !== f.password2) err.password2 = t('user_pwd_mismatch')
+      } else if (f.password) {
+        if (f.password.length < 6) err.password = t('user_pwd_rule')
+        else if (f.password !== f.password2) err.password2 = t('user_pwd_mismatch')
+      }
+      userDlg.value.err = err
+      if (Object.keys(err).length) return
+      userDlg.value.saving = true
+      const payload = { display_name: f.display_name, email: f.email, phone: f.phone, role_id: Number(f.role_id), resource_quota: f.resource_quota }
+      let res
+      if (isCreate) { payload.username = f.username; payload.password = f.password; res = await api('/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) }
+      else { res = await api('/users/' + userDlg.value.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) }
+      userDlg.value.saving = false
+      if (res && res.error) {
+        if (res.code === 'NAME_DUPLICATE') { userDlg.value.err = { username: res.error }; return }
+        if (res.code === 'BAD_USERNAME') { userDlg.value.err = { username: res.error }; return }
+        return toast(res.error, 'error')
+      }
+      toast(isCreate ? t('toast_created') : t('toast_saved'), 'success')
+      userDlg.value.open = false
+      await load()
+    }
+
+    // ---- 启用 / 禁用 ----
+    const toggleUserStatus = async (u) => {
+      const next = u.status === 'active' ? 'disabled' : 'active'
+      const res = await api('/users/' + u.id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) })
+      if (res && res.error) return toast(res.error, 'error')
+      toast(res.message, 'success'); await load()
+    }
+    // ---- 重置密码 ----
+    const resetPwd = async (u) => {
+      const res = await api('/users/' + u.id + '/reset-password', { method: 'POST' })
+      if (res && res.error) return toast(res.error, 'error')
+      toast(res.message, 'success')
+    }
+    // ---- 删除（运行中 VM 阻止）----
+    const blockDlg = ref({ open: false, title: '', message: '', children: [] })
+    const confirmDlg = ref({ open: false, user: null })
+    const askDeleteUser = (u) => { confirmDlg.value = { open: true, user: u } }
+    const doDeleteUser = async () => {
+      const u = confirmDlg.value.user; confirmDlg.value.open = false
+      const res = await api('/users/' + u.id, { method: 'DELETE' })
+      if (res && res.error) {
+        if (res.code === 'HAS_RUNNING_VM') return blockDlg.value = { open: true, title: t('user_del_blocked'), message: res.error, children: res.children || [] }
+        return toast(res.error, 'error')
+      }
+      toast(res.message, 'success'); await load()
+    }
+
+    return { props, users, roles, userRoles, privileges, assignments, auditLogs, selRole,
+      hasPriv, roleName, roleNamesOf, resultBadge,
+      userStatusMeta, fmtTime, userDlg, openUserCreate, openUserEdit, saveUser,
+      toggleUserStatus, resetPwd, blockDlg, confirmDlg, askDeleteUser, doDeleteUser, t }
   },
   template: `
     <div>
-      <!-- ===== users：用户管理 ===== -->
+      <!-- ===== users：用户管理（完整 CRUD）===== -->
       <template v-if="props.tab==='users'">
-        <div class="toolbar">
-          <span class="muted">{{ users.length }} {{ t('acc_users_title') }}</span>
+        <div class="crud-toolbar">
+          <button class="apple-btn apple-btn--primary" @click="openUserCreate"><i class="fas fa-user-plus"></i> {{ t('acc_add_user') }}</button>
           <div class="spacer"></div>
-          <button class="apple-btn apple-btn--primary"><i class="fas fa-user-plus"></i> {{ t('acc_add_user') }}</button>
+          <span class="muted" style="font-size:13px">{{ users.length }} {{ t('acc_users_title') }}</span>
         </div>
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
-            <thead><tr><th>{{ t('acc_username') }}</th><th>{{ t('acc_display_name') }}</th><th>{{ t('acc_email') }}</th><th>{{ t('acc_roles') }}</th><th>{{ t('acc_source') }}</th><th>{{ t('status') }}</th><th>{{ t('acc_last_login') }}</th></tr></thead>
+            <thead><tr><th>{{ t('acc_username') }}</th><th>{{ t('acc_display_name') }}</th><th>{{ t('acc_email') }}</th><th>{{ t('acc_roles') }}</th><th>{{ t('user_quota') }}</th><th>{{ t('status') }}</th><th>{{ t('acc_last_login') }}</th><th style="width:150px">{{ t('op_actions') }}</th></tr></thead>
             <tbody>
               <tr v-for="u in users" :key="u.id">
                 <td><i class="fas fa-user muted"></i> <strong>{{ u.username }}</strong></td>
                 <td>{{ u.display_name }}</td>
                 <td class="mono muted">{{ u.email }}</td>
-                <td><span class="apple-badge apple-badge--running"><span class="dot"></span>{{ roleNamesOf(u.role_keys) }}</span></td>
-                <td><span class="apple-badge">{{ u.source==='ldap'?t('acc_source_ldap'):t('acc_source_local') }}</span></td>
-                <td><span class="apple-badge" :class="u.is_active?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ u.is_active?t('enabled'):t('disabled') }}</span></td>
-                <td class="muted">{{ u.last_login }}</td>
+                <td><span class="apple-badge apple-badge--running"><span class="dot"></span>{{ u.role_name }}</span></td>
+                <td class="mono" style="font-size:12px">
+                  <span :title="t('user_quota')">{{ u.resource_usage.current_vms }}/{{ u.resource_quota.max_vms }} VM · {{ u.resource_usage.current_vcpus }}/{{ u.resource_quota.max_vcpus }} vCPU</span>
+                </td>
+                <td><span class="apple-badge" :class="userStatusMeta(u.status).cls"><span class="dot"></span>{{ userStatusMeta(u.status).label }}</span></td>
+                <td class="muted">{{ fmtTime(u.last_login_at || u.last_login) }}</td>
+                <td>
+                  <button class="icon-btn" :title="t('op_edit')" @click="openUserEdit(u)"><i class="fas fa-pen"></i></button>
+                  <button class="icon-btn" :title="u.status==='active'?t('user_disable'):t('user_enable')" @click="toggleUserStatus(u)"><i class="fas" :class="u.status==='active'?'fa-user-slash':'fa-user-check'"></i></button>
+                  <button class="icon-btn" :title="t('user_reset_pwd')" @click="resetPwd(u)"><i class="fas fa-key"></i></button>
+                  <button class="icon-btn danger" :title="t('op_delete')" @click="askDeleteUser(u)"><i class="fas fa-trash"></i></button>
+                </td>
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- 用户 创建/编辑 对话框 -->
+        <div v-if="userDlg.open" class="modal-mask" @click.self="userDlg.open=false">
+          <div class="modal-dialog modal-lg">
+            <div class="modal-head"><i class="fas fa-user-plus" style="color:var(--color-blue)"></i> {{ userDlg.mode==='create' ? t('acc_add_user') : t('user_edit') }}</div>
+            <div class="modal-body">
+              <div class="form-grid-2">
+                <div class="form-row">
+                  <label class="req">{{ t('acc_username') }}</label>
+                  <input :class="{invalid:userDlg.err.username}" v-model="userDlg.form.username" :disabled="userDlg.mode==='edit'" placeholder="ops_zhang">
+                  <div v-if="userDlg.err.username" class="form-err">{{ userDlg.err.username }}</div>
+                  <div v-else class="muted" style="font-size:11px;margin-top:4px">{{ t('user_username_rule') }}</div>
+                </div>
+                <div class="form-row">
+                  <label class="req">{{ t('acc_display_name') }}</label>
+                  <input :class="{invalid:userDlg.err.display_name}" v-model="userDlg.form.display_name" :placeholder="t('user_display_ph')">
+                  <div v-if="userDlg.err.display_name" class="form-err">{{ userDlg.err.display_name }}</div>
+                </div>
+              </div>
+              <div class="form-grid-2">
+                <div class="form-row">
+                  <label class="req">{{ t('acc_email') }}</label>
+                  <input :class="{invalid:userDlg.err.email}" v-model="userDlg.form.email" placeholder="name@example.com">
+                  <div v-if="userDlg.err.email" class="form-err">{{ userDlg.err.email }}</div>
+                </div>
+                <div class="form-row"><label>{{ t('user_phone') }}</label><input v-model="userDlg.form.phone" placeholder="13800138000"></div>
+              </div>
+              <div class="form-grid-2">
+                <div class="form-row">
+                  <label :class="{req:userDlg.mode==='create'}">{{ t('user_password') }}</label>
+                  <input type="password" :class="{invalid:userDlg.err.password}" v-model="userDlg.form.password" :placeholder="userDlg.mode==='edit'?t('user_pwd_keep'):''">
+                  <div v-if="userDlg.err.password" class="form-err">{{ userDlg.err.password }}</div>
+                </div>
+                <div class="form-row">
+                  <label :class="{req:userDlg.mode==='create'}">{{ t('user_password2') }}</label>
+                  <input type="password" :class="{invalid:userDlg.err.password2}" v-model="userDlg.form.password2">
+                  <div v-if="userDlg.err.password2" class="form-err">{{ userDlg.err.password2 }}</div>
+                </div>
+              </div>
+              <div class="form-row">
+                <label class="req">{{ t('acc_roles') }}</label>
+                <select v-model.number="userDlg.form.role_id">
+                  <option v-for="r in userRoles" :key="r.id" :value="r.id">{{ r.name }}</option>
+                </select>
+              </div>
+              <div class="quota-fieldset">
+                <div class="quota-legend"><i class="fas fa-gauge-high"></i> {{ t('user_quota') }}</div>
+                <div class="form-grid-2">
+                  <div class="form-row"><label>{{ t('user_max_vms') }}</label><input type="number" min="0" v-model.number="userDlg.form.resource_quota.max_vms"></div>
+                  <div class="form-row"><label>{{ t('user_max_vcpus') }}</label><input type="number" min="0" v-model.number="userDlg.form.resource_quota.max_vcpus"></div>
+                  <div class="form-row"><label>{{ t('user_max_mem') }} (GB)</label><input type="number" min="0" v-model.number="userDlg.form.resource_quota.max_memory_gb"></div>
+                  <div class="form-row"><label>{{ t('user_max_storage') }} (GB)</label><input type="number" min="0" v-model.number="userDlg.form.resource_quota.max_storage_gb"></div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="apple-btn apple-btn--ghost" @click="userDlg.open=false">{{ t('op_cancel') }}</button>
+              <button class="apple-btn apple-btn--primary" :disabled="userDlg.saving" @click="saveUser"><i v-if="userDlg.saving" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 删除确认 -->
+        <div v-if="confirmDlg.open" class="modal-mask" @click.self="confirmDlg.open=false">
+          <div class="modal-dialog modal-sm">
+            <div class="modal-head"><i class="fas fa-triangle-exclamation" style="color:var(--color-orange)"></i> {{ t('op_delete') }}</div>
+            <div class="modal-body"><p>{{ t('user_del_confirm', { name: confirmDlg.user && confirmDlg.user.display_name }) }}</p></div>
+            <div class="modal-foot">
+              <button class="apple-btn apple-btn--ghost" @click="confirmDlg.open=false">{{ t('op_cancel') }}</button>
+              <button class="apple-btn apple-btn--danger" @click="doDeleteUser">{{ t('op_delete') }}</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 删除阻止（有运行中 VM）-->
+        <div v-if="blockDlg.open" class="modal-mask" @click.self="blockDlg.open=false">
+          <div class="modal-dialog modal-sm">
+            <div class="modal-head"><i class="fas fa-ban" style="color:var(--color-red)"></i> {{ blockDlg.title }}</div>
+            <div class="modal-body">
+              <p>{{ blockDlg.message }}</p>
+              <div v-if="blockDlg.children.length" class="block-children">
+                <span class="apple-badge" v-for="(ch,i) in blockDlg.children" :key="i" style="margin:2px">{{ ch }}</span>
+              </div>
+            </div>
+            <div class="modal-foot"><button class="apple-btn apple-btn--primary" @click="blockDlg.open=false">{{ t('op_close') }}</button></div>
+          </div>
         </div>
       </template>
 

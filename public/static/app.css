@@ -557,13 +557,14 @@
 .modal-foot { padding: 16px 22px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--separator); }
 
 /* 表单校验 */
-.form-row input, .form-row select {
+.form-row input, .form-row select, .form-row textarea {
   width: 100%; height: 38px; padding: 0 12px; font-size: 14px;
   border: 1px solid var(--separator); border-radius: var(--radius-sm);
   background: var(--bg-primary); color: var(--text-primary); outline: none; transition: border-color var(--duration-fast);
 }
-.form-row input:focus { border-color: var(--color-blue); }
-.form-row input.invalid { border-color: var(--color-red); }
+.form-row textarea { height: auto; padding: 9px 12px; line-height: 1.5; resize: vertical; font-family: inherit; }
+.form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--color-blue); }
+.form-row input.invalid, .form-row select.invalid, .form-row textarea.invalid { border-color: var(--color-red); }
 .form-row .req { color: var(--color-red); }
 .form-err { color: var(--color-red); font-size: 12px; margin-top: 5px; }
 .form-row select {
@@ -846,3 +847,9 @@
 .hev-desc { font-size: 14px; font-weight: 500; }
 .block-list { margin: 10px 0 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
 .block-list li { margin: 3px 0; }
+
+/* ===== 用户配额表单组（access-control 创建用户对话框）===== */
+.quota-fieldset { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--separator); border-radius: var(--radius-md); background: var(--bg-secondary); }
+.quota-legend { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
+.quota-legend i { color: var(--color-blue); margin-right: 5px; }
+.block-children { margin-top: 8px; }

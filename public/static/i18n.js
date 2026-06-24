@@ -293,6 +293,23 @@ const dict = {
     toast_success: '操作成功', toast_failed: '操作失败', toast_deleted: '已删除「{name}」',
     toast_created: '已创建「{name}」', toast_saved: '已保存', toast_canceled: '已取消',
 
+    // ===== 数据中心 / 集群 创建·编辑 =====
+    dc_create: '新建数据中心', dc_edit: '编辑数据中心', dc_name_ph: '如：北京一区 (DC-Beijing-01)',
+    dc_location: '所在地域', dc_location_ph: '如：北京·亦庄', dc_timezone: '时区',
+    dc_desc: '描述', dc_desc_ph: '用途 / 备注（可选）',
+    cl_create: '新建集群', cl_edit: '编辑集群', cl_name_ph: '如：生产集群 Prod-A',
+    cl_desc_ph: '用途 / 备注（可选）', cl_ha: 'HA 高可用',
+
+    // ===== 用户管理（完整 CRUD + 配额）=====
+    user_st_active: '正常', user_st_disabled: '已禁用', user_st_locked: '已锁定',
+    user_edit: '编辑用户', user_quota: '资源配额', user_disable: '禁用', user_enable: '启用',
+    user_reset_pwd: '重置密码', user_username_rule: '仅限英文字母、数字和下划线',
+    user_email_invalid: '请输入有效的邮箱地址', user_pwd_rule: '密码至少 6 位', user_pwd_mismatch: '两次密码不一致',
+    user_display_ph: '如：张运维', user_phone: '手机号', user_password: '密码', user_password2: '确认密码',
+    user_pwd_keep: '留空则不修改', user_max_vms: '最大虚拟机数', user_max_vcpus: '最大 vCPU',
+    user_max_mem: '最大内存', user_max_storage: '最大存储', user_del_blocked: '无法删除用户',
+    user_del_confirm: '确定删除用户「{name}」？此操作不可恢复。',
+
     // ===== 二层虚拟交换机创建（网卡选择 + bond 模式）=====
     sw_create: '创建虚拟交换机', sw_edit: '编辑交换机',
     sw_name: '交换机名称', sw_type: '交换机类型', sw_mtu: 'MTU',
@@ -658,6 +675,23 @@ const dict = {
     toast_success: 'Success', toast_failed: 'Failed', toast_deleted: 'Deleted "{name}"',
     toast_created: 'Created "{name}"', toast_saved: 'Saved', toast_canceled: 'Canceled',
 
+    // ===== Datacenter / Cluster create·edit =====
+    dc_create: 'New Datacenter', dc_edit: 'Edit Datacenter', dc_name_ph: 'e.g. Beijing Zone 1 (DC-Beijing-01)',
+    dc_location: 'Location', dc_location_ph: 'e.g. Beijing · Yizhuang', dc_timezone: 'Time Zone',
+    dc_desc: 'Description', dc_desc_ph: 'Purpose / notes (optional)',
+    cl_create: 'New Cluster', cl_edit: 'Edit Cluster', cl_name_ph: 'e.g. Prod Cluster Prod-A',
+    cl_desc_ph: 'Purpose / notes (optional)', cl_ha: 'HA',
+
+    // ===== User management (full CRUD + quota) =====
+    user_st_active: 'Active', user_st_disabled: 'Disabled', user_st_locked: 'Locked',
+    user_edit: 'Edit User', user_quota: 'Resource Quota', user_disable: 'Disable', user_enable: 'Enable',
+    user_reset_pwd: 'Reset Password', user_username_rule: 'Letters, digits and underscore only',
+    user_email_invalid: 'Please enter a valid email', user_pwd_rule: 'Password must be at least 6 chars', user_pwd_mismatch: 'Passwords do not match',
+    user_display_ph: 'e.g. John Ops', user_phone: 'Phone', user_password: 'Password', user_password2: 'Confirm Password',
+    user_pwd_keep: 'Leave blank to keep', user_max_vms: 'Max VMs', user_max_vcpus: 'Max vCPUs',
+    user_max_mem: 'Max Memory', user_max_storage: 'Max Storage', user_del_blocked: 'Cannot Delete User',
+    user_del_confirm: 'Delete user "{name}"? This cannot be undone.',
+
     // ===== L2 virtual switch creation =====
     sw_create: 'Create Virtual Switch', sw_edit: 'Edit Switch',
     sw_name: 'Switch Name', sw_type: 'Switch Type', sw_mtu: 'MTU',
@@ -765,9 +799,14 @@ const saved = localStorage.getItem('cnf_locale')
 const locale = ref(saved === 'en' ? 'en' : 'zh')
 
 // 翻译函数：t('key') 返回当前语言文案，缺失回退到 key
-function t(key) {
+function t(key, params) {
   const table = dict[locale.value] || dict.zh
-  return table[key] !== undefined ? table[key] : (dict.zh[key] !== undefined ? dict.zh[key] : key)
+  let s = table[key] !== undefined ? table[key] : (dict.zh[key] !== undefined ? dict.zh[key] : key)
+  // 支持 {name} 占位符插值
+  if (params && typeof s === 'string') {
+    s = s.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined && params[k] !== null ? params[k] : m))
+  }
+  return s
 }
 
 function setLocale(l) {
