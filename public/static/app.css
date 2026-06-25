@@ -990,3 +990,26 @@
 .ntp-fieldset { margin-top: 16px; padding: 14px; border: 1px solid var(--separator); border-radius: var(--radius-md); background: var(--bg-secondary); }
 .ntp-legend { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
 .ntp-legend i { color: var(--color-blue); }
+
+/* ===== P4 主机硬件 · IOMMU/VFIO + GPU 管理 + 内联管理网络 ===== */
+.hw-section-title { display:flex; align-items:center; gap:8px; }
+.hw-net-view { display:flex; flex-wrap:wrap; gap:24px; }
+.hw-net-view .hnv-item { display:flex; flex-direction:column; gap:3px; }
+.hw-net-view .hnv-item .muted { font-size:12px; }
+.iommu-panel .iommu-status { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.iommu-badge { display:inline-flex; align-items:center; gap:7px; padding:8px 16px; border-radius:var(--radius-md); font-weight:700; font-size:14px; white-space:nowrap; }
+.iommu-badge.on { background:rgba(52,199,89,.14); color:var(--color-green); }
+.iommu-badge.off { background:rgba(142,142,147,.16); color:var(--text-secondary); }
+.iommu-badge i { font-size:16px; }
+.iommu-meta { flex:1; min-width:240px; }
+.iommu-kv { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+.iommu-kv > span { font-size:12px; color:var(--text-secondary); }
+.iommu-steps { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:7px; }
+.iommu-steps li { display:flex; align-items:center; gap:8px; font-size:13px; }
+.iommu-steps li i { color:var(--color-green); }
+.gpu-mgmt-card { display:flex; flex-direction:column; gap:8px; }
+.gpu-mgmt-card .gmc-head { display:flex; align-items:center; justify-content:space-between; }
+.gpu-mgmt-card .gmc-name { font-weight:600; display:flex; align-items:center; gap:7px; }
+.gpu-mgmt-card .gmc-meta { font-size:12.5px; color:var(--text-secondary); }
+.gpu-mgmt-card .gmc-ops { display:flex; gap:8px; margin-top:6px; }
+.gpu-mgmt-card .apple-btn.active { border-color:var(--color-blue); color:var(--color-blue); }

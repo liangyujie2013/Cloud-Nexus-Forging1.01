@@ -12,6 +12,12 @@ import { cors } from 'hono/cors'
 import { mockData, genMetrics, getHostHardware, getHostHA, getClusterHAStatus } from './mock-data'
 import { buildDomainXML, type VMConfig } from './libvirt-xml'
 
+// UUID 生成：优先用 Web Crypto（Cloudflare Workers / 现代 Node），否则回退手工生成（兼容 Node 18 无全局 crypto 的情况）
+const genUUID = (): string => {
+  try { const g: any = (globalThis as any).crypto; if (g && typeof g.randomUUID === 'function') return g.randomUUID() } catch {}
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = (Math.random() * 16) | 0; const v = c === 'x' ? r : (r & 0x3) | 0x8; return v.toString(16) })
+}
+
 const app = new Hono()
 const API = '/api/v1'
 
@@ -293,6 +299,60 @@ app.post(`${API}/hosts/:id/maintenance`, async (c) => {
   return c.json({ id, maintenance_mode: enable, status: host.status, message: enable ? `主机 ${host.name} 已进入维护模式` : `主机 ${host.name} 已退出维护模式` })
 })
 
+// ---- 启用/禁用主机 IOMMU + VFIO（直通就绪）。真实环境需写 GRUB 内核参数并重启 ----
+app.post(`${API}/hosts/:id/iommu`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const host = mockData.hosts.find((h) => h.id === id)
+  if (!host) return c.json({ error: '主机不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<{ enabled?: boolean }>().catch(() => ({} as any))
+  const enable = b.enabled ?? !(host as any).iommu
+  ;(host as any).iommu = enable
+  return c.json({
+    id, iommu: enable,
+    // 真实环境的可执行步骤回执，前端可展示给运维
+    steps: enable
+      ? ['已写入内核引导参数（intel_iommu=on iommu=pt）', '已加载 vfio / vfio_pci / vfio_iommu_type1 模块', '需重启主机使 IOMMU 生效']
+      : ['已移除内核引导参数', '需重启主机'],
+    needs_reboot: true,
+    message: enable ? `主机 ${host.name} 已配置启用 IOMMU/VFIO（重启后生效）` : `主机 ${host.name} 已禁用 IOMMU/VFIO（重启后生效）`,
+  })
+})
+
+// ---- 绑定/解绑某 PCI 设备到 vfio-pci（直通栈）。bind=true 绑定，false 还原主机驱动 ----
+app.post(`${API}/hosts/:id/pci/passthrough`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const host = mockData.hosts.find((h) => h.id === id)
+  if (!host) return c.json({ error: '主机不存在', code: 'NOT_FOUND' }, 404)
+  if ((host as any).iommu === false) return c.json({ error: '请先启用主机 IOMMU/VFIO', code: 'IOMMU_DISABLED' }, 409)
+  const b = await c.req.json<{ pci_address?: string; bind?: boolean }>().catch(() => ({} as any))
+  if (!b.pci_address) return c.json({ error: '缺少 PCI 地址', code: 'INVALID' }, 400)
+  const list: string[] = (host as any).vfio_bound || ((host as any).vfio_bound = [])
+  // 已被 VM 占用的设备不允许解绑
+  const inUse = mockData.gpus.some((g) => g.host_id === id && g.pci === b.pci_address && g.status === 'assigned')
+  if (b.bind === false && inUse) return c.json({ error: '该设备已分配给虚拟机，请先释放', code: 'DEV_IN_USE' }, 409)
+  if (b.bind === false) {
+    const i = list.indexOf(b.pci_address); if (i >= 0) list.splice(i, 1)
+  } else if (!list.includes(b.pci_address)) list.push(b.pci_address)
+  return c.json({ id, pci_address: b.pci_address, bound: b.bind !== false, message: b.bind === false ? `设备 ${b.pci_address} 已还原主机驱动` : `设备 ${b.pci_address} 已绑定 vfio-pci（可直通）` })
+})
+
+// ---- GPU 直通模式切换（passthrough / vgpu）+ 释放分配 ----
+app.post(`${API}/hosts/:id/gpu/:gpuId/mode`, async (c) => {
+  const gid = Number(c.req.param('gpuId'))
+  const gpu = mockData.gpus.find((g) => g.id === gid)
+  if (!gpu) return c.json({ error: 'GPU 不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<{ mode?: 'passthrough' | 'vgpu'; release?: boolean }>().catch(() => ({} as any))
+  if (b.release) {
+    if (gpu.status === 'assigned') { gpu.status = 'available'; gpu.vm = null; gpu.util = 0; gpu.mem_used = 0 }
+    return c.json({ id: gid, status: gpu.status, message: `GPU ${gpu.model} 已释放` })
+  }
+  if (b.mode) {
+    if (gpu.status === 'assigned') return c.json({ error: 'GPU 已分配给虚拟机，请先释放后再切换模式', code: 'GPU_IN_USE' }, 409)
+    gpu.mode = b.mode
+  }
+  return c.json({ id: gid, mode: gpu.mode, status: gpu.status, message: `GPU ${gpu.model} 模式已切换为 ${gpu.mode === 'vgpu' ? 'vGPU 切分' : 'PCI 直通'}` })
+})
+
 // ---- 校验：IPv4 地址 / 子网掩码格式 ----
 const isIPv4 = (s: string) => /^((25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(25[0-5]|2[0-4]\d|1?\d?\d)$/.test(s)
 
@@ -497,7 +557,7 @@ app.get(`${API}/migrations`, (c) => c.json(mockData.migrations))
 app.post(`${API}/migrations`, async (c) => {
   const body = await c.req.json<{ vm: string; dst: string; live?: boolean; storage?: boolean }>()
   return c.json({
-    task_uuid: crypto.randomUUID(),
+    task_uuid: genUUID(),
     vm: body.vm, dst: body.dst, live: !!body.live, storage: !!body.storage,
     status: 'running',
     message: '（原型）热迁移任务已提交，可轮询 ' + API + '/migrations/progress',

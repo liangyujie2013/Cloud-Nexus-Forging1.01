@@ -392,11 +392,43 @@ export function getHostHardware(id: number) {
     }
   })
 
-  const pci_devices = prof.pci.map((p: any, i: number) => ({
-    pci_address: `0000:${(7 + i * 0x20).toString(16).padStart(2, '0')}:00.0`,
-    vendor: p.vendor, device_name: p.device_name, device_class: p.device_class,
-    driver: p.driver, iommu_group: 10 + i, passthrough_capable: p.passthrough_capable, numa_node: p.numa_node,
+  const iommuOn = (host as any).iommu !== false
+  // 已被某台 VM 直通占用的 PCI 设备地址（来自 GPU 分配表）
+  const assignedPci = new Set(mockData.gpus.filter((g) => g.host_id === host.id && g.status === 'assigned').map((g) => g.pci))
+  const pci_devices = prof.pci.map((p: any, i: number) => {
+    const addr = `0000:${(7 + i * 0x20).toString(16).padStart(2, '0')}:00.0`
+    // 设备当前驱动归属：vfio=已切到直通栈、host=主机原生驱动
+    const bound = (host as any).vfio_bound && (host as any).vfio_bound.includes(addr)
+    const inUse = assignedPci.has(addr)
+    return {
+      pci_address: addr,
+      vendor: p.vendor, device_name: p.device_name, device_class: p.device_class,
+      driver: bound || inUse ? 'vfio-pci' : p.driver,
+      native_driver: p.driver,
+      iommu_group: 10 + i, passthrough_capable: p.passthrough_capable, numa_node: p.numa_node,
+      // 直通状态：in_use=已分配给 VM，bound=已绑 vfio 待分配，host=主机占用，n/a=不支持直通
+      passthrough_state: !p.passthrough_capable ? 'n/a' : inUse ? 'in_use' : bound ? 'bound' : 'host',
+    }
+  })
+
+  // 该主机的 GPU（直通/vGPU 管理用），合并到硬件视图，供 ESXi/vCenter 风格的 GPU 管理面板使用
+  const gpus = mockData.gpus.filter((g) => g.host_id === host.id).map((g) => ({
+    id: g.id, pci: g.pci, vendor: g.vendor, model: g.model,
+    vram_gb: Math.round(g.vram_mb / 1024), mode: g.mode, status: g.status,
+    vm: g.vm, numa: g.numa, temp: g.temp, power: g.power,
   }))
+
+  // 直通就绪所需的内核引导参数（RHEL/KVM 真实参数），用于前端展示「如何启用」
+  const cpuVendor = (prof.cpu.vendor || '').toLowerCase().includes('amd') ? 'amd' : 'intel'
+  const iommu_summary = {
+    enabled: iommuOn,
+    cpu_vendor: cpuVendor,
+    kernel_param: cpuVendor === 'amd' ? 'amd_iommu=on iommu=pt' : 'intel_iommu=on iommu=pt',
+    vfio_modules: ['vfio', 'vfio_pci', 'vfio_iommu_type1'],
+    needs_reboot: !iommuOn,
+    passthrough_capable_count: pci_devices.filter((p: any) => p.passthrough_capable).length,
+    bound_count: pci_devices.filter((p: any) => p.passthrough_state === 'bound' || p.passthrough_state === 'in_use').length,
+  }
 
   return {
     id: host.id, hostname: host.hostname, ip_address: host.ip,
@@ -408,6 +440,9 @@ export function getHostHardware(id: number) {
       current_usage_percent: host.cpu_usage,
     },
     mem_total_gb: host.mem_total_gb, mem_used_gb: host.mem_used_gb,
+    // 管理网络（供「硬件 / 网络」内联编辑用，替代独立的「修改管理网络」反人类设计）
+    mgmt_network: { ip: host.ip, netmask: (host as any).netmask || '255.255.255.0', gateway: (host as any).gateway || '', mgmt_vlan: (host as any).mgmt_vlan ?? null, mgmt_nic: (host as any).mgmt_nic || 'bond0' },
+    iommu_summary, gpus,
     network_interfaces, storage_devices, pci_devices,
     ha_status: getHostHA(id),
   }

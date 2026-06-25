@@ -175,6 +175,95 @@ const HostsView = {
     const detailHost = computed(() => hosts.value.find((h) => h.id === selectedId.value))
     const detailVMs = computed(() => detailHost.value ? detailHost.value.vms_list || [] : [])
 
+    // ============================================================
+    //  P4 · 硬件 → IOMMU/VFIO 直通就绪 + GPU 管理（对标 ESXi/vCenter）
+    // ============================================================
+    const iommuBusy = ref(false)
+    const pciBusy = ref('')
+    const gpuBusy = ref(0)
+    // 重新拉取硬件（操作后刷新直通状态）
+    const reloadHw = async () => { if (selectedId.value) detail.value = await api('/hosts/' + selectedId.value + '/hardware') }
+    // 启用 / 禁用主机 IOMMU
+    const iommuConfirm = reactive({ open: false, steps: [], title: '' })
+    const toggleIommu = async () => {
+      if (!detail.value) return
+      const enable = !(detail.value.iommu_summary && detail.value.iommu_summary.enabled)
+      iommuBusy.value = true
+      try {
+        const res = await api('/hosts/' + selectedId.value + '/iommu', { method: 'POST', body: JSON.stringify({ enabled: enable }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        await reloadHw()
+        iommuConfirm.title = res.message
+        iommuConfirm.steps = res.steps || []
+        iommuConfirm.open = true
+        toast(res.message, 'success')
+      } catch (e) { toast(t('op_failed'), 'error') } finally { iommuBusy.value = false }
+    }
+    // 绑定 / 解绑 PCI 设备到 vfio-pci
+    const togglePci = async (p) => {
+      const bind = p.passthrough_state === 'host'
+      pciBusy.value = p.pci_address
+      try {
+        const res = await api('/hosts/' + selectedId.value + '/pci/passthrough', { method: 'POST', body: JSON.stringify({ pci_address: p.pci_address, bind }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        await reloadHw()
+        toast(res.message, 'success')
+      } catch (e) { toast(t('op_failed'), 'error') } finally { pciBusy.value = '' }
+    }
+    // GPU 模式切换 / 释放
+    const switchGpuMode = async (g, mode) => {
+      gpuBusy.value = g.id
+      try {
+        const res = await api('/hosts/' + selectedId.value + '/gpu/' + g.id + '/mode', { method: 'POST', body: JSON.stringify({ mode }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        await Promise.all([reloadHw(), store.fetchAll()])
+        toast(res.message, 'success')
+      } catch (e) { toast(t('op_failed'), 'error') } finally { gpuBusy.value = 0 }
+    }
+    const releaseGpu = async (g) => {
+      gpuBusy.value = g.id
+      try {
+        const res = await api('/hosts/' + selectedId.value + '/gpu/' + g.id + '/mode', { method: 'POST', body: JSON.stringify({ release: true }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        await Promise.all([reloadHw(), store.fetchAll()])
+        toast(res.message, 'success')
+      } catch (e) { toast(t('op_failed'), 'error') } finally { gpuBusy.value = 0 }
+    }
+    // PCI 直通状态 → 中文标签 / 颜色
+    const ptState = (s) => ({
+      in_use: { txt: t('hw_pt_in_use'), color: C.blue, badge: 'apple-badge--running' },
+      bound: { txt: t('hw_pt_bound'), color: C.teal, badge: 'apple-badge--warning' },
+      host: { txt: t('hw_pt_host'), color: C.gray, badge: 'apple-badge--stopped' },
+      'n/a': { txt: t('hw_pt_na'), color: C.gray, badge: 'apple-badge--stopped' },
+    }[s] || { txt: s, color: C.gray, badge: 'apple-badge--stopped' })
+    const gpuModeText = (m) => (m === 'vgpu' ? t('hw_gpu_vgpu') : t('hw_gpu_passthrough'))
+
+    // 硬件页内联编辑管理网络（替代旧的独立「修改管理网络」反人类弹窗入口）
+    const hwNetEdit = reactive({ editing: false, busy: false, form: {}, errors: {} })
+    const startHwNetEdit = () => {
+      const m = detail.value.mgmt_network || {}
+      hwNetEdit.form = { ip: m.ip || '', netmask: m.netmask || '255.255.255.0', gateway: m.gateway || '', mgmt_vlan: m.mgmt_vlan ?? '', mgmt_nic: m.mgmt_nic || 'bond0' }
+      hwNetEdit.errors = {}; hwNetEdit.editing = true
+    }
+    const saveHwNet = async () => {
+      const e = {}
+      if (!ipv4Re.test(hwNetEdit.form.ip)) e.ip = t('hmn_ip_invalid')
+      if (!ipv4Re.test(hwNetEdit.form.netmask)) e.netmask = t('hmn_netmask_invalid')
+      if (hwNetEdit.form.gateway && !ipv4Re.test(hwNetEdit.form.gateway)) e.gateway = t('hmn_gateway_invalid')
+      const vlan = hwNetEdit.form.mgmt_vlan
+      if (vlan !== '' && (Number(vlan) < 0 || Number(vlan) > 4094)) e.mgmt_vlan = t('hmn_vlan_invalid')
+      hwNetEdit.errors = e
+      if (Object.keys(e).length) return
+      hwNetEdit.busy = true
+      try {
+        const res = await api('/hosts/' + selectedId.value + '/network', { method: 'PUT', body: JSON.stringify(hwNetEdit.form) })
+        if (res && res.error) { hwNetEdit.errors = { ip: res.code === 'IP_CONFLICT' ? t('hmn_ip_conflict') : res.error }; return }
+        toast(res.message, 'success')
+        await Promise.all([reloadHw(), store.fetchAll()])
+        hwNetEdit.editing = false
+      } catch (err) { toast(t('op_failed'), 'error') } finally { hwNetEdit.busy = false }
+    }
+
     // ---- HA helpers ----
     const haCheckList = computed(() => {
       if (!ha.value) return []
@@ -234,6 +323,8 @@ const HostsView = {
       toggleMaintenance, maintBusy, blockDlg,
       clusterGroups, netDlg, openNetEdit, submitNet, batchDlg, openBatch, submitBatch,
       haCheckList, haStatusColor, haStatusText, overallColor, overallText, evIcon, evColor,
+      iommuBusy, pciBusy, gpuBusy, toggleIommu, togglePci, switchGpuMode, releaseGpu,
+      ptState, gpuModeText, iommuConfirm, hwNetEdit, startHwNetEdit, saveHwNet,
       bytesRate, utilColor, C, t, fmt,
     }
   },
@@ -368,6 +459,88 @@ const HostsView = {
 
       <!-- HARDWARE -->
       <div v-else-if="detailTab==='hardware'">
+        <!-- 管理网络（内联编辑，取代独立的「修改管理网络」弹窗入口）-->
+        <div class="hw-section-title"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('hw_mgmt_net') }}
+          <button v-if="!hwNetEdit.editing" class="apple-btn apple-btn--ghost apple-btn--sm" style="margin-left:auto" @click="startHwNetEdit"><i class="fas fa-pen"></i> {{ t('hw_mgmt_edit') }}</button>
+        </div>
+        <div class="apple-card">
+          <div v-if="!hwNetEdit.editing" class="hw-net-view">
+            <div class="hnv-item"><span class="muted">{{ t('hmn_col_ip') }}</span><strong class="mono">{{ detail.mgmt_network.ip }}</strong></div>
+            <div class="hnv-item"><span class="muted">{{ t('hmn_col_netmask') }}</span><strong class="mono">{{ detail.mgmt_network.netmask }}</strong></div>
+            <div class="hnv-item"><span class="muted">{{ t('hmn_col_gateway') }}</span><strong class="mono">{{ detail.mgmt_network.gateway || '—' }}</strong></div>
+            <div class="hnv-item"><span class="muted">{{ t('hmn_col_vlan') }}</span><strong class="mono">VLAN {{ detail.mgmt_network.mgmt_vlan ?? '—' }}</strong></div>
+            <div class="hnv-item"><span class="muted">{{ t('hmn_col_nic') }}</span><strong class="mono">{{ detail.mgmt_network.mgmt_nic }}</strong></div>
+          </div>
+          <div v-else>
+            <div class="form-grid-2">
+              <div class="form-row"><label class="req">{{ t('hmn_col_ip') }}</label><input v-model="hwNetEdit.form.ip" :class="{invalid:hwNetEdit.errors.ip}" placeholder="192.168.1.100"><div v-if="hwNetEdit.errors.ip" class="form-err">{{ hwNetEdit.errors.ip }}</div></div>
+              <div class="form-row"><label class="req">{{ t('hmn_col_netmask') }}</label><input v-model="hwNetEdit.form.netmask" :class="{invalid:hwNetEdit.errors.netmask}" placeholder="255.255.255.0"><div v-if="hwNetEdit.errors.netmask" class="form-err">{{ hwNetEdit.errors.netmask }}</div></div>
+              <div class="form-row"><label>{{ t('hmn_col_gateway') }}</label><input v-model="hwNetEdit.form.gateway" :class="{invalid:hwNetEdit.errors.gateway}" placeholder="192.168.1.1"><div v-if="hwNetEdit.errors.gateway" class="form-err">{{ hwNetEdit.errors.gateway }}</div></div>
+              <div class="form-row"><label>{{ t('hmn_col_vlan') }}</label><input type="number" min="0" max="4094" v-model.number="hwNetEdit.form.mgmt_vlan" :class="{invalid:hwNetEdit.errors.mgmt_vlan}" placeholder="10"><div v-if="hwNetEdit.errors.mgmt_vlan" class="form-err">{{ hwNetEdit.errors.mgmt_vlan }}</div></div>
+              <div class="form-row"><label>{{ t('hmn_col_nic') }}</label><input v-model="hwNetEdit.form.mgmt_nic" placeholder="bond0"></div>
+            </div>
+            <div class="flex" style="gap:8px;margin-top:10px;justify-content:flex-end">
+              <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="hwNetEdit.editing=false">{{ t('op_cancel') }}</button>
+              <button class="apple-btn apple-btn--primary apple-btn--sm" :disabled="hwNetEdit.busy" @click="saveHwNet"><i v-if="hwNetEdit.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- IOMMU / VFIO 直通就绪（对标 vCenter「主机 → 配置 → 硬件 → PCI 设备」）-->
+        <div class="hw-section-title"><i class="fas fa-plug-circle-bolt" :style="{color:C.orange}"></i> {{ t('hw_iommu_title') }}</div>
+        <div class="apple-card iommu-panel" v-if="detail.iommu_summary">
+          <div class="iommu-status">
+            <div class="iommu-badge" :class="detail.iommu_summary.enabled?'on':'off'">
+              <i class="fas" :class="detail.iommu_summary.enabled?'fa-circle-check':'fa-circle-xmark'"></i>
+              {{ detail.iommu_summary.enabled ? t('hw_iommu_on') : t('hw_iommu_off') }}
+            </div>
+            <div class="iommu-meta">
+              <div class="muted">{{ t('hw_iommu_intro') }}</div>
+              <div class="iommu-kv">
+                <span><i class="fas fa-microchip"></i> {{ detail.cpu_info.vendor }}</span>
+                <span class="mono">{{ detail.iommu_summary.kernel_param }}</span>
+                <span class="hw-chip" v-for="m in detail.iommu_summary.vfio_modules" :key="m">{{ m }}</span>
+              </div>
+              <div class="muted" style="margin-top:6px;font-size:12px">
+                {{ t('hw_iommu_count', { cap: detail.iommu_summary.passthrough_capable_count, bound: detail.iommu_summary.bound_count }) }}
+              </div>
+            </div>
+            <button class="apple-btn" :class="detail.iommu_summary.enabled?'apple-btn--secondary':'apple-btn--primary'" :disabled="iommuBusy" @click="toggleIommu">
+              <i v-if="iommuBusy" class="fas fa-spinner fa-spin"></i>
+              <i v-else class="fas" :class="detail.iommu_summary.enabled?'fa-power-off':'fa-bolt'"></i>
+              {{ detail.iommu_summary.enabled ? t('hw_iommu_disable') : t('hw_iommu_enable') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- GPU 管理（直通 / vGPU 切换 / 释放，对标 SmartX/ESXi 的 GPU 管理）-->
+        <div v-if="detail.gpus && detail.gpus.length">
+          <div class="hw-section-title"><i class="fas fa-microchip" :style="{color:'#76b900'}"></i> {{ t('hw_gpu_title') }}</div>
+          <div class="grid grid-2">
+            <div class="apple-card gpu-mgmt-card" v-for="g in detail.gpus" :key="g.id">
+              <div class="gmc-head">
+                <div class="gmc-name"><i class="fas fa-microchip" style="color:#76b900"></i> {{ g.model }}</div>
+                <span class="apple-badge" :class="g.status==='assigned'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ g.status==='assigned'?t('hw_gpu_assigned'):t('hw_gpu_free') }}</span>
+              </div>
+              <div class="gmc-meta">
+                <span class="mono">{{ g.pci }}</span> · {{ g.vram_gb }} GB · NUMA{{ g.numa }}
+                <span class="hw-chip" style="margin-left:6px">{{ gpuModeText(g.mode) }}</span>
+              </div>
+              <div class="gmc-meta" v-if="g.vm"><i class="fas fa-desktop"></i> {{ t('hw_gpu_owner') }}: <strong>{{ g.vm }}</strong> · {{ g.temp }}°C · {{ g.power }}W</div>
+              <div class="gmc-meta" v-else class="muted">{{ t('hw_gpu_idle_desc') }} · {{ g.temp }}°C</div>
+              <div class="gmc-ops">
+                <template v-if="g.status==='assigned'">
+                  <button class="apple-btn apple-btn--secondary apple-btn--sm" :disabled="gpuBusy===g.id" @click="releaseGpu(g)"><i class="fas fa-link-slash"></i> {{ t('hw_gpu_release') }}</button>
+                </template>
+                <template v-else>
+                  <button class="apple-btn apple-btn--ghost apple-btn--sm" :class="{active:g.mode==='passthrough'}" :disabled="gpuBusy===g.id||g.mode==='passthrough'" @click="switchGpuMode(g,'passthrough')"><i class="fas fa-arrow-right-arrow-left"></i> {{ t('hw_gpu_set_pt') }}</button>
+                  <button class="apple-btn apple-btn--ghost apple-btn--sm" :class="{active:g.mode==='vgpu'}" :disabled="gpuBusy===g.id||g.mode==='vgpu'" @click="switchGpuMode(g,'vgpu')"><i class="fas fa-grip"></i> {{ t('hw_gpu_set_vgpu') }}</button>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- CPU topology -->
         <div class="hw-section-title"><i class="fas fa-microchip" :style="{color:C.blue}"></i> {{ t('hw_cpu_topo') }}</div>
         <div class="apple-card hw-cpu-grid">
@@ -424,11 +597,11 @@ const HostsView = {
           </table>
         </div>
 
-        <!-- PCI devices -->
+        <!-- PCI devices（含直通绑定操作）-->
         <div class="hw-section-title"><i class="fas fa-plug" :style="{color:C.purple}"></i> {{ t('hw_pci_dev') }}</div>
         <div class="apple-card" style="padding:0;overflow-x:auto">
           <table class="apple-table">
-            <thead><tr><th>PCI</th><th>{{ t('hw_vendor_model') }}</th><th>{{ t('hw_dev_class') }}</th><th>{{ t('hw_driver') }}</th><th>IOMMU</th><th>NUMA</th><th>{{ t('hw_passthrough') }}</th></tr></thead>
+            <thead><tr><th>PCI</th><th>{{ t('hw_vendor_model') }}</th><th>{{ t('hw_dev_class') }}</th><th>{{ t('hw_driver') }}</th><th>IOMMU</th><th>NUMA</th><th>{{ t('hw_pt_status') }}</th><th style="text-align:right">{{ t('hmn_col_ops') }}</th></tr></thead>
             <tbody>
               <tr v-for="p in detail.pci_devices" :key="p.pci_address">
                 <td class="mono" style="font-size:12px">{{ p.pci_address }}</td>
@@ -437,7 +610,22 @@ const HostsView = {
                 <td class="mono" style="font-size:12px">{{ p.driver }}</td>
                 <td class="mono">{{ p.iommu_group }}</td>
                 <td class="mono">{{ p.numa_node }}</td>
-                <td><i :class="p.passthrough_capable?'fas fa-circle-check':'fas fa-circle-minus'" :style="{color:p.passthrough_capable?'var(--color-green)':'var(--text-tertiary)'}"></i></td>
+                <td>
+                  <span v-if="p.passthrough_capable" class="apple-badge" :class="ptState(p.passthrough_state).badge"><span class="dot"></span>{{ ptState(p.passthrough_state).txt }}</span>
+                  <span v-else class="muted" style="font-size:12px"><i class="fas fa-circle-minus"></i> {{ t('hw_pt_na') }}</span>
+                </td>
+                <td style="text-align:right">
+                  <button v-if="p.passthrough_capable && (p.passthrough_state==='host' || p.passthrough_state==='bound')"
+                          class="apple-btn apple-btn--ghost apple-btn--sm"
+                          :disabled="pciBusy===p.pci_address || !(detail.iommu_summary && detail.iommu_summary.enabled)"
+                          :title="!(detail.iommu_summary && detail.iommu_summary.enabled) ? t('hw_iommu_need_first') : ''"
+                          @click="togglePci(p)">
+                    <i v-if="pciBusy===p.pci_address" class="fas fa-spinner fa-spin"></i>
+                    <i v-else :class="p.passthrough_state==='host'?'fas fa-bolt':'fas fa-rotate-left'"></i>
+                    {{ p.passthrough_state==='host' ? t('hw_pt_bind') : t('hw_pt_unbind') }}
+                  </button>
+                  <span v-else-if="p.passthrough_state==='in_use'" class="muted" style="font-size:12px">{{ t('hw_pt_locked') }}</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -574,6 +762,21 @@ const HostsView = {
           <button class="apple-btn apple-btn--ghost" @click="batchDlg.open=false">{{ t('op_cancel') }}</button>
           <button class="apple-btn apple-btn--primary" :disabled="batchDlg.busy" @click="submitBatch"><i v-if="batchDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
         </div>
+      </div>
+    </div>
+
+    <!-- IOMMU/VFIO 启用回执（展示真实内核步骤）-->
+    <div v-if="iommuConfirm.open" class="modal-mask" @click.self="iommuConfirm.open=false">
+      <div class="modal-dialog modal-sm">
+        <div class="modal-head"><i class="fas fa-plug-circle-bolt" style="color:var(--color-orange)"></i> {{ t('hw_iommu_title') }}</div>
+        <div class="modal-body">
+          <p style="margin-bottom:10px">{{ iommuConfirm.title }}</p>
+          <ul class="iommu-steps">
+            <li v-for="(s,i) in iommuConfirm.steps" :key="i"><i class="fas fa-angle-right"></i> {{ s }}</li>
+          </ul>
+          <div class="hosts-pick-hint" style="margin-top:12px"><i class="fas fa-triangle-exclamation"></i> {{ t('hw_iommu_reboot_hint') }}</div>
+        </div>
+        <div class="modal-foot"><button class="apple-btn apple-btn--primary" @click="iommuConfirm.open=false">{{ t('op_close') }}</button></div>
       </div>
     </div>
 
