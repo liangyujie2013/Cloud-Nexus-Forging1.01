@@ -24,6 +24,39 @@ const API = '/api/v1'
 app.use(`${API}/*`, cors())
 
 // ============================================================================
+//  N4 · 虚拟机硬件配置（虚拟磁盘 / 网络适配器 / 引导项）内存模型
+//  首次访问按 volumes / vlans 派生默认配置，后续编辑写入内存覆盖层。
+// ============================================================================
+const vmConfigStore: Record<number, any> = {}
+const DISK_BUS = ['virtio-scsi', 'virtio-blk', 'sata', 'ide', 'nvme']
+const NIC_MODELS = ['virtio', 'e1000e', 'rtl8139', 'sriov']
+function deriveVmConfig(vm: any) {
+  if (vmConfigStore[vm.id]) return vmConfigStore[vm.id]
+  // 磁盘：优先取 volumes 中归属该 VM 的卷，否则给一块系统盘
+  const vols = mockData.volumes.filter((v: any) => v.vm === vm.name)
+  const disks =
+    vols.length > 0
+      ? vols.map((v: any, i: number) => ({
+          id: i + 1, name: v.name, pool: v.pool, format: v.format, size_gb: v.size_gb,
+          used_gb: v.used_gb, bus: v.bus || 'virtio-scsi', cache: 'none', iops_limit: v.iops_limit || 0,
+          boot_order: i === 0 ? 1 : 0, shareable: false,
+        }))
+      : [{ id: 1, name: `${vm.name}-disk0`, pool: 'prod-nfs-pool', format: 'qcow2', size_gb: 40, used_gb: 8, bus: 'virtio-scsi', cache: 'none', iops_limit: 0, boot_order: 1, shareable: false }]
+  // 网卡：默认一块 virtio 接入业务前端 VLAN
+  const nics = [
+    { id: 1, model: 'virtio', portgroup: '业务前端 VLAN', vlan_id: 10, mac: '52:54:00:' + vm.id.toString(16).padStart(2, '0') + ':a1:01', connected: true, queues: 4, sriov_pf: '', sriov_vf: null },
+  ]
+  const cfg = {
+    vm_id: vm.id,
+    boot: { firmware: 'uefi', secure_boot: false, boot_menu: false, boot_order: ['disk', 'cdrom', 'network'] },
+    disks,
+    nics,
+  }
+  vmConfigStore[vm.id] = cfg
+  return cfg
+}
+
+// ============================================================================
 //  模块 1 · 仪表板 dashboard：资源概览 / 性能监控 / 告警摘要
 // ============================================================================
 // 全局资源汇总（顶部 4 张统计卡）
@@ -401,6 +434,36 @@ app.post(`${API}/hosts/:id/power`, async (c) => {
   return c.json({ error: '未知的电源操作', code: 'BAD_ACTION' }, 400)
 })
 
+// ---- N5 · 在宿主机物理网卡 (PF) 上启用 SR-IOV，分配 VF 数量 ----
+// 真实环境：echo N > /sys/class/net/<pf>/device/sriov_numvfs，并确保 IOMMU 已开启
+app.post(`${API}/hosts/:id/sriov`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const host: any = mockData.hosts.find((h) => h.id === id)
+  if (!host) return c.json({ error: '主机不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json().catch(() => ({} as any))
+  if (!host.iommu) return c.json({ error: '启用 SR-IOV 前必须先开启 IOMMU/VFIO', code: 'IOMMU_REQUIRED' }, 409)
+  host.sriov_pfs = host.sriov_pfs || []
+  const pfName = b.pf || ('ens' + (host.sriov_pfs.length + 6) + 'f0')
+  if (b.enabled === false) {
+    const pf = host.sriov_pfs.find((p: any) => p.pf === pfName)
+    if (pf && pf.used_vfs > 0) return c.json({ error: `PF ${pfName} 仍有 ${pf.used_vfs} 个 VF 被虚拟机占用，请先解除`, code: 'VF_IN_USE' }, 409)
+    host.sriov_pfs = host.sriov_pfs.filter((p: any) => p.pf !== pfName)
+    return c.json({ ok: true, sriov_pfs: host.sriov_pfs, message: `已在 ${host.name} 上禁用 PF ${pfName} 的 SR-IOV` })
+  }
+  const numVfs = Math.max(1, Math.min(64, Number(b.num_vfs) || 8))
+  const existing = host.sriov_pfs.find((p: any) => p.pf === pfName)
+  const vfs = Array.from({ length: numVfs }, (_, i) => ({ vf: i, used: existing ? !!(existing.vfs[i] && existing.vfs[i].used) : false, vm: existing && existing.vfs[i] ? existing.vfs[i].vm : undefined }))
+  const used_vfs = vfs.filter((v: any) => v.used).length
+  const rec = { pf: pfName, nic_model: b.nic_model || host.nic_model || 'Mellanox ConnectX-6 Dx', total_vfs: numVfs, used_vfs, link_gbe: b.link_gbe || 100, vfs }
+  if (existing) Object.assign(existing, rec)
+  else host.sriov_pfs.push(rec)
+  return c.json({
+    ok: true, sriov_pfs: host.sriov_pfs,
+    steps: [`已在 ${pfName} 写入 sriov_numvfs=${numVfs}`, '已加载网卡 VF 驱动', 'VF 现可在虚拟机网卡配置中直通分配'],
+    message: `已在 ${host.name} 的 ${pfName} 启用 SR-IOV（${numVfs} 个 VF）`,
+  })
+})
+
 // ---- 启用/禁用主机 IOMMU + VFIO（直通就绪）。真实环境需写 GRUB 内核参数并重启 ----
 app.post(`${API}/hosts/:id/iommu`, async (c) => {
   const id = Number(c.req.param('id'))
@@ -560,6 +623,68 @@ app.get(`${API}/iso-repositories`, (c) => {
 app.get(`${API}/gpus`, (c) => c.json(mockData.gpus))
 
 // VM 电源操作（右键菜单：开机/关机/重启/挂起/恢复/强制关机）
+// ---- N4 · 获取 VM 完整硬件配置（编辑对话框初始化）----
+app.get(`${API}/vms/:id/hardware`, (c) => {
+  const id = Number(c.req.param('id'))
+  const vm = mockData.vms.find((v) => v.id === id)
+  if (!vm) return c.json({ error: '虚拟机不存在', code: 'NOT_FOUND' }, 404)
+  const cfg = deriveVmConfig(vm)
+  // 可选项：存储池（按集群可见）/ 端口组（VLAN）/ 总线 / 网卡型号 / SR-IOV PF 列表
+  const host = mockData.hosts.find((h) => h.id === vm.host_id)
+  const pools = mockData.storage_pools
+    .filter((p: any) => !p.host_id || p.host_id === vm.host_id)
+    .map((p: any) => ({ name: p.name, type: p.type, shared: p.shared, free_tb: +(p.capacity_tb - p.used_tb).toFixed(2) }))
+  const portgroups = mockData.vlans.map((v: any) => ({ name: v.name, vlan_id: v.vlan_id, subnet: v.subnet, vswitch: v.vswitch }))
+  // SR-IOV：宿主机上已启用 SR-IOV 的物理网卡（PF）及其可用 VF
+  const sriovPfs = (host && (host as any).sriov_pfs) ? (host as any).sriov_pfs : []
+  return c.json({
+    vm: { id: vm.id, name: vm.name, status: vm.status, vcpus: vm.vcpus, sockets: vm.sockets, cores: vm.cores, threads: vm.threads, mem_gb: vm.mem_gb, os: vm.os, cpu_pinning: (vm as any).cpu_pinning, host_id: vm.host_id },
+    config: cfg,
+    options: { disk_bus: DISK_BUS, nic_models: NIC_MODELS, pools, portgroups, sriov_pfs: sriovPfs },
+  })
+})
+
+// ---- N4 · 保存 VM 硬件配置（运行中仅允许热插拔类变更，离线允许全部）----
+app.put(`${API}/vms/:id/hardware`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const vm = mockData.vms.find((v) => v.id === id)
+  if (!vm) return c.json({ error: '虚拟机不存在', code: 'NOT_FOUND' }, 404)
+  const body = await c.req.json().catch(() => ({}))
+  const cfg = deriveVmConfig(vm)
+  const running = vm.status === 'running'
+  const warnings: string[] = []
+  // CPU/内存：运行中变更需支持热插（vCPU 仅可增加、内存仅可增加），否则提示重启生效
+  if (body.vm) {
+    const nv = body.vm
+    if (nv.name && nv.name.trim()) vm.name = nv.name.trim()
+    if (typeof nv.vcpus === 'number') {
+      if (running && nv.vcpus < vm.vcpus) warnings.push('运行中不支持热移除 vCPU，缩减将在下次重启后生效')
+      vm.vcpus = nv.vcpus
+    }
+    if (typeof nv.mem_gb === 'number') {
+      if (running && nv.mem_gb < vm.mem_gb) warnings.push('运行中不支持热缩减内存，缩减将在下次重启后生效')
+      vm.mem_gb = nv.mem_gb; ;(vm as any).mem_mb = nv.mem_gb * 1024
+    }
+  }
+  // 磁盘 / 网卡 / 引导：整体替换（前端提交完整数组）
+  if (Array.isArray(body.disks)) {
+    // 校验：至少一块磁盘、引导盘唯一
+    if (body.disks.length === 0) return c.json({ error: '至少需要保留一块虚拟磁盘', code: 'NO_DISK' }, 400)
+    cfg.disks = body.disks
+  }
+  if (Array.isArray(body.nics)) {
+    // SR-IOV 网卡校验：选择 sriov 型号必须指定 PF + VF
+    for (const n of body.nics) {
+      if (n.model === 'sriov' && (!n.sriov_pf || n.sriov_vf == null))
+        return c.json({ error: `SR-IOV 网卡必须选择对应的 PF 和 VF`, code: 'SRIOV_INCOMPLETE' }, 400)
+    }
+    cfg.nics = body.nics
+  }
+  if (body.boot) cfg.boot = { ...cfg.boot, ...body.boot }
+  vmConfigStore[id] = cfg
+  return c.json({ ok: true, config: cfg, warnings, message: `虚拟机「${vm.name}」配置已保存` })
+})
+
 app.post(`${API}/vms/:id/power`, async (c) => {
   const { action } = await c.req.json<{ action: string }>()
   // 动作 → 目标状态映射

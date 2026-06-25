@@ -46,7 +46,7 @@ const ComputeView = {
     const confirmDlg = reactive({ open: false, title: '', message: '', targets: [], danger: true, busy: false, onOk: null })
 
     // ---- 编辑/重命名表单对话框 ----
-    const editDlg = reactive({ open: false, mode: 'edit', busy: false, vm: null, form: { name: '', vcpus: 1, mem_gb: 1 }, errors: {} })
+    const editDlg = reactive({ open: false, mode: 'edit', busy: false, loading: false, tab: 'cpu', vm: null, form: { name: '', vcpus: 1, mem_gb: 1 }, config: null, options: null, errors: {} })
 
     // ---- P10 · 企业级迁移向导（右键 → 数据中心 → 集群 → 主机 → 资源校验 → 冷/热 → 执行）----
     const migDlg = reactive({
@@ -227,10 +227,23 @@ const ComputeView = {
     const batchDelete = () => { batchOpen.value = false; if (selectedVms.value.length) askDelete(selectedVms.value); else toast(t('op_no_data'), 'warning') }
 
     // ---- 编辑/重命名对话框 + 表单校验 ----
-    const openEdit = (vm, mode) => {
+    const openEdit = async (vm, mode) => {
       editDlg.mode = mode; editDlg.vm = vm
       editDlg.form = { name: vm.name, vcpus: vm.vcpus, mem_gb: vm.mem_gb }
-      editDlg.errors = {}; editDlg.open = true
+      editDlg.errors = {}; editDlg.tab = 'cpu'
+      editDlg.config = null; editDlg.options = null
+      editDlg.open = true
+      // 完整编辑：拉取虚拟磁盘 / 网卡 / 引导项 + 可选项
+      if (mode === 'edit') {
+        editDlg.loading = true
+        const res = await api('/vms/' + vm.id + '/hardware')
+        editDlg.loading = false
+        if (res && res.error) { toast(res.error, 'error'); editDlg.open = false; return }
+        editDlg.config = JSON.parse(JSON.stringify(res.config))
+        editDlg.options = res.options
+        editDlg.form.vcpus = res.vm.vcpus; editDlg.form.mem_gb = res.vm.mem_gb
+        editDlg.form.sockets = res.vm.sockets; editDlg.form.cores = res.vm.cores; editDlg.form.threads = res.vm.threads
+      }
     }
     const validate = () => {
       const e = {}
@@ -240,21 +253,59 @@ const ComputeView = {
       if (editDlg.mode === 'edit') {
         if (!editDlg.form.vcpus || editDlg.form.vcpus < 1) e.vcpus = t('op_invalid')
         if (!editDlg.form.mem_gb || editDlg.form.mem_gb < 1) e.mem_gb = t('op_invalid')
+        const cfg = editDlg.config
+        if (cfg) {
+          if (!cfg.disks.length) e.disks = t('vme_err_no_disk')
+          for (const n of cfg.nics) { if (n.model === 'sriov' && (!n.sriov_pf || n.sriov_vf == null)) e.nics = t('vme_err_sriov') }
+        }
       }
       editDlg.errors = e
       return Object.keys(e).length === 0
     }
+    // 虚拟磁盘操作
+    const addDisk = () => {
+      const cfg = editDlg.config; if (!cfg) return
+      const id = Math.max(0, ...cfg.disks.map((d) => d.id)) + 1
+      const pool = (editDlg.options.pools[0] && editDlg.options.pools[0].name) || 'prod-nfs-pool'
+      cfg.disks.push({ id, name: editDlg.vm.name + '-disk' + cfg.disks.length, pool, format: 'qcow2', size_gb: 40, used_gb: 0, bus: 'virtio-scsi', cache: 'none', iops_limit: 0, boot_order: 0, shareable: false })
+    }
+    const removeDisk = (i) => { editDlg.config.disks.splice(i, 1) }
+    // 网卡操作
+    const addNic = () => {
+      const cfg = editDlg.config; if (!cfg) return
+      const id = Math.max(0, ...cfg.nics.map((n) => n.id)) + 1
+      const pg = (editDlg.options.portgroups[0] && editDlg.options.portgroups[0].name) || '业务前端 VLAN'
+      cfg.nics.push({ id, model: 'virtio', portgroup: pg, vlan_id: editDlg.options.portgroups[0] ? editDlg.options.portgroups[0].vlan_id : 0, mac: '', connected: true, queues: 4, sriov_pf: '', sriov_vf: null })
+    }
+    const removeNic = (i) => { editDlg.config.nics.splice(i, 1) }
+    // 选择 SR-IOV PF 后，可用 VF 列表
+    const pfVfs = (pfName) => {
+      const pf = (editDlg.options && editDlg.options.sriov_pfs || []).find((p) => p.pf === pfName)
+      return pf ? pf.vfs.filter((v) => !v.used).map((v) => v.vf) : []
+    }
     const saveEdit = async () => {
       if (!validate()) return
       editDlg.busy = true
-      await new Promise((r) => setTimeout(r, 400))
-      const target = vms.value.find((v) => v.id === editDlg.vm.id)
-      if (target) {
-        target.name = editDlg.form.name.trim()
-        if (editDlg.mode === 'edit') { target.vcpus = Number(editDlg.form.vcpus); target.mem_gb = Number(editDlg.form.mem_gb) }
-      }
-      editDlg.busy = false; editDlg.open = false
-      toast(t('toast_saved'), 'success')
+      try {
+        if (editDlg.mode === 'rename') {
+          const target = vms.value.find((v) => v.id === editDlg.vm.id)
+          if (target) target.name = editDlg.form.name.trim()
+          // 同步后端（复用 hardware PUT 仅改名）
+          await api('/vms/' + editDlg.vm.id + '/hardware', { method: 'PUT', body: JSON.stringify({ vm: { name: editDlg.form.name.trim() } }) })
+          toast(t('toast_saved'), 'success'); editDlg.open = false; return
+        }
+        const cfg = editDlg.config
+        const res = await api('/vms/' + editDlg.vm.id + '/hardware', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vm: { name: editDlg.form.name.trim(), vcpus: Number(editDlg.form.vcpus), mem_gb: Number(editDlg.form.mem_gb) }, disks: cfg.disks, nics: cfg.nics, boot: cfg.boot }),
+        })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        const target = vms.value.find((v) => v.id === editDlg.vm.id)
+        if (target) { target.name = editDlg.form.name.trim(); target.vcpus = Number(editDlg.form.vcpus); target.mem_gb = Number(editDlg.form.mem_gb) }
+        if (res.warnings && res.warnings.length) res.warnings.forEach((w) => toast(w, 'warning'))
+        toast(res.message || t('toast_saved'), 'success')
+        editDlg.open = false
+      } finally { editDlg.busy = false }
     }
 
     const statusBadge = (s) => ({
@@ -424,7 +475,7 @@ const ComputeView = {
       kw, statusFilter, filterOpen, batchOpen, selected, page,
       filtered, paged, pageCount, isSelected, toggleSelect, allChecked, toggleAll, selectedVms,
       confirmDlg, confirmOk, askDelete, batchPower, batchDelete,
-      editDlg, openEdit, saveEdit,
+      editDlg, openEdit, saveEdit, addDisk, removeDisk, addNic, removeNic, pfVfs,
       migDlg, openMigrate, doMigrate, migClusters, migHosts, pickMigHost, setMigMode, fitMeta,
       statusBadge, openWizard, refresh, setFilter, t,
       GUEST_OS, hostsRef, stoppedVms,
@@ -620,30 +671,115 @@ const ComputeView = {
 
       <!-- 编辑/重命名对话框（表单校验）-->
       <div v-if="editDlg.open" class="modal-mask" @click.self="!editDlg.busy && (editDlg.open=false)">
-        <div class="modal-dialog">
-          <div class="modal-head"><i class="fas fa-sliders"></i> {{ editDlg.mode==='rename' ? t('ctx_rename') : t('ctx_edit_settings') }} · {{ editDlg.vm.name }}</div>
-          <div class="modal-body">
-            <div class="form-row">
-              <label>{{ t('col_name') }} <span class="req">*</span></label>
-              <input v-model="editDlg.form.name" :class="{invalid:editDlg.errors.name}" :placeholder="t('col_name')" />
-              <div v-if="editDlg.errors.name" class="form-err">{{ editDlg.errors.name }}</div>
-            </div>
-            <template v-if="editDlg.mode==='edit'">
+        <div class="modal-dialog" :class="editDlg.mode==='edit' ? 'modal-lg' : ''">
+          <div class="modal-head"><i class="fas fa-sliders"></i> {{ editDlg.mode==='rename' ? t('ctx_rename') : t('vme_title') }} · {{ editDlg.vm.name }}</div>
+
+          <!-- 重命名：极简 -->
+          <template v-if="editDlg.mode==='rename'">
+            <div class="modal-body">
               <div class="form-row">
-                <label>vCPU <span class="req">*</span></label>
-                <input type="number" min="1" max="128" v-model.number="editDlg.form.vcpus" :class="{invalid:editDlg.errors.vcpus}" />
-                <div v-if="editDlg.errors.vcpus" class="form-err">{{ editDlg.errors.vcpus }}</div>
+                <label>{{ t('col_name') }} <span class="req">*</span></label>
+                <input v-model="editDlg.form.name" :class="{invalid:editDlg.errors.name}" :placeholder="t('col_name')" />
+                <div v-if="editDlg.errors.name" class="form-err">{{ editDlg.errors.name }}</div>
               </div>
-              <div class="form-row">
-                <label>{{ t('col_mem') }} (GB) <span class="req">*</span></label>
-                <input type="number" min="1" max="2048" v-model.number="editDlg.form.mem_gb" :class="{invalid:editDlg.errors.mem_gb}" />
-                <div v-if="editDlg.errors.mem_gb" class="form-err">{{ editDlg.errors.mem_gb }}</div>
+            </div>
+          </template>
+
+          <!-- 完整编辑：多页签（硬件/磁盘/网络/引导）对标 vSphere 「编辑设置」 -->
+          <template v-else>
+            <div v-if="editDlg.loading" class="modal-body" style="text-align:center;padding:40px"><i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--text-tertiary)"></i></div>
+            <template v-else-if="editDlg.config">
+              <div class="vme-tabs">
+                <button class="vme-tab" :class="{active:editDlg.tab==='cpu'}" @click="editDlg.tab='cpu'"><i class="fas fa-microchip"></i> {{ t('vme_tab_cpu') }}</button>
+                <button class="vme-tab" :class="{active:editDlg.tab==='disk'}" @click="editDlg.tab='disk'"><i class="fas fa-hard-drive"></i> {{ t('vme_tab_disk') }} ({{ editDlg.config.disks.length }})</button>
+                <button class="vme-tab" :class="{active:editDlg.tab==='nic'}" @click="editDlg.tab='nic'"><i class="fas fa-ethernet"></i> {{ t('vme_tab_nic') }} ({{ editDlg.config.nics.length }})</button>
+                <button class="vme-tab" :class="{active:editDlg.tab==='boot'}" @click="editDlg.tab='boot'"><i class="fas fa-power-off"></i> {{ t('vme_tab_boot') }}</button>
+              </div>
+              <div class="modal-body vme-body">
+                <!-- 硬件资源 -->
+                <template v-if="editDlg.tab==='cpu'">
+                  <div class="form-row">
+                    <label>{{ t('col_name') }} <span class="req">*</span></label>
+                    <input v-model="editDlg.form.name" :class="{invalid:editDlg.errors.name}" />
+                    <div v-if="editDlg.errors.name" class="form-err">{{ editDlg.errors.name }}</div>
+                  </div>
+                  <div class="form-grid-2">
+                    <div class="form-row"><label>vCPU <span class="req">*</span></label><input type="number" min="1" max="256" v-model.number="editDlg.form.vcpus" :class="{invalid:editDlg.errors.vcpus}" /></div>
+                    <div class="form-row"><label>{{ t('col_mem') }} (GB) <span class="req">*</span></label><input type="number" min="1" max="4096" v-model.number="editDlg.form.mem_gb" :class="{invalid:editDlg.errors.mem_gb}" /></div>
+                  </div>
+                  <div class="vme-hint"><i class="fas fa-circle-info"></i> {{ t('vme_hotplug_hint') }}</div>
+                </template>
+
+                <!-- 虚拟磁盘 -->
+                <template v-if="editDlg.tab==='disk'">
+                  <div v-for="(d,i) in editDlg.config.disks" :key="d.id" class="vme-dev-card">
+                    <div class="vme-dev-head"><i class="fas fa-hard-drive"></i> {{ t('vme_disk') }} {{ i }} <span class="muted">· {{ d.size_gb }} GB · {{ d.format }}</span><div class="spacer"></div><button class="icon-btn danger" :disabled="editDlg.config.disks.length<=1" @click="removeDisk(i)"><i class="fas fa-trash"></i></button></div>
+                    <div class="form-grid-2">
+                      <div class="form-row"><label>{{ t('vme_disk_name') }}</label><input v-model="d.name" /></div>
+                      <div class="form-row"><label>{{ t('vme_disk_pool') }}</label><select v-model="d.pool"><option v-for="p in editDlg.options.pools" :key="p.name" :value="p.name">{{ p.name }} ({{ p.shared?t('iso_scope_cluster'):t('iso_scope_host') }})</option></select></div>
+                      <div class="form-row"><label>{{ t('vme_disk_size') }} (GB)</label><input type="number" min="1" v-model.number="d.size_gb" /></div>
+                      <div class="form-row"><label>{{ t('vme_disk_bus') }}</label><select v-model="d.bus"><option v-for="b in editDlg.options.disk_bus" :key="b" :value="b">{{ b }}</option></select></div>
+                      <div class="form-row"><label>{{ t('vme_disk_format') }}</label><select v-model="d.format"><option value="qcow2">qcow2 ({{ t('vme_thin') }})</option><option value="raw">raw ({{ t('vme_thick') }})</option></select></div>
+                      <div class="form-row"><label>{{ t('vme_disk_cache') }}</label><select v-model="d.cache"><option value="none">none (Direct I/O)</option><option value="writeback">writeback</option><option value="writethrough">writethrough</option></select></div>
+                      <div class="form-row"><label>{{ t('vme_disk_iops') }}</label><input type="number" min="0" v-model.number="d.iops_limit" :placeholder="t('vme_unlimited')" /></div>
+                      <div class="form-row" style="justify-content:flex-end"><label class="switch-row"><input type="checkbox" v-model="d.shareable"> {{ t('vme_disk_shareable') }}</label></div>
+                    </div>
+                  </div>
+                  <button class="apple-btn apple-btn--secondary" @click="addDisk"><i class="fas fa-plus"></i> {{ t('vme_add_disk') }}</button>
+                  <div v-if="editDlg.errors.disks" class="form-err">{{ editDlg.errors.disks }}</div>
+                </template>
+
+                <!-- 网络适配器 -->
+                <template v-if="editDlg.tab==='nic'">
+                  <div v-for="(n,i) in editDlg.config.nics" :key="n.id" class="vme-dev-card">
+                    <div class="vme-dev-head"><i class="fas fa-ethernet"></i> {{ t('vme_nic') }} {{ i }} <span class="muted">· {{ n.model }}</span><div class="spacer"></div><button class="icon-btn danger" @click="removeNic(i)"><i class="fas fa-trash"></i></button></div>
+                    <div class="form-grid-2">
+                      <div class="form-row"><label>{{ t('vme_nic_model') }}</label><select v-model="n.model"><option value="virtio">virtio (paravirt)</option><option value="e1000e">e1000e</option><option value="rtl8139">rtl8139</option><option value="sriov">SR-IOV (VF 直通)</option></select></div>
+                      <div class="form-row" v-if="n.model!=='sriov'"><label>{{ t('vme_nic_portgroup') }}</label><select v-model="n.portgroup"><option v-for="pg in editDlg.options.portgroups" :key="pg.name" :value="pg.name">{{ pg.name }} (VLAN {{ pg.vlan_id }})</option></select></div>
+                      <!-- SR-IOV：选择 PF + VF -->
+                      <template v-if="n.model==='sriov'">
+                        <div class="form-row"><label>{{ t('vme_sriov_pf') }}</label>
+                          <select v-model="n.sriov_pf" @change="n.sriov_vf=null">
+                            <option value="">{{ t('vme_select') }}</option>
+                            <option v-for="pf in editDlg.options.sriov_pfs" :key="pf.pf" :value="pf.pf">{{ pf.pf }} · {{ pf.nic_model }} · {{ pf.link_gbe }}GbE ({{ pf.total_vfs-pf.used_vfs }}/{{ pf.total_vfs }} VF {{ t('vme_free') }})</option>
+                          </select>
+                          <div v-if="!editDlg.options.sriov_pfs.length" class="form-err">{{ t('vme_sriov_none') }}</div>
+                        </div>
+                        <div class="form-row"><label>{{ t('vme_sriov_vf') }}</label>
+                          <select v-model.number="n.sriov_vf" :disabled="!n.sriov_pf">
+                            <option :value="null">{{ t('vme_select') }}</option>
+                            <option v-for="vf in pfVfs(n.sriov_pf)" :key="vf" :value="vf">VF {{ vf }}</option>
+                          </select>
+                        </div>
+                      </template>
+                      <div class="form-row" v-if="n.model==='virtio'"><label>{{ t('vme_nic_queues') }}</label><input type="number" min="1" max="16" v-model.number="n.queues" /></div>
+                      <div class="form-row" style="justify-content:flex-end"><label class="switch-row"><input type="checkbox" v-model="n.connected"> {{ t('vme_nic_connected') }}</label></div>
+                    </div>
+                  </div>
+                  <button class="apple-btn apple-btn--secondary" @click="addNic"><i class="fas fa-plus"></i> {{ t('vme_add_nic') }}</button>
+                  <div v-if="editDlg.errors.nics" class="form-err">{{ editDlg.errors.nics }}</div>
+                </template>
+
+                <!-- 引导选项 -->
+                <template v-if="editDlg.tab==='boot'">
+                  <div class="form-grid-2">
+                    <div class="form-row"><label>{{ t('vme_firmware') }}</label><select v-model="editDlg.config.boot.firmware"><option value="bios">BIOS (SeaBIOS)</option><option value="uefi">UEFI (OVMF)</option></select></div>
+                    <div class="form-row" style="justify-content:flex-end"><label class="switch-row" :class="{disabled:editDlg.config.boot.firmware!=='uefi'}"><input type="checkbox" v-model="editDlg.config.boot.secure_boot" :disabled="editDlg.config.boot.firmware!=='uefi'"> {{ t('vme_secure_boot') }}</label></div>
+                  </div>
+                  <div class="form-row"><label>{{ t('vme_boot_order') }}</label>
+                    <div class="vme-boot-order">
+                      <span class="vme-boot-item" v-for="(b,bi) in editDlg.config.boot.boot_order" :key="bi"><i class="fas" :class="b==='disk'?'fa-hard-drive':(b==='cdrom'?'fa-compact-disc':'fa-network-wired')"></i> {{ t('vme_boot_'+b) }}</span>
+                    </div>
+                  </div>
+                  <div class="form-row" style="justify-content:flex-end"><label class="switch-row"><input type="checkbox" v-model="editDlg.config.boot.boot_menu"> {{ t('vme_boot_menu') }}</label></div>
+                </template>
               </div>
             </template>
-          </div>
+          </template>
+
           <div class="modal-foot">
             <button class="apple-btn apple-btn--secondary" :disabled="editDlg.busy" @click="editDlg.open=false">{{ t('op_cancel') }}</button>
-            <button class="apple-btn apple-btn--primary" :disabled="editDlg.busy" @click="saveEdit">
+            <button class="apple-btn apple-btn--primary" :disabled="editDlg.busy || editDlg.loading" @click="saveEdit">
               <i v-if="editDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_save') }}
             </button>
           </div>

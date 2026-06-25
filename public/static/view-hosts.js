@@ -263,6 +263,31 @@ const HostsView = {
         toast(res.message, 'success')
       } catch (e) { toast(t('op_failed'), 'error') } finally { gpuBusy.value = 0 }
     }
+    // ---- N5 · SR-IOV 物理网卡 (PF) 启用 / 配置 / 禁用 ----
+    const sriovDlg = reactive({ open: false, busy: false, form: {}, errors: {} })
+    const openSriovEnable = () => {
+      sriovDlg.form = { pf: '', nic_model: (detail.value && detail.value.hostname) ? '' : '', num_vfs: 8, link_gbe: 100 }
+      sriovDlg.errors = {}; sriovDlg.open = true
+    }
+    const saveSriov = async () => {
+      const e = {}
+      if (sriovDlg.form.num_vfs < 1 || sriovDlg.form.num_vfs > 64) e.num_vfs = t('op_invalid')
+      sriovDlg.errors = e
+      if (Object.keys(e).length) return
+      sriovDlg.busy = true
+      try {
+        const res = await api('/hosts/' + selectedId.value + '/sriov', { method: 'POST', body: JSON.stringify({ enabled: true, pf: sriovDlg.form.pf || undefined, num_vfs: Number(sriovDlg.form.num_vfs), link_gbe: Number(sriovDlg.form.link_gbe) }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        await reloadHw()
+        toast(res.message, 'success'); sriovDlg.open = false
+      } finally { sriovDlg.busy = false }
+    }
+    const disableSriov = async (pf) => {
+      const res = await api('/hosts/' + selectedId.value + '/sriov', { method: 'POST', body: JSON.stringify({ enabled: false, pf: pf.pf }) })
+      if (res && res.error) return toast(res.error, 'error')
+      await reloadHw(); toast(res.message, 'success')
+    }
+
     // PCI 直通状态 → 中文标签 / 颜色
     const ptState = (s) => ({
       in_use: { txt: t('hw_pt_in_use'), color: C.blue, badge: 'apple-badge--running' },
@@ -360,6 +385,7 @@ const HostsView = {
       haCheckList, haStatusColor, haStatusText, overallColor, overallText, evIcon, evColor,
       iommuBusy, pciBusy, gpuBusy, toggleIommu, togglePci, switchGpuMode, releaseGpu,
       ptState, gpuModeText, iommuConfirm, hwNetEdit, startHwNetEdit, saveHwNet,
+      sriovDlg, openSriovEnable, saveSriov, disableSriov,
       bytesRate, utilColor, C, t, fmt,
     }
   },
@@ -574,6 +600,30 @@ const HostsView = {
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- N5 · SR-IOV 物理网卡（PF）管理 -->
+        <div>
+          <div class="hw-section-title"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('sriov_title') }}
+            <button class="apple-btn apple-btn--primary apple-btn--sm" style="margin-left:auto" :disabled="!detail.iommu_summary || !detail.iommu_summary.enabled" :title="(!detail.iommu_summary||!detail.iommu_summary.enabled)?t('sriov_need_iommu'):''" @click="openSriovEnable"><i class="fas fa-plus"></i> {{ t('sriov_enable') }}</button>
+          </div>
+          <div v-if="detail.sriov_pfs && detail.sriov_pfs.length" class="grid grid-2">
+            <div class="apple-card sriov-card" v-for="pf in detail.sriov_pfs" :key="pf.pf">
+              <div class="gmc-head">
+                <div class="gmc-name"><i class="fas fa-ethernet" style="color:var(--color-teal,#30b0c7)"></i> {{ pf.pf }}</div>
+                <span class="apple-badge apple-badge--running"><span class="dot"></span>SR-IOV</span>
+              </div>
+              <div class="gmc-meta">{{ pf.nic_model }} · {{ pf.link_gbe }} GbE</div>
+              <div class="gmc-meta">{{ t('sriov_vf_usage') }}：<strong>{{ pf.used_vfs }}/{{ pf.total_vfs }}</strong> {{ t('vme_sriov_vf') }}</div>
+              <div class="sriov-vf-grid">
+                <span class="sriov-vf" v-for="v in pf.vfs" :key="v.vf" :class="{used:v.used}" :title="v.used ? (t('vme_sriov_vf')+' '+v.vf+' → '+(v.vm||'')) : (t('vme_sriov_vf')+' '+v.vf+' '+t('vme_free'))">{{ v.vf }}</span>
+              </div>
+              <div class="gmc-ops">
+                <button class="apple-btn apple-btn--secondary apple-btn--sm" @click="disableSriov(pf)"><i class="fas fa-power-off"></i> {{ t('sriov_disable') }}</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="apple-card" style="text-align:center;padding:24px"><span class="muted">{{ t('sriov_empty') }}</span></div>
         </div>
 
         <!-- CPU topology -->
@@ -812,6 +862,25 @@ const HostsView = {
           <div class="hosts-pick-hint" style="margin-top:12px"><i class="fas fa-triangle-exclamation"></i> {{ t('hw_iommu_reboot_hint') }}</div>
         </div>
         <div class="modal-foot"><button class="apple-btn apple-btn--primary" @click="iommuConfirm.open=false">{{ t('op_close') }}</button></div>
+      </div>
+    </div>
+
+    <!-- N5 · 启用 SR-IOV 对话框 -->
+    <div v-if="sriovDlg.open" class="modal-mask" @click.self="!sriovDlg.busy && (sriovDlg.open=false)">
+      <div class="modal-dialog modal-sm">
+        <div class="modal-head"><i class="fas fa-ethernet" style="color:var(--color-teal,#30b0c7)"></i> {{ t('sriov_enable') }}</div>
+        <div class="modal-body">
+          <div class="form-row"><label>{{ t('sriov_pf_name') }}</label><input v-model="sriovDlg.form.pf" placeholder="ens6f0（留空自动命名）"></div>
+          <div class="form-grid-2">
+            <div class="form-row"><label>{{ t('sriov_num_vfs') }} <span class="req">*</span></label><input type="number" min="1" max="64" v-model.number="sriovDlg.form.num_vfs" :class="{invalid:sriovDlg.errors.num_vfs}"></div>
+            <div class="form-row"><label>{{ t('hw_speed') }}</label><select v-model.number="sriovDlg.form.link_gbe"><option :value="10">10 GbE</option><option :value="25">25 GbE</option><option :value="100">100 GbE</option></select></div>
+          </div>
+          <div class="hosts-pick-hint" style="margin-top:8px"><i class="fas fa-circle-info"></i> {{ t('sriov_hint') }}</div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--secondary" :disabled="sriovDlg.busy" @click="sriovDlg.open=false">{{ t('op_cancel') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="sriovDlg.busy" @click="saveSriov"><i v-if="sriovDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+        </div>
       </div>
     </div>
 
