@@ -48,8 +48,14 @@ const ComputeView = {
     // ---- 编辑/重命名表单对话框 ----
     const editDlg = reactive({ open: false, mode: 'edit', busy: false, vm: null, form: { name: '', vcpus: 1, mem_gb: 1 }, errors: {} })
 
-    // ---- 虚拟机迁移对话框（体现集群约束：目标只能是同集群在线主机）----
-    const migDlg = reactive({ open: false, busy: false, vm: null, targets: [], targetId: null })
+    // ---- P10 · 企业级迁移向导（右键 → 数据中心 → 集群 → 主机 → 资源校验 → 冷/热 → 执行）----
+    const migDlg = reactive({
+      open: false, busy: false, planning: false, vm: null,
+      tree: [], info: null,                 // 迁移源信息 + DC/集群/主机树
+      dcId: null, clusterId: null, hostId: null,
+      mode: 'live',                         // live=热迁移 / cold=冷迁移
+      plan: null,                           // 选定目标后的迁移计划
+    })
 
     const load = async () => {
       loading.value = true
@@ -125,34 +131,69 @@ const ComputeView = {
       toast(`「${vm.name}」：${t('ctx_' + command)}（原型演示）`, 'info')
     }
 
-    // ---- 虚拟机迁移：核心集群约束 ----
-    //  目标主机列表只显示「同集群内的其他在线非维护主机」（store.getMigrationTargets）。
+    // ---- P10 · 迁移向导：打开 → 拉取「数据中心 → 集群 → 主机」目标树 ----
     const openMigrate = async (vm) => {
-      // 确保 store 已加载层级数据（VM 列表、主机、集群血缘）
-      await store.fetchAll()
-      const targets = store.getMigrationTargets(vm.id)
       migDlg.vm = vm
-      migDlg.targets = targets
-      migDlg.targetId = targets.length ? targets[0].id : null
-      migDlg.busy = false
-      // 同集群内没有其他可用主机 → 直接提示并不打开对话框
-      if (!targets.length) return toast(t('mig_no_target'), 'warning')
+      migDlg.tree = []; migDlg.info = null; migDlg.plan = null
+      migDlg.dcId = null; migDlg.clusterId = null; migDlg.hostId = null
+      migDlg.busy = false; migDlg.planning = false
       migDlg.open = true
+      const info = await api('/vms/' + vm.id + '/migration-targets')
+      if (info && info.error) { migDlg.open = false; return toast(info.error, 'error') }
+      migDlg.info = info
+      migDlg.tree = info.tree || []
+      migDlg.mode = info.can_live ? 'live' : 'cold'   // 停机 VM 只能冷迁移
     }
+    // 当前选中数据中心下的集群 / 集群下的主机
+    const migClusters = computed(() => {
+      const dc = migDlg.tree.find((d) => d.id === migDlg.dcId)
+      return dc ? dc.clusters : []
+    })
+    const migHosts = computed(() => {
+      const cl = migClusters.value.find((c) => c.id === migDlg.clusterId)
+      return cl ? cl.hosts : []
+    })
+    // 选择目标主机 → 拉取迁移计划（资源校验 / 冷热 / 共享存储 / 网络路径）
+    const pickMigHost = async (h) => {
+      if (h.fit === 'unavailable') return
+      migDlg.hostId = h.id
+      migDlg.planning = true; migDlg.plan = null
+      try {
+        const plan = await api('/vms/' + migDlg.vm.id + '/migration-plan', { method: 'POST', body: JSON.stringify({ target_host_id: h.id, mode: migDlg.mode }) })
+        if (plan && plan.error) { toast(plan.error, 'error'); return }
+        migDlg.plan = plan
+        if (plan.mode_forced_cold) migDlg.mode = 'cold'
+      } finally { migDlg.planning = false }
+    }
+    // 切换冷/热迁移后重新评估计划
+    const setMigMode = async (m) => {
+      if (migDlg.plan && migDlg.plan.mode_forced_cold && m === 'live') return
+      migDlg.mode = m
+      if (migDlg.hostId) await pickMigHost(migHosts.value.find((x) => x.id === migDlg.hostId) || { id: migDlg.hostId, fit: 'ok' })
+    }
+    // 执行迁移
     const doMigrate = async () => {
-      if (!migDlg.targetId) return
+      if (!migDlg.hostId || !migDlg.plan || !migDlg.plan.can_migrate) return
       migDlg.busy = true
-      const target = migDlg.targets.find((h) => h.id === migDlg.targetId)
+      const target = migHosts.value.find((h) => h.id === migDlg.hostId)
       toast(t('mig_in_progress').replace('{vm}', migDlg.vm.name).replace('{host}', target ? target.name : ''), 'info')
-      const res = await store.migrateVm(migDlg.vm.id, migDlg.targetId)
-      migDlg.busy = false
-      if (!res.ok) return
-      // 同步本地 VM 列表的归属主机（即时一致）
-      const local = vms.value.find((v) => v.id === migDlg.vm.id)
-      if (local) local.host_id = Number(migDlg.targetId)
-      migDlg.open = false
-      toast(t('mig_success').replace('{vm}', migDlg.vm.name).replace('{host}', target ? target.name : ''), 'success')
+      try {
+        const res = await api('/vms/' + migDlg.vm.id + '/migrate', { method: 'POST', body: JSON.stringify({ target_host_id: migDlg.hostId, mode: migDlg.mode }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        const local = vms.value.find((v) => v.id === migDlg.vm.id)
+        if (local) { local.host_id = Number(migDlg.hostId); if (target) { local.cluster_id = target_cluster(); } }
+        await store.fetchAll()
+        migDlg.open = false
+        toast(res.message || t('mig_success').replace('{vm}', migDlg.vm.name).replace('{host}', target ? target.name : ''), 'success')
+      } catch (e) { toast(t('toast_failed'), 'error') } finally { migDlg.busy = false }
     }
+    const target_cluster = () => migDlg.clusterId
+    // 资源匹配徽标
+    const fitMeta = (f) => ({
+      ok: { txt: t('mig_fit_ok'), color: 'var(--color-green)', icon: 'fa-circle-check' },
+      insufficient: { txt: t('mig_fit_insufficient'), color: 'var(--color-orange)', icon: 'fa-triangle-exclamation' },
+      unavailable: { txt: t('mig_fit_unavailable'), color: 'var(--text-tertiary)', icon: 'fa-ban' },
+    }[f] || { txt: f, color: 'var(--text-tertiary)', icon: 'fa-circle-question' })
 
     // ---- 删除二次确认 ----
     const askDelete = (targets) => {
@@ -384,7 +425,7 @@ const ComputeView = {
       filtered, paged, pageCount, isSelected, toggleSelect, allChecked, toggleAll, selectedVms,
       confirmDlg, confirmOk, askDelete, batchPower, batchDelete,
       editDlg, openEdit, saveEdit,
-      migDlg, openMigrate, doMigrate,
+      migDlg, openMigrate, doMigrate, migClusters, migHosts, pickMigHost, setMigMode, fitMeta,
       statusBadge, openWizard, refresh, setFilter, t,
       GUEST_OS, hostsRef, stoppedVms,
       tplDlg, openTplCreate, saveTpl,
@@ -609,36 +650,88 @@ const ComputeView = {
         </div>
       </div>
 
-      <!-- 虚拟机迁移对话框（目标主机列表仅同集群在线主机）-->
+      <!-- P10 · 企业级迁移向导：数据中心 → 集群 → 主机 → 资源校验 → 冷/热 → 执行 -->
       <div v-if="migDlg.open" class="modal-mask" @click.self="!migDlg.busy && (migDlg.open=false)">
-        <div class="modal-dialog">
-          <div class="modal-head"><i class="fas fa-truck-fast" style="color:var(--color-indigo)"></i> {{ t('mig_title') }} · {{ migDlg.vm.name }}</div>
-          <div class="modal-body">
-            <div class="info-alert"><i class="fas fa-circle-info"></i> {{ t('mig_same_cluster') }}</div>
-            <div class="form-row">
-              <label>{{ t('mig_select_target') }} <span class="req">*</span></label>
-              <div class="mig-target-list">
-                <label class="mig-target" v-for="h in migDlg.targets" :key="h.id"
-                       :class="{active: migDlg.targetId===h.id}">
-                  <input type="radio" name="mig-target" :value="h.id" v-model="migDlg.targetId" />
-                  <div class="mig-target-main">
-                    <div class="mig-target-name"><i class="fas fa-server" style="color:var(--color-blue)"></i> <strong>{{ h.name }}</strong>
-                      <span class="apple-badge apple-badge--running" style="margin-left:6px"><span class="dot"></span>{{ h.cluster_name }}</span>
-                    </div>
-                    <div class="mig-target-meta muted">{{ h.ip }} · {{ h.cpu_model }}</div>
-                  </div>
-                  <div class="mig-target-free">
-                    <div><span class="muted">{{ t('mig_cpu_free') }}</span> <strong>{{ 100 - (h.cpu_usage||0) }}%</strong></div>
-                    <div><span class="muted">{{ t('mig_mem_free') }}</span> <strong>{{ (h.mem_total_gb||0) - (h.mem_used_gb||0) }} GB</strong></div>
-                  </div>
-                </label>
+        <div class="modal-dialog modal-lg">
+          <div class="modal-head"><i class="fas fa-truck-fast" style="color:var(--color-indigo)"></i> {{ t('mig_title') }} · {{ migDlg.vm.name }}
+            <span v-if="migDlg.info" class="muted" style="font-weight:400;margin-left:8px">{{ migDlg.info.vcpus }} vCPU · {{ migDlg.info.mem_gb }} GB<template v-if="migDlg.info.gpus"> · {{ migDlg.info.gpus }} GPU</template></span>
+          </div>
+          <div class="modal-body" style="max-height:64vh;overflow:auto">
+            <div v-if="!migDlg.info" class="muted" style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i> {{ t('op_loading') }}</div>
+            <template v-else>
+              <!-- 源信息 + 迁移模式 -->
+              <div class="mig-src">
+                <div><span class="muted">{{ t('mig_source') }}</span> <strong><i class="fas fa-server" style="color:var(--color-gray)"></i> {{ migDlg.info.source_host }}</strong></div>
+                <div class="mig-mode-seg">
+                  <button :class="{active:migDlg.mode==='live'}" :disabled="!migDlg.info.can_live || (migDlg.plan && migDlg.plan.mode_forced_cold)" @click="setMigMode('live')"><i class="fas fa-bolt"></i> {{ t('mig_mode_live') }}</button>
+                  <button :class="{active:migDlg.mode==='cold'}" @click="setMigMode('cold')"><i class="fas fa-power-off"></i> {{ t('mig_mode_cold') }}</button>
+                </div>
               </div>
-            </div>
+              <div v-if="!migDlg.info.can_live" class="info-alert" style="margin-top:8px"><i class="fas fa-circle-info"></i> {{ t('mig_cold_only') }}</div>
+
+              <!-- 三级选择：数据中心 / 集群 / 主机 -->
+              <div class="mig-pick-grid">
+                <div class="mig-col">
+                  <div class="mig-col-title">{{ t('mig_pick_dc') }}</div>
+                  <div class="mig-opt" v-for="dc in migDlg.tree" :key="dc.id" :class="{active:migDlg.dcId===dc.id}" @click="migDlg.dcId=dc.id; migDlg.clusterId=null; migDlg.hostId=null; migDlg.plan=null">
+                    <i class="fas fa-building"></i> {{ dc.name }}
+                  </div>
+                </div>
+                <div class="mig-col">
+                  <div class="mig-col-title">{{ t('mig_pick_cluster') }}</div>
+                  <div v-if="!migDlg.dcId" class="mig-empty">{{ t('mig_pick_dc_first') }}</div>
+                  <div v-else class="mig-opt" v-for="cl in migClusters" :key="cl.id" :class="{active:migDlg.clusterId===cl.id}" @click="migDlg.clusterId=cl.id; migDlg.hostId=null; migDlg.plan=null">
+                    <i class="fas fa-layer-group"></i> {{ cl.name }} <span class="muted" style="font-size:11px">· {{ cl.hosts.length }}</span>
+                  </div>
+                </div>
+                <div class="mig-col">
+                  <div class="mig-col-title">{{ t('mig_pick_host') }}</div>
+                  <div v-if="!migDlg.clusterId" class="mig-empty">{{ t('mig_pick_cluster_first') }}</div>
+                  <div v-else-if="!migHosts.length" class="mig-empty">{{ t('mig_no_host') }}</div>
+                  <div v-else class="mig-opt mig-host-opt" v-for="h in migHosts" :key="h.id"
+                       :class="{active:migDlg.hostId===h.id, disabled:h.fit==='unavailable'}" @click="pickMigHost(h)">
+                    <div class="flex between" style="width:100%">
+                      <span><i class="fas fa-server"></i> {{ h.name }}</span>
+                      <i class="fas" :class="fitMeta(h.fit).icon" :style="{color:fitMeta(h.fit).color}" :title="fitMeta(h.fit).txt"></i>
+                    </div>
+                    <div class="muted" style="font-size:11px">{{ t('mig_free') }} {{ h.free_vcpus }} vCPU / {{ h.free_mem_gb }} GB</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 迁移计划：资源校验 + 范围 + 存储 + 网络路径 -->
+              <div v-if="migDlg.planning" class="muted" style="text-align:center;padding:14px"><i class="fas fa-spinner fa-spin"></i> {{ t('mig_planning') }}</div>
+              <div v-else-if="migDlg.plan" class="mig-plan">
+                <div class="mig-plan-head">
+                  <span class="hw-chip"><i class="fas fa-route"></i> {{ migDlg.plan.scope_label }}</span>
+                  <span class="hw-chip" :style="{color: migDlg.plan.mode==='live'?'var(--color-green)':'var(--color-orange)'}">{{ migDlg.plan.mode==='live'?t('mig_mode_live'):t('mig_mode_cold') }}</span>
+                  <span class="hw-chip">{{ migDlg.plan.shared_storage ? t('mig_shared_storage') : t('mig_storage_migration') }}</span>
+                  <span class="muted" style="font-size:12px;margin-left:auto">≈ {{ migDlg.plan.est_seconds }}s</span>
+                </div>
+                <div v-if="migDlg.plan.cold_reason" class="info-alert" style="margin:6px 0"><i class="fas fa-circle-info"></i> {{ migDlg.plan.cold_reason }}</div>
+                <!-- 网络路径 -->
+                <div class="mig-netpath">
+                  <span class="muted" style="font-size:12px">{{ t('mig_net_path') }}：</span>
+                  <template v-for="(p,i) in migDlg.plan.network_path" :key="i">
+                    <span class="mig-hop">{{ p }}</span><i v-if="i<migDlg.plan.network_path.length-1" class="fas fa-arrow-right mig-arrow"></i>
+                  </template>
+                </div>
+                <!-- 资源校验清单 -->
+                <div class="mig-checks">
+                  <div class="mig-check" v-for="ck in migDlg.plan.checks" :key="ck.key">
+                    <i class="fas" :class="ck.pass?'fa-circle-check':'fa-triangle-exclamation'" :style="{color:ck.pass?'var(--color-green)':'var(--color-orange)'}"></i>
+                    <span class="mig-check-key">{{ t('mig_chk_'+ck.key) }}</span>
+                    <span class="muted" style="font-size:12px">{{ ck.detail }}</span>
+                  </div>
+                </div>
+                <div v-if="!migDlg.plan.can_migrate" class="form-err" style="margin-top:8px"><i class="fas fa-ban"></i> {{ t('mig_blocked') }}：{{ migDlg.plan.blockers.join('；') }}</div>
+              </div>
+            </template>
           </div>
           <div class="modal-foot">
             <button class="apple-btn apple-btn--secondary" :disabled="migDlg.busy" @click="migDlg.open=false">{{ t('op_cancel') }}</button>
-            <button class="apple-btn apple-btn--primary" :disabled="migDlg.busy || !migDlg.targetId" @click="doMigrate">
-              <i v-if="migDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-truck-fast"></i> {{ t('mig_start') }}
+            <button class="apple-btn apple-btn--primary" :disabled="migDlg.busy || !migDlg.plan || !migDlg.plan.can_migrate" @click="doMigrate">
+              <i v-if="migDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-truck-fast"></i> {{ migDlg.mode==='live'?t('mig_start_live'):t('mig_start_cold') }}
             </button>
           </div>
         </div>

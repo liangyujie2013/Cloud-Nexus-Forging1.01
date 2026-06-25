@@ -482,39 +482,146 @@ app.post(`${API}/vms`, async (c) => {
   return c.json({ id: 999, name: cfg.name, status: 'starting', message: '（原型）虚拟机创建任务已提交' })
 })
 
-// ---- VM 迁移目标：核心业务约束 = 只能迁到「同集群内的其他在线非维护主机」----
+// ============================================================================
+//  P10 · 企业级 VM 迁移（右键向导）：数据中心 → 集群 → 主机 → 资源校验 →
+//        冷/热迁移 + 共享存储/非共享存储逻辑 + 跨 DC/集群/节点网络路径
+// ============================================================================
+// 判断源主机与目标主机是否共享同一存储域（决定是否需要存储迁移 storage migration）
+const hostsShareStorage = (srcHostId: number, dstHostId: number): { shared: boolean; pool?: string } => {
+  const src = mockData.hosts.find((h) => h.id === srcHostId)
+  const dst = mockData.hosts.find((h) => h.id === dstHostId)
+  if (!src || !dst) return { shared: false }
+  // 共享存储池挂在集群级（cluster_id），同集群且存在 shared 池即视为共享存储
+  const sharedPools = mockData.storage_pools.filter((p) => p.shared)
+  const srcShared = sharedPools.filter((p) => p.cluster_id === src.cluster_id)
+  const dstShared = sharedPools.filter((p) => p.cluster_id === dst.cluster_id)
+  const common = srcShared.find((sp) => dstShared.some((dp) => dp.name === sp.name))
+  if (common) return { shared: true, pool: common.name }
+  // 同集群即便不同池，只要两端都有共享池也认为可走共享存储（简化）
+  if (src.cluster_id === dst.cluster_id && srcShared.length && dstShared.length) return { shared: true, pool: srcShared[0].name }
+  return { shared: false }
+}
+// 计算源→目标主机的网络路径（同主机/同集群/跨集群/跨数据中心）
+const migrationScope = (vm: any, dst: any): { scope: string; label: string; path: string[] } => {
+  const src = mockData.hosts.find((h) => h.id === vm.host_id)
+  if (!src) return { scope: 'unknown', label: '未知', path: [] }
+  if (src.cluster_id === dst.cluster_id) return { scope: 'intra_cluster', label: '集群内迁移', path: [src.name, '集群内务网/迁移网络', dst.name] }
+  if (src.datacenter_id === dst.datacenter_id) return { scope: 'cross_cluster', label: '跨集群迁移（同数据中心）', path: [src.name, '源集群上联', '数据中心骨干网', '目标集群上联', dst.name] }
+  return { scope: 'cross_datacenter', label: '跨数据中心迁移', path: [src.name, '源 DC 出口', 'DC 互联专线/VPN', '目标 DC 入口', dst.name] }
+}
+
+// ---- 迁移目标拓扑：返回按「数据中心 → 集群 → 主机」分组的可迁移目标树 ----
+//  企业级：支持跨集群、跨数据中心（不再硬限制同集群），并对每个候选主机给出资源匹配预判
 app.get(`${API}/vms/:id/migration-targets`, (c) => {
   const id = Number(c.req.param('id'))
   const vm = mockData.vms.find((v) => v.id === id)
   if (!vm) return c.json({ error: '虚拟机不存在', code: 'VM_NOT_FOUND' }, 404)
-  const targets = mockData.hosts
-    .filter((h) => h.cluster_id === vm.cluster_id && h.id !== vm.host_id && h.status === 'connected' && !h.maintenance_mode)
-    .map((h) => ({ id: h.id, name: h.name, ip: h.ip, cpu_usage: h.cpu_usage, mem_usage: h.mem_usage, cpu_free: 100 - h.cpu_usage, mem_free: 100 - h.mem_usage }))
-  return c.json({ vm_id: id, vm_name: vm.name, cluster_id: vm.cluster_id, source_host_id: vm.host_id, targets })
+  const tree = mockData.datacenters.map((dc) => ({
+    id: dc.id, name: dc.name,
+    clusters: mockData.clusters.filter((cl) => cl.datacenter_id === dc.id).map((cl) => ({
+      id: cl.id, name: cl.name, ha_enabled: cl.ha_enabled,
+      hosts: mockData.hosts.filter((h) => h.cluster_id === cl.id && h.id !== vm.host_id).map((h) => {
+        const freeV = Math.max(0, h.vcpus - Math.round(h.vcpus * h.cpu_usage / 100))
+        const freeM = Math.max(0, h.mem_total_gb - h.mem_used_gb)
+        const okCpu = freeV >= vm.vcpus
+        const okMem = freeM >= vm.mem_gb
+        const available = h.status === 'connected' && !h.maintenance_mode
+        return {
+          id: h.id, name: h.name, ip: h.ip, status: h.status, available,
+          cpu_usage: h.cpu_usage, mem_usage: h.mem_usage,
+          free_vcpus: freeV, free_mem_gb: freeM,
+          need_vcpus: vm.vcpus, need_mem_gb: vm.mem_gb,
+          fit: available && okCpu && okMem ? 'ok' : !available ? 'unavailable' : (!okCpu || !okMem) ? 'insufficient' : 'ok',
+          shared_storage: hostsShareStorage(vm.host_id, h.id).shared,
+        }
+      }),
+    })),
+  }))
+  const srcHost = mockData.hosts.find((h) => h.id === vm.host_id)
+  return c.json({
+    vm_id: id, vm_name: vm.name, vm_status: vm.status,
+    vcpus: vm.vcpus, mem_gb: vm.mem_gb, gpus: vm.gpus || 0,
+    source_host_id: vm.host_id, source_host: srcHost?.name,
+    source_cluster_id: vm.cluster_id, source_datacenter_id: vm.datacenter_id,
+    // 运行中=可热迁移；停机=只能冷迁移
+    can_live: vm.status === 'running',
+    tree,
+  })
 })
 
-// ---- 执行 VM 迁移（同集群约束校验后变更归属主机）----
-app.post(`${API}/vms/:id/migrate`, async (c) => {
+// ---- 迁移预演：对指定目标主机计算完整迁移计划（类型/范围/存储/网络路径/资源校验）----
+app.post(`${API}/vms/:id/migration-plan`, async (c) => {
   const id = Number(c.req.param('id'))
-  const { target_host_id } = await c.req.json<{ target_host_id: number }>()
   const vm = mockData.vms.find((v) => v.id === id)
   if (!vm) return c.json({ error: '虚拟机不存在', code: 'VM_NOT_FOUND' }, 404)
-  const target = mockData.hosts.find((h) => h.id === Number(target_host_id))
-  if (!target) return c.json({ error: '目标主机不存在', code: 'HOST_NOT_FOUND' }, 404)
-  // 同集群约束
-  if (target.cluster_id !== vm.cluster_id) {
-    return c.json({ error: '不允许跨集群迁移：目标主机不在同一集群', code: 'CROSS_CLUSTER' }, 409)
-  }
-  if (target.status !== 'connected' || target.maintenance_mode) {
-    return c.json({ error: '目标主机不可用（离线或维护中）', code: 'HOST_UNAVAILABLE' }, 409)
-  }
+  const b = await c.req.json<{ target_host_id?: number; mode?: 'live' | 'cold' }>().catch(() => ({} as any))
+  const dst = mockData.hosts.find((h) => h.id === Number(b.target_host_id))
+  if (!dst) return c.json({ error: '请选择目标主机', code: 'NO_TARGET' }, 400)
   const srcHost = mockData.hosts.find((h) => h.id === vm.host_id)
+  const sto = hostsShareStorage(vm.host_id, dst.id)
+  const sc = migrationScope(vm, dst)
+  const freeV = Math.max(0, dst.vcpus - Math.round(dst.vcpus * dst.cpu_usage / 100))
+  const freeM = Math.max(0, dst.mem_total_gb - dst.mem_used_gb)
+  const checks = [
+    { key: 'cpu', pass: freeV >= vm.vcpus, detail: `需 ${vm.vcpus} vCPU / 目标空闲 ${freeV} vCPU` },
+    { key: 'mem', pass: freeM >= vm.mem_gb, detail: `需 ${vm.mem_gb} GB / 目标空闲 ${freeM} GB` },
+    { key: 'host', pass: dst.status === 'connected' && !dst.maintenance_mode, detail: dst.status === 'connected' && !dst.maintenance_mode ? '目标主机在线可用' : '目标主机离线或维护中' },
+    { key: 'cpu_compat', pass: (srcHost?.cpu_model || '').split(' ')[1] === (dst.cpu_model || '').split(' ')[1] || sc.scope === 'intra_cluster', detail: sc.scope === 'intra_cluster' ? '同集群 CPU 兼容' : `源 ${srcHost?.cpu_model} → 目标 ${dst.cpu_model}` },
+    { key: 'storage', pass: true, detail: sto.shared ? `共享存储 ${sto.pool}，无需迁移磁盘` : '非共享存储，需同步迁移虚拟磁盘（存储迁移）' },
+    { key: 'gpu', pass: !(vm.gpus > 0), detail: vm.gpus > 0 ? 'VM 绑定 GPU 直通，热迁移受限，建议冷迁移' : '无 GPU 直通约束' },
+  ]
+  // 迁移模式：运行中默认热迁移；停机只能冷迁移；带 GPU 直通时强制冷迁移
+  const requestedLive = b.mode ? b.mode === 'live' : vm.status === 'running'
+  const forceCold = vm.status !== 'running' || vm.gpus > 0
+  const mode = forceCold ? 'cold' : (requestedLive ? 'live' : 'cold')
+  const blockers = checks.filter((ck) => !ck.pass && (ck.key === 'cpu' || ck.key === 'mem' || ck.key === 'host'))
+  return c.json({
+    vm_id: id, vm_name: vm.name,
+    source_host: srcHost?.name, target_host: dst.name,
+    scope: sc.scope, scope_label: sc.label, network_path: sc.path,
+    shared_storage: sto.shared, storage_pool: sto.pool || null,
+    storage_migration: !sto.shared,
+    mode, mode_forced_cold: forceCold,
+    cold_reason: vm.status !== 'running' ? 'VM 当前停机，只能执行冷迁移' : vm.gpus > 0 ? 'VM 绑定 GPU 直通，建议冷迁移' : null,
+    checks,
+    can_migrate: blockers.length === 0,
+    blockers: blockers.map((x) => x.detail),
+    est_seconds: sto.shared ? (mode === 'live' ? 30 + vm.mem_gb : 15) : 120 + vm.mem_gb * 2,
+  })
+})
+
+// ---- 执行 VM 迁移（企业级：支持跨集群/跨 DC + 冷/热 + 存储迁移；资源不足拒绝）----
+app.post(`${API}/vms/:id/migrate`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const b = await c.req.json<{ target_host_id?: number; mode?: 'live' | 'cold' }>()
+  const vm = mockData.vms.find((v) => v.id === id)
+  if (!vm) return c.json({ error: '虚拟机不存在', code: 'VM_NOT_FOUND' }, 404)
+  const target = mockData.hosts.find((h) => h.id === Number(b.target_host_id))
+  if (!target) return c.json({ error: '目标主机不存在', code: 'HOST_NOT_FOUND' }, 404)
+  if (target.status !== 'connected' || target.maintenance_mode)
+    return c.json({ error: '目标主机不可用（离线或维护中）', code: 'HOST_UNAVAILABLE' }, 409)
+  // 资源校验
+  const freeV = Math.max(0, target.vcpus - Math.round(target.vcpus * target.cpu_usage / 100))
+  const freeM = Math.max(0, target.mem_total_gb - target.mem_used_gb)
+  if (freeV < vm.vcpus) return c.json({ error: `目标主机 vCPU 不足（需 ${vm.vcpus}，空闲 ${freeV}）`, code: 'INSUFFICIENT_CPU' }, 409)
+  if (freeM < vm.mem_gb) return c.json({ error: `目标主机内存不足（需 ${vm.mem_gb}GB，空闲 ${freeM}GB）`, code: 'INSUFFICIENT_MEM' }, 409)
+  const srcHost = mockData.hosts.find((h) => h.id === vm.host_id)
+  const sto = hostsShareStorage(vm.host_id, target.id)
+  const sc = migrationScope(vm, target)
+  const forceCold = vm.status !== 'running' || vm.gpus > 0
+  const mode = forceCold ? 'cold' : (b.mode === 'cold' ? 'cold' : 'live')
+  // 变更归属（同时更新 cluster/datacenter，支持跨集群/跨 DC）
   vm.host_id = target.id
+  vm.cluster_id = target.cluster_id
+  ;(vm as any).datacenter_id = target.datacenter_id
   return c.json({
     vm_id: id, vm_name: vm.name,
     source_host: srcHost?.name, target_host: target.name,
-    status: 'running',
-    message: `${vm.name} 已迁移到 ${target.name}`,
+    scope: sc.scope, scope_label: sc.label,
+    mode, shared_storage: sto.shared, storage_migration: !sto.shared,
+    status: vm.status === 'stopped' ? 'stopped' : 'running',
+    task_uuid: genUUID(),
+    message: `${vm.name} 已${mode === 'live' ? '热' : '冷'}迁移到 ${target.name}（${sc.label}${sto.shared ? '·共享存储' : '·存储迁移'}）`,
   })
 })
 

@@ -1024,3 +1024,26 @@
 .iso-repo-card .irc-path { font-size:11.5px; color:var(--text-tertiary); word-break:break-all; }
 .iso-repo-card .irc-stat { font-size:12.5px; color:var(--text-secondary); }
 .iso-scope-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
+
+/* ===== P10 企业级迁移向导 ===== */
+.mig-src { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:var(--bg-secondary); border-radius:var(--radius-md); }
+.mig-mode-seg { display:inline-flex; border:1px solid var(--separator); border-radius:var(--radius-md); overflow:hidden; }
+.mig-mode-seg button { padding:6px 14px; font-size:13px; background:transparent; border:none; cursor:pointer; color:var(--text-secondary); display:flex; align-items:center; gap:6px; }
+.mig-mode-seg button.active { background:var(--color-blue); color:#fff; }
+.mig-mode-seg button:disabled { opacity:.4; cursor:not-allowed; }
+.mig-pick-grid { display:grid; grid-template-columns:1fr 1fr 1.2fr; gap:10px; margin-top:14px; }
+.mig-col { border:1px solid var(--separator); border-radius:var(--radius-md); padding:8px; min-height:120px; max-height:240px; overflow:auto; }
+.mig-col-title { font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px; }
+.mig-opt { padding:8px 10px; border-radius:var(--radius-sm); cursor:pointer; font-size:13px; display:flex; flex-direction:column; gap:2px; margin-bottom:4px; border:1px solid transparent; }
+.mig-opt:hover { background:var(--bg-secondary); }
+.mig-opt.active { background:rgba(0,122,255,.12); border-color:rgba(0,122,255,.4); color:var(--color-blue); }
+.mig-opt.disabled { opacity:.45; cursor:not-allowed; }
+.mig-empty { font-size:12px; color:var(--text-tertiary); padding:12px 6px; text-align:center; }
+.mig-plan { margin-top:14px; padding:12px; border:1px solid var(--separator); border-radius:var(--radius-md); background:var(--bg-secondary); }
+.mig-plan-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.mig-netpath { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:10px 0; }
+.mig-hop { font-size:12px; padding:3px 9px; background:var(--bg-primary); border:1px solid var(--separator); border-radius:999px; }
+.mig-arrow { color:var(--text-tertiary); font-size:11px; }
+.mig-checks { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+.mig-check { display:flex; align-items:center; gap:8px; font-size:13px; }
+.mig-check-key { font-weight:600; min-width:84px; }

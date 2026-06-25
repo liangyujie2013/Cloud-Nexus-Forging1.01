@@ -142,8 +142,10 @@ const AvailabilityView = {
     onMounted(load)
     watch(() => props.tab, load)
 
+    // P10：迁移入口统一到「虚拟机列表 → 右键 → 迁移」，此处提供跳转
+    const gotoVmList = () => window.dispatchEvent(new CustomEvent('cnf:goto', { detail: { module: 'compute', tab: 'vms' } }))
     return { props, configs, sel, hosts, members, pick, saveHA, toast,
-             vms, history, form, job, gpuBlocked, submitMigration, backupJobs, bkStatusBadge, t,
+             vms, history, form, job, gpuBlocked, submitMigration, backupJobs, bkStatusBadge, t, gotoVmList,
              clusters, allVms, bkDlg, openBackupCreate, toggleBkVm, saveBackup, runBackupNow }
   },
   template: `
@@ -193,48 +195,32 @@ const AvailabilityView = {
         </div>
       </template>
 
-      <!-- ===== migration：迁移中心 ===== -->
+      <!-- ===== migration：迁移记录（控制台已精简，迁移入口统一走 虚拟机列表 → 右键 → 迁移）===== -->
       <template v-else-if="props.tab==='migration'">
-        <div class="grid grid-2">
-          <div class="apple-card">
-            <h3 style="margin:0 0 16px"><i class="fas fa-right-left" style="color:var(--color-blue)"></i> {{ t('mig_console_title') }}</h3>
-            <div class="form-row"><label>{{ t('mig_vm') }}</label>
-              <select class="apple-input" v-model="form.vm"><option v-for="v in vms" :key="v.id" :value="v.name">{{ v.name }} ({{ v.vcpus }}vCPU / {{ v.mem_gb }}GB{{ v.gpus>0?' / '+v.gpus+'×GPU':'' }})</option></select></div>
-            <div class="form-row"><label>{{ t('mig_target_host') }}</label>
-              <select class="apple-input" v-model="form.dst"><option value="">{{ t('mig_choose') }}</option><option v-for="h in hosts" :key="h.id" :value="h.name" :disabled="h.status!=='connected'">{{ h.name }} · {{ h.ip }} · {{ t('mig_remain') }} {{ (h.mem_total_gb-h.mem_used_gb) }}GB</option></select></div>
-            <div class="flex" style="gap:18px;margin:14px 0;flex-wrap:wrap">
-              <label class="switch-row"><input type="checkbox" v-model="form.live"> {{ t('mig_live2') }}</label>
-              <label class="switch-row"><input type="checkbox" v-model="form.storage"> {{ t('mig_storage2') }}</label>
-              <label class="switch-row"><input type="checkbox" v-model="form.compressed"> {{ t('mig_compress') }}</label>
-            </div>
-            <div v-if="gpuBlocked" class="apple-alert apple-alert--warning" style="margin:12px 0"><i class="fas fa-triangle-exclamation"></i> {{ t('mig_gpu_block') }}</div>
-            <button class="apple-btn apple-btn--primary" :disabled="job.active && !job.done || gpuBlocked || !form.dst" @click="submitMigration"><i class="fas fa-paper-plane"></i> {{ job.active && !job.done ? t('mig_running') : t('mig_go') }}</button>
-            <div v-if="job.active" style="margin-top:20px">
-              <div class="flex between" style="margin-bottom:6px"><span class="muted">{{ job.phase }}</span><span class="mono">{{ job.progress }}%</span></div>
-              <div class="usage-bar" style="height:10px"><div class="fill" :style="{width:job.progress+'%',background:job.done?'var(--color-green)':'var(--color-blue)',transition:'width .5s'}"></div></div>
-              <div class="gpu-stats" style="margin-top:14px">
-                <div class="gpu-stat"><div class="k">{{ t('mig_progress_throughput') }}</div><div class="v">{{ job.throughput }} Mbps</div></div>
-                <div class="gpu-stat"><div class="k">{{ t('mig_progress_remaining') }}</div><div class="v">{{ job.remaining }} MB</div></div>
-                <div class="gpu-stat"><div class="k">{{ t('mig_progress_status') }}</div><div class="v" :style="{color:job.done?'var(--color-green)':'var(--color-orange)'}">{{ job.done?'✓ '+t('mig_done'):'● '+t('mig_in_progress') }}</div></div>
-              </div>
-            </div>
+        <div class="iso-repo-note" style="margin-bottom:14px">
+          <i class="fas fa-circle-info"></i>
+          <div>
+            <strong>{{ t('mig_center_tip_title') }}</strong>
+            <div class="muted" style="margin-top:4px;line-height:1.6">{{ t('mig_center_tip') }}</div>
+            <button class="apple-btn apple-btn--primary apple-btn--sm" style="margin-top:10px" @click="gotoVmList"><i class="fas fa-desktop"></i> {{ t('mig_goto_vms') }}</button>
           </div>
-          <div class="apple-card" style="padding:0">
-            <div style="padding:16px 16px 0"><h3 style="margin:0 0 4px"><i class="fas fa-clock-rotate-left" style="color:var(--color-indigo)"></i> {{ t('mig_history') }}</h3></div>
-            <table class="apple-table">
-              <thead><tr><th>{{ t('mig_vm') }}</th><th>{{ t('mig_path') }}</th><th>{{ t('mig_mode') }}</th><th>{{ t('mig_downtime_col') }}</th><th>{{ t('status') }}</th><th>{{ t('task_time') }}</th></tr></thead>
-              <tbody>
-                <tr v-for="m in history" :key="m.id">
-                  <td><strong>{{ m.vm }}</strong></td>
-                  <td class="mono" style="font-size:12px">{{ m.src }} → {{ m.dst }}</td>
-                  <td><span class="apple-badge" :class="m.live?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ m.live?t('mig_online'):t('mig_cold') }}</span><span v-if="m.storage" class="apple-badge apple-badge--warning"><span class="dot"></span>{{ t('mig_col_storage') }}</span></td>
-                  <td class="mono">{{ m.downtime_ms }}ms</td>
-                  <td><span class="apple-badge" :class="m.status==='success'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ m.status==='success'?t('mig_success'):t('mig_failed') }}</span></td>
-                  <td class="muted" style="font-size:12px">{{ m.time }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        </div>
+        <div class="apple-card" style="padding:0">
+          <div style="padding:16px 16px 0"><h3 style="margin:0 0 4px"><i class="fas fa-clock-rotate-left" style="color:var(--color-indigo)"></i> {{ t('mig_history') }}</h3></div>
+          <table class="apple-table">
+            <thead><tr><th>{{ t('mig_vm') }}</th><th>{{ t('mig_path') }}</th><th>{{ t('mig_mode') }}</th><th>{{ t('mig_downtime_col') }}</th><th>{{ t('status') }}</th><th>{{ t('task_time') }}</th></tr></thead>
+            <tbody>
+              <tr v-for="m in history" :key="m.id">
+                <td><strong>{{ m.vm }}</strong></td>
+                <td class="mono" style="font-size:12px">{{ m.src }} → {{ m.dst }}</td>
+                <td><span class="apple-badge" :class="m.live?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ m.live?t('mig_online'):t('mig_cold') }}</span><span v-if="m.storage" class="apple-badge apple-badge--warning"><span class="dot"></span>{{ t('mig_col_storage') }}</span></td>
+                <td class="mono">{{ m.downtime_ms }}ms</td>
+                <td><span class="apple-badge" :class="m.status==='success'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ m.status==='success'?t('mig_success'):t('mig_failed') }}</span></td>
+                <td class="muted" style="font-size:12px">{{ m.time }}</td>
+              </tr>
+              <tr v-if="!history.length"><td colspan="6" class="muted" style="text-align:center;padding:18px">{{ t('mig_no_history') }}</td></tr>
+            </tbody>
+          </table>
         </div>
       </template>
 
