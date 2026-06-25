@@ -27,7 +27,7 @@ const bytesRate = (n) => {
 const utilColor = (v) => (v > 85 ? C.red : v > 65 ? C.orange : C.green)
 
 const HostsView = {
-  components: { RingProgress: window.__CNF_VIEWS.RingProgress },
+  components: { RingProgress: window.__CNF_VIEWS.RingProgress, HostContextMenu: window.__CNF_VIEWS.HostContextMenu },
   props: { tab: { type: String, default: 'list' }, focus: { type: Object, default: null } },
   setup(props) {
     const hosts = computed(() => store.hostStats.value)
@@ -156,19 +156,53 @@ const HostsView = {
 
     // ---- maintenance toggle ----
     const maintBusy = ref(0)
-    const blockDlg = reactive({ open: false, title: '', message: '', children: [] })
+    const blockDlg = reactive({ open: false, title: '', message: '', children: [], host: null })
     const toggleMaintenance = async (h) => {
       maintBusy.value = h.id
       try {
         const res = await api('/hosts/' + h.id + '/maintenance', { method: 'POST', body: JSON.stringify({ enabled: h.status !== 'maintenance' }) })
         if (res && res.error) {
-          blockDlg.open = true; blockDlg.title = t('host_maint_blocked'); blockDlg.message = res.error; blockDlg.children = res.children || []
+          // N3：进入维护时仍有运行中虚拟机 → 提示必须先完整迁移
+          blockDlg.open = true; blockDlg.title = t('hctx_maint_block_title'); blockDlg.host = h
+          blockDlg.message = t('hctx_maint_block_msg', { n: (res.children || []).length })
+          blockDlg.children = res.children || []
           return
         }
         toast(res.message, 'success')
         await store.fetchAll()
         if (selectedId.value === h.id) await openDetail(h.id)
       } catch (e) { toast(t('op_failed'), 'error') } finally { maintBusy.value = 0 }
+    }
+    // 阻止对话框 → 前往迁移中心（虚拟机列表）
+    const gotoMigrate = () => {
+      blockDlg.open = false
+      window.dispatchEvent(new CustomEvent('cnf:goto', { detail: { module: 'compute', tab: 'vms' } }))
+    }
+
+    // ============================================================
+    //  N3 · 主机右键上下文菜单（电源/维护/网络与配置）
+    // ============================================================
+    const hostCtx = window.useContextMenu()
+    const onHostCtxAction = async ({ command, host }) => {
+      if (!host) return
+      if (command === 'open_detail') return openDetail(host.id)
+      if (command === 'edit_network') return openNetEdit(host)
+      if (command === 'enter_maintenance') return toggleMaintenance(host)
+      if (command === 'exit_maintenance') return toggleMaintenance(host)
+      if (command === 'remove') return removeHostCtx(host)
+      if (command === 'power_on' || command === 'reboot' || command === 'shutdown') {
+        if (command === 'shutdown' && !confirm(t('hctx_shutdown_confirm', { name: host.name }))) return
+        const res = await api('/hosts/' + host.id + '/power', { method: 'POST', body: JSON.stringify({ action: command }) })
+        if (res && res.error) return toast(res.error, 'error')
+        toast(res.message || t('toast_success'), 'success')
+        await store.fetchAll()
+        if (selectedId.value === host.id) await openDetail(host.id)
+      }
+    }
+    const removeHostCtx = async (host) => {
+      const res = await store.removeHost(host.id)
+      if (!res.ok) { blockDlg.open = true; blockDlg.title = t('del_blocked_title'); blockDlg.message = res.error; blockDlg.children = res.children || []; blockDlg.host = null; return }
+      toast(t('toast_success'), 'success')
     }
 
     // ---- detail VM list ----
@@ -320,7 +354,8 @@ const HostsView = {
     return {
       props, hosts, filteredHosts, search, statusFilter, statusMeta, openDetail, backToList, addHost,
       selectedId, detail, ha, detailTab, loading, showDetailView, detailHost, detailVMs,
-      toggleMaintenance, maintBusy, blockDlg,
+      toggleMaintenance, maintBusy, blockDlg, gotoMigrate,
+      hostCtx, onHostCtxAction,
       clusterGroups, netDlg, openNetEdit, submitNet, batchDlg, openBatch, submitBatch,
       haCheckList, haStatusColor, haStatusText, overallColor, overallText, evIcon, evColor,
       iommuBusy, pciBusy, gpuBusy, toggleIommu, togglePci, switchGpuMode, releaseGpu,
@@ -345,9 +380,9 @@ const HostsView = {
         <span class="muted">{{ filteredHosts.length }} {{ t('host_machine') }}</span>
       </div>
       <div class="grid grid-3">
-        <div class="apple-card host-tile" v-for="h in filteredHosts" :key="h.id" @click="openDetail(h.id)">
+        <div class="apple-card host-tile" v-for="h in filteredHosts" :key="h.id" @click="openDetail(h.id)" @contextmenu="hostCtx.open($event, h)" :title="t('hctx_open_detail')">
           <div class="ht-head">
-            <div class="ht-title"><i class="fas fa-server" :style="{color:C.blue}"></i> {{ h.name }}</div>
+            <div class="ht-title"><i class="fas fa-server" :style="{color:C.blue}"></i> {{ h.name }} <i class="fas fa-ellipsis-vertical host-ctx-hint" :title="t('hctx_group_config')" @click.stop="hostCtx.open($event, h)"></i></div>
             <span class="apple-badge" :class="statusMeta(h.status).cls"><span class="dot"></span>{{ t(statusMeta(h.status).key) }}</span>
           </div>
           <div class="ht-meta">{{ h.ip }} · {{ h.cluster_name }}</div>
@@ -785,9 +820,15 @@ const HostsView = {
       <div class="modal-dialog modal-sm">
         <div class="modal-head"><i class="fas fa-triangle-exclamation" style="color:var(--color-orange)"></i> {{ blockDlg.title }}</div>
         <div class="modal-body"><p>{{ blockDlg.message }}</p><ul v-if="blockDlg.children.length" class="block-list"><li v-for="c in blockDlg.children" :key="c">{{ c }}</li></ul></div>
-        <div class="modal-foot"><button class="apple-btn apple-btn--primary" @click="blockDlg.open=false">{{ t('op_close') }}</button></div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="blockDlg.open=false">{{ t('op_close') }}</button>
+          <button v-if="blockDlg.host && blockDlg.children.length" class="apple-btn apple-btn--primary" @click="gotoMigrate"><i class="fas fa-right-left"></i> {{ t('hctx_maint_migrate_now') }}</button>
+        </div>
       </div>
     </div>
+
+    <!-- N3 主机右键上下文菜单 -->
+    <HostContextMenu v-if="hostCtx.visible.value" :host="hostCtx.payload.value" :x="hostCtx.x.value" :y="hostCtx.y.value" @action="onHostCtxAction" @close="hostCtx.close" />
   </div>`,
 }
 

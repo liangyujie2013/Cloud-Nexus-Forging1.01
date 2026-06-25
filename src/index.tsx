@@ -375,6 +375,32 @@ app.post(`${API}/hosts/:id/maintenance`, async (c) => {
   return c.json({ id, maintenance_mode: enable, status: host.status, message: enable ? `主机 ${host.name} 已进入维护模式` : `主机 ${host.name} 已退出维护模式` })
 })
 
+// ---- 主机电源操作（IPMI/BMC）：power_on / reboot / shutdown（N3）----
+app.post(`${API}/hosts/:id/power`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const host = mockData.hosts.find((h) => h.id === id)
+  if (!host) return c.json({ error: '主机不存在', code: 'NOT_FOUND' }, 404)
+  const b = await c.req.json<{ action?: string }>().catch(() => ({} as any))
+  const action = b.action || ''
+  const runningVMs = mockData.vms.filter((v) => v.host_id === id && v.status === 'running')
+  if (action === 'power_on') {
+    if (host.status === 'connected') return c.json({ error: '主机已在线', code: 'ALREADY_ON' }, 409)
+    host.status = 'connected'; host.maintenance_mode = false
+    return c.json({ ok: true, status: host.status, message: `已下发开机指令（IPMI/BMC）→ ${host.name}` })
+  }
+  if (action === 'shutdown') {
+    // 关机会导致其上虚拟机停止 — 回执给出影响范围
+    host.status = 'disconnected'
+    mockData.vms.filter((v) => v.host_id === id).forEach((v) => { v.status = 'stopped' })
+    host.cpu_usage = 0; host.mem_used_gb = 0; host.mem_usage = 0
+    return c.json({ ok: true, status: host.status, affected_vms: runningVMs.map((x) => x.name), message: `已下发关机指令 → ${host.name}` })
+  }
+  if (action === 'reboot') {
+    return c.json({ ok: true, status: host.status, affected_vms: runningVMs.map((x) => x.name), message: `已下发重启指令 → ${host.name}` })
+  }
+  return c.json({ error: '未知的电源操作', code: 'BAD_ACTION' }, 400)
+})
+
 // ---- 启用/禁用主机 IOMMU + VFIO（直通就绪）。真实环境需写 GRUB 内核参数并重启 ----
 app.post(`${API}/hosts/:id/iommu`, async (c) => {
   const id = Number(c.req.param('id'))

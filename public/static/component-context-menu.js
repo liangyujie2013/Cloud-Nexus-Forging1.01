@@ -185,4 +185,69 @@ const VMContextMenu = {
 }
 
 window.__CNF_VIEWS.VMContextMenu = VMContextMenu
+
+// =============================================================================
+//  主机（宿主机）右键菜单结构（N3）：分组 → 命令项
+//  分组：电源 / 维护 / 网络与配置
+//  状态联动：
+//    · connected   → 可关机/重启/进入维护；不可开机
+//    · maintenance → 可退出维护/开机/关机；进入维护已是当前态
+//    · disconnected→ 可开机；其余禁用
+// =============================================================================
+function buildHostMenu(h) {
+  const connected = h.status === 'connected'
+  const maintenance = h.status === 'maintenance' || h.maintenance_mode
+  const off = h.status === 'disconnected' || h.status === 'poweroff'
+  return [
+    { group: 'hctx_group_power', items: [
+      { command: 'power_on', label: 'hctx_power_on', icon: 'fa-play', disabled: connected || maintenance, hint: 'IPMI/BMC 开机' },
+      { command: 'reboot', label: 'hctx_reboot', icon: 'fa-rotate-right', disabled: off, hint: '重启宿主机' },
+      { command: 'shutdown', label: 'hctx_shutdown', icon: 'fa-power-off', disabled: off, danger: true, hint: '关闭宿主机' },
+    ]},
+    { group: 'hctx_group_maint', items: [
+      { command: 'enter_maintenance', label: 'hctx_enter_maint', icon: 'fa-screwdriver-wrench', disabled: maintenance || off, hint: '进入维护模式（需先迁出运行中虚拟机）' },
+      { command: 'exit_maintenance', label: 'hctx_exit_maint', icon: 'fa-circle-check', disabled: !maintenance, hint: '退出维护模式恢复调度' },
+    ]},
+    { group: 'hctx_group_config', items: [
+      { command: 'edit_network', label: 'hctx_edit_network', icon: 'fa-network-wired', disabled: off, hint: '修改管理网络（IP/掩码/网关/VLAN）' },
+      { command: 'open_detail', label: 'hctx_open_detail', icon: 'fa-circle-info', hint: '查看硬件/IOMMU/GPU详情' },
+      { command: 'remove', label: 'hctx_remove', icon: 'fa-trash', disabled: connected && (h.vm_count > 0), danger: true, hint: '从集群移除（需无运行虚拟机）' },
+    ]},
+  ]
+}
+
+const HostContextMenu = {
+  props: {
+    host: { type: Object, required: true },
+    x: { type: Number, default: 0 },
+    y: { type: Number, default: 0 },
+  },
+  emits: ['action', 'close'],
+  setup(props, { emit }) {
+    const menu = computed(() => buildHostMenu(props.host))
+    const style = computed(() => ({ left: props.x + 'px', top: props.y + 'px' }))
+    const pick = (item) => {
+      if (item.disabled) return
+      emit('action', { command: item.command, host: props.host, hint: item.hint })
+      emit('close')
+    }
+    return { menu, style, pick, t }
+  },
+  template: `
+    <div class="ctx-menu" :style="style" @click.stop @contextmenu.prevent @mousedown.stop>
+      <div class="ctx-header"><i class="fas fa-server"></i> <span>{{ host.name }}</span></div>
+      <template v-for="(grp,gi) in menu" :key="gi">
+        <div class="ctx-group-label">{{ t(grp.group) }}</div>
+        <button v-for="(it,ii) in grp.items" :key="ii"
+          class="ctx-item" :class="{disabled:it.disabled, danger:it.danger}"
+          :title="it.hint || ''" @click="pick(it)">
+          <i class="fas ctx-ic" :class="it.icon"></i>
+          <span class="ctx-label">{{ t(it.label) }}</span>
+        </button>
+        <div v-if="gi < menu.length-1" class="ctx-sep"></div>
+      </template>
+    </div>`,
+}
+
+window.__CNF_VIEWS.HostContextMenu = HostContextMenu
 })()

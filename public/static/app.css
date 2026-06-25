@@ -1055,3 +1055,8 @@
 .apple-btn--sm { padding:5px 10px; font-size:12px; }
 .apple-btn.danger { color:var(--color-red); }
 .apple-btn.danger:hover { background:rgba(255,59,48,.08); }
+
+/* ===== N3 主机右键提示图标 ===== */
+.host-ctx-hint { margin-left:6px; color:var(--text-tertiary); font-size:12px; cursor:pointer; opacity:0; transition:opacity .15s; }
+.host-tile:hover .host-ctx-hint { opacity:1; }
+.host-ctx-hint:hover { color:var(--color-blue); }
