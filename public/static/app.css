@@ -934,6 +934,15 @@
 .dgs-num { font-size: 22px; font-weight: 700; line-height: 1.1; }
 .dgs-item .muted { font-size: 12px; margin-top: 2px; }
 
+/* P1: GPU 归属明细行（仪表板 GPU 概要）*/
+.gpu-owner-list { display: flex; flex-direction: column; gap: 10px; max-height: 260px; overflow-y: auto; }
+.gpu-owner-row { padding: 10px 12px; background: var(--bg-secondary); border-radius: var(--radius-md); border: 1px solid var(--separator); }
+.gor-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.gor-model { font-weight: 600; font-size: 13px; }
+.gor-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin: 6px 0 8px; }
+.gor-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.gor-bar { display: flex; align-items: center; gap: 8px; }
+
 /* ===== 集群创建/编辑：时间同步（NTP）配置区 ===== */
 .ntp-fieldset { margin-top: 16px; padding: 14px; border: 1px solid var(--separator); border-radius: var(--radius-md); background: var(--bg-secondary); }
 .ntp-legend { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
