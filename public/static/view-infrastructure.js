@@ -110,6 +110,54 @@ const InfrastructureView = {
       window.dispatchEvent(new CustomEvent('cnf:open-host-wizard', { detail: { presetClusterId: presetClusterId || 0 } }))
     }
 
+    // ============================================================
+    //  资源池：创建 / 编辑 / 删除对话框（N2 修复死按钮 — 完整 CRUD）
+    //  对标 VMware 资源池：份额(shares) + CPU/内存上限(limit) + 预留(reservation)
+    // ============================================================
+    const poolDlg = ref({ open: false, mode: 'create', id: null, form: {}, err: {}, saving: false })
+    const reloadPools = async () => { pools.value = await window.api('/resource-pools') }
+    const openPoolCreate = () => {
+      poolDlg.value = {
+        open: true, mode: 'create', id: null,
+        form: { name: '', cluster_id: (clusters.value[0] && clusters.value[0].id) || '', cpu_shares: 'normal', cpu_limit_vcpu: 64, cpu_reserved_vcpu: 0, mem_limit_gb: 128, mem_reserved_gb: 0 },
+        err: {}, saving: false,
+      }
+    }
+    const openPoolEdit = (p) => {
+      poolDlg.value = {
+        open: true, mode: 'edit', id: p.id,
+        form: { name: p.name, cluster_id: p.cluster_id, cpu_shares: p.cpu_shares, cpu_limit_vcpu: p.cpu_limit_vcpu, cpu_reserved_vcpu: p.cpu_reserved_vcpu, mem_limit_gb: p.mem_limit_gb, mem_reserved_gb: p.mem_reserved_gb },
+        err: {}, saving: false,
+      }
+    }
+    const savePool = async () => {
+      const f = poolDlg.value.form; const err = {}
+      if (!f.name || !f.name.trim()) err.name = t('op_required')
+      if (!f.cluster_id) err.cluster_id = t('op_required')
+      if (Number(f.cpu_reserved_vcpu) > Number(f.cpu_limit_vcpu)) err.cpu_reserved_vcpu = t('pool_err_cpu_reserve')
+      if (Number(f.mem_reserved_gb) > Number(f.mem_limit_gb)) err.mem_reserved_gb = t('pool_err_mem_reserve')
+      poolDlg.value.err = err
+      if (Object.keys(err).length) return
+      poolDlg.value.saving = true
+      const path = poolDlg.value.mode === 'create' ? '/resource-pools' : '/resource-pools/' + poolDlg.value.id
+      const res = await window.api(path, { method: poolDlg.value.mode === 'create' ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) })
+      poolDlg.value.saving = false
+      if (!res.ok) {
+        if (res.code === 'NAME_DUPLICATE') { poolDlg.value.err = { name: res.error }; return }
+        return toast(res.error || t('op_failed'), 'error')
+      }
+      toast(poolDlg.value.mode === 'create' ? t('toast_created') : t('toast_saved'), 'success')
+      poolDlg.value.open = false
+      await reloadPools()
+    }
+    const delPool = async (p) => {
+      const res = await window.api('/resource-pools/' + p.id, { method: 'DELETE' })
+      if (!res.ok) return showBlocked(t('del_blocked_title'), res.error, res.children)
+      toast(t('toast_success'), 'success')
+      await reloadPools()
+    }
+    const poolClusterName = (cid) => { const c = clusters.value.find((x) => x.id === cid); return c ? c.name : '—' }
+
     // ---- 删除数据中心（级联校验）----
     const delDatacenter = async (dc) => {
       const res = await store.deleteDatacenter(dc.id)
@@ -155,6 +203,7 @@ const InfrastructureView = {
       delDatacenter, delCluster, delHost,
       dcDlg, openDcCreate, openDcEdit, saveDc,
       clDlg, openClCreate, openClEdit, saveCl, clNtpHosts,
+      poolDlg, openPoolCreate, openPoolEdit, savePool, delPool, poolClusterName,
       focusId, focusType, sharesLabel, t,
     }
   },
@@ -192,7 +241,7 @@ const InfrastructureView = {
                     </div>
                   </div>
                   <div class="dc2-actions">
-                    <span class="health-pill" :class="dcHealth(dc)>=100?'ok':(dcHealth(dc)>=60?'warn':'bad')"><span class="dot"></span>{{ dcHealth(dc) }}% {{ t('dash_online') }}</span>
+                    <span class="health-pill" :class="dcHealth(dc)>=100?'ok':(dcHealth(dc)>=60?'warn':'bad')" :title="t('host_conn_rate_tip')"><span class="dot"></span>{{ dcHealth(dc) }}% {{ t('host_conn_rate') }}</span>
                     <button class="icon-btn" :title="t('hw_add_host')" @click="addHost(0)"><i class="fas fa-server"></i></button>
                     <button class="icon-btn" :title="t('op_edit')" @click="openDcEdit(dc)"><i class="fas fa-pen"></i></button>
                     <button class="icon-btn danger" :title="t('op_delete')" @click="delDatacenter(dc)"><i class="fas fa-trash"></i></button>
@@ -204,7 +253,7 @@ const InfrastructureView = {
                   <div class="dc2-metric"><div class="m-k"><i class="fas fa-desktop" style="color:var(--color-green)"></i> {{ t('dash_vms') }}</div><div class="m-v">{{ dc.vm_running }}<span class="muted" style="font-size:14px">/{{ dc.vm_count }}</span></div></div>
                 </div>
                 <div class="dc2-bar">
-                  <div class="flex between" style="font-size:12px;margin-bottom:4px"><span class="muted">{{ t('host_machine') }} {{ t('dash_online') }}</span><span class="mono">{{ dcHealth(dc) }}%</span></div>
+                  <div class="flex between" style="font-size:12px;margin-bottom:4px"><span class="muted" :title="t('host_conn_rate_tip')">{{ t('host_conn_rate') }}</span><span class="mono">{{ dcHealth(dc) }}%</span></div>
                   <div class="usage-bar"><div class="fill" :style="{width:dcHealth(dc)+'%',background:dcHealth(dc)>=100?'var(--color-green)':(dcHealth(dc)>=60?'var(--color-orange)':'var(--color-red)')}"></div></div>
                 </div>
               </div>
@@ -306,15 +355,20 @@ const InfrastructureView = {
         </div>
       </template>
 
-      <!-- ===== pools：资源池 ===== -->
+      <!-- ===== pools：资源池（N2 完整 CRUD — 对标 VMware 资源池）===== -->
       <template v-else>
-        <div class="toolbar"><span class="muted">{{ pools.length }} {{ t('pool_title') }}</span><div class="spacer"></div><button class="apple-btn apple-btn--primary"><i class="fas fa-plus"></i> {{ t('pool_add') }}</button></div>
+        <div class="crud-toolbar">
+          <button class="apple-btn apple-btn--primary" @click="openPoolCreate"><i class="fas fa-plus"></i> {{ t('pool_add') }}</button>
+          <div class="spacer"></div>
+          <span class="muted" style="font-size:13px">{{ pools.length }} {{ t('pool_title') }}</span>
+        </div>
         <div class="grid grid-3">
-          <div class="apple-card" v-for="p in pools" :key="p.id">
-            <div class="flex between" style="margin-bottom:12px">
+          <div class="apple-card pool-card" v-for="p in pools" :key="p.id">
+            <div class="flex between" style="margin-bottom:6px">
               <strong>{{ p.name }}</strong>
-              <span class="apple-badge" :class="p.cpu_shares==='high'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ sharesLabel(p.cpu_shares) }}</span>
+              <span class="apple-badge" :class="p.cpu_shares==='high'?'apple-badge--running':(p.cpu_shares==='low'?'apple-badge--stopped':'apple-badge--warning')"><span class="dot"></span>{{ sharesLabel(p.cpu_shares) }}</span>
             </div>
+            <div class="muted" style="font-size:12px;margin-bottom:10px"><i class="fas fa-layer-group"></i> {{ p.cluster_name || poolClusterName(p.cluster_id) }}</div>
             <div class="gpu-stats">
               <div class="gpu-stat"><div class="k">{{ t('pool_cpu_limit') }}</div><div class="v">{{ p.cpu_limit_vcpu }}</div></div>
               <div class="gpu-stat"><div class="k">{{ t('pool_mem_limit') }}</div><div class="v">{{ p.mem_limit_gb }} GB</div></div>
@@ -322,7 +376,12 @@ const InfrastructureView = {
               <div class="gpu-stat"><div class="k">{{ t('pool_mem_reserved') }}</div><div class="v">{{ p.mem_reserved_gb }} GB</div></div>
               <div class="gpu-stat"><div class="k">{{ t('pool_vms') }}</div><div class="v">{{ p.vms }}</div></div>
             </div>
+            <div class="pool-actions">
+              <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openPoolEdit(p)"><i class="fas fa-pen"></i> {{ t('op_edit') }}</button>
+              <button class="apple-btn apple-btn--ghost apple-btn--sm danger" @click="delPool(p)"><i class="fas fa-trash"></i> {{ t('op_delete') }}</button>
+            </div>
           </div>
+          <div v-if="!pools.length" class="apple-card" style="text-align:center;padding:40px;grid-column:1/-1"><i class="fas fa-inbox" style="font-size:32px;color:var(--text-tertiary)"></i><div class="muted" style="margin-top:10px">{{ t('op_no_data') }}</div></div>
         </div>
       </template>
 
@@ -353,6 +412,55 @@ const InfrastructureView = {
           <div class="modal-foot">
             <button class="apple-btn apple-btn--ghost" @click="dcDlg.open=false">{{ t('op_cancel') }}</button>
             <button class="apple-btn apple-btn--primary" :disabled="dcDlg.saving" @click="saveDc"><i v-if="dcDlg.saving" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 资源池 创建/编辑 对话框（N2）===== -->
+      <div v-if="poolDlg.open" class="modal-mask" @click.self="poolDlg.open=false">
+        <div class="modal-dialog">
+          <div class="modal-head"><i class="fas fa-cubes" style="color:var(--color-purple,#af52de)"></i> {{ poolDlg.mode==='create' ? t('pool_create') : t('pool_edit') }}</div>
+          <div class="modal-body">
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label class="req">{{ t('name') }}</label>
+                <input :class="{invalid:poolDlg.err.name}" v-model="poolDlg.form.name" :placeholder="t('pool_name_ph')">
+                <div v-if="poolDlg.err.name" class="form-err">{{ poolDlg.err.name }}</div>
+              </div>
+              <div class="form-row">
+                <label class="req">{{ t('host_cluster') }}</label>
+                <select :class="{invalid:poolDlg.err.cluster_id}" v-model="poolDlg.form.cluster_id">
+                  <option v-for="c in clusters" :key="c.id" :value="c.id">{{ c.name }}</option>
+                </select>
+                <div v-if="poolDlg.err.cluster_id" class="form-err">{{ poolDlg.err.cluster_id }}</div>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>{{ t('pool_shares') }} <span class="muted" style="font-weight:400;font-size:12px">{{ t('pool_shares_hint') }}</span></label>
+              <select v-model="poolDlg.form.cpu_shares">
+                <option value="high">{{ t('shares_high') }} — {{ t('pool_shares_high_d') }}</option>
+                <option value="normal">{{ t('shares_normal') }} — {{ t('pool_shares_normal_d') }}</option>
+                <option value="low">{{ t('shares_low') }} — {{ t('pool_shares_low_d') }}</option>
+              </select>
+            </div>
+            <div class="ntp-fieldset">
+              <div class="ntp-legend"><i class="fas fa-microchip"></i> {{ t('pool_cpu_alloc') }}</div>
+              <div class="form-grid-2">
+                <div class="form-row"><label>{{ t('pool_cpu_limit') }} (vCPU)</label><input type="number" min="0" v-model.number="poolDlg.form.cpu_limit_vcpu"></div>
+                <div class="form-row"><label>{{ t('pool_cpu_reserved') }} (vCPU)</label><input :class="{invalid:poolDlg.err.cpu_reserved_vcpu}" type="number" min="0" v-model.number="poolDlg.form.cpu_reserved_vcpu"><div v-if="poolDlg.err.cpu_reserved_vcpu" class="form-err">{{ poolDlg.err.cpu_reserved_vcpu }}</div></div>
+              </div>
+            </div>
+            <div class="ntp-fieldset">
+              <div class="ntp-legend"><i class="fas fa-memory"></i> {{ t('pool_mem_alloc') }}</div>
+              <div class="form-grid-2">
+                <div class="form-row"><label>{{ t('pool_mem_limit') }} (GB)</label><input type="number" min="0" v-model.number="poolDlg.form.mem_limit_gb"></div>
+                <div class="form-row"><label>{{ t('pool_mem_reserved') }} (GB)</label><input :class="{invalid:poolDlg.err.mem_reserved_gb}" type="number" min="0" v-model.number="poolDlg.form.mem_reserved_gb"><div v-if="poolDlg.err.mem_reserved_gb" class="form-err">{{ poolDlg.err.mem_reserved_gb }}</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--ghost" @click="poolDlg.open=false">{{ t('op_cancel') }}</button>
+            <button class="apple-btn apple-btn--primary" :disabled="poolDlg.saving" @click="savePool"><i v-if="poolDlg.saving" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
           </div>
         </div>
       </div>

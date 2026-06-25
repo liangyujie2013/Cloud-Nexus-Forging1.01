@@ -210,7 +210,7 @@ const DashboardView = {
             <strong><i class="fas fa-layer-group" style="color:var(--color-indigo)"></i> {{ t('dash_cluster_load') }}</strong>
             <div class="dash-cluster-list" style="margin-top:14px">
               <div v-for="cl in clusterLoad" :key="cl.id" class="dash-cluster-row">
-                <div class="dcr-name">{{ cl.name }} <span class="muted" style="font-size:12px;font-weight:400">· {{ cl.host_online }}/{{ cl.host_count }} {{ t('dash_online') }}</span></div>
+                <div class="dcr-name">{{ cl.name }} <span class="muted" style="font-size:12px;font-weight:400" :title="t('host_conn_rate_tip')">· {{ cl.host_online }}/{{ cl.host_count }} {{ t('host_connected') }}</span></div>
                 <div class="dcr-bars">
                   <div class="dcr-bar"><span class="muted">CPU</span><div class="usage-bar"><div class="fill" :style="{width:cl.cpu+'%',background:cpuColor(cl.cpu)}"></div></div><span class="mono">{{ cl.cpu }}%</span></div>
                   <div class="dcr-bar"><span class="muted">{{ t('col_mem') }}</span><div class="usage-bar"><div class="fill" :style="{width:cl.mem+'%',background:cpuColor(cl.mem)}"></div></div><span class="mono">{{ cl.mem }}%</span></div>

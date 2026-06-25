@@ -107,7 +107,83 @@ app.get(`${API}/datacenters`, (c) => c.json(computeDatacenterStats()))
 app.get(`${API}/clusters`, (c) => c.json(computeClusterStats()))
 // 主机（带聚合统计 + 集群/数据中心归属名 + 该主机上的 VM 列表）
 app.get(`${API}/hosts`, (c) => c.json(computeHostStats()))
-app.get(`${API}/resource-pools`, (c) => c.json(mockData.resource_pools))
+app.get(`${API}/resource-pools`, (c) => {
+  // 附带所属集群名，便于前端展示资源池所在的集群
+  return c.json(
+    mockData.resource_pools.map((p: any) => {
+      const cl = mockData.clusters.find((x: any) => x.id === p.cluster_id)
+      return { ...p, cluster_name: cl ? cl.name : '—' }
+    }),
+  )
+})
+
+// 资源池 — 创建
+app.post(`${API}/resource-pools`, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const name = (body.name || '').trim()
+  if (!name) return c.json({ error: '资源池名称不能为空', code: 'NAME_REQUIRED' }, 400)
+  if (mockData.resource_pools.some((p: any) => p.name === name))
+    return c.json({ error: `资源池「${name}」已存在`, code: 'NAME_DUPLICATE' }, 409)
+  if (!body.cluster_id) return c.json({ error: '请选择所属集群', code: 'CLUSTER_REQUIRED' }, 400)
+  // 预留值不得超过上限（容量预留校验）
+  if (Number(body.cpu_reserved_vcpu) > Number(body.cpu_limit_vcpu))
+    return c.json({ error: 'CPU 预留值不能超过 CPU 上限', code: 'CPU_RESERVE_EXCEED' }, 400)
+  if (Number(body.mem_reserved_gb) > Number(body.mem_limit_gb))
+    return c.json({ error: '内存预留值不能超过内存上限', code: 'MEM_RESERVE_EXCEED' }, 400)
+  const id = Math.max(0, ...mockData.resource_pools.map((p: any) => p.id)) + 1
+  const pool = {
+    id,
+    cluster_id: Number(body.cluster_id),
+    name,
+    cpu_shares: body.cpu_shares || 'normal',
+    cpu_limit_vcpu: Number(body.cpu_limit_vcpu) || 0,
+    cpu_reserved_vcpu: Number(body.cpu_reserved_vcpu) || 0,
+    mem_limit_gb: Number(body.mem_limit_gb) || 0,
+    mem_reserved_gb: Number(body.mem_reserved_gb) || 0,
+    vms: 0,
+  }
+  mockData.resource_pools.push(pool)
+  return c.json({ ok: true, pool })
+})
+
+// 资源池 — 编辑
+app.put(`${API}/resource-pools/:id`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const pool = mockData.resource_pools.find((p: any) => p.id === id)
+  if (!pool) return c.json({ error: '资源池不存在', code: 'NOT_FOUND' }, 404)
+  const body = await c.req.json().catch(() => ({}))
+  const name = (body.name || '').trim()
+  if (!name) return c.json({ error: '资源池名称不能为空', code: 'NAME_REQUIRED' }, 400)
+  if (mockData.resource_pools.some((p: any) => p.name === name && p.id !== id))
+    return c.json({ error: `资源池「${name}」已存在`, code: 'NAME_DUPLICATE' }, 409)
+  if (Number(body.cpu_reserved_vcpu) > Number(body.cpu_limit_vcpu))
+    return c.json({ error: 'CPU 预留值不能超过 CPU 上限', code: 'CPU_RESERVE_EXCEED' }, 400)
+  if (Number(body.mem_reserved_gb) > Number(body.mem_limit_gb))
+    return c.json({ error: '内存预留值不能超过内存上限', code: 'MEM_RESERVE_EXCEED' }, 400)
+  pool.name = name
+  if (body.cluster_id) pool.cluster_id = Number(body.cluster_id)
+  pool.cpu_shares = body.cpu_shares || pool.cpu_shares
+  pool.cpu_limit_vcpu = Number(body.cpu_limit_vcpu) || 0
+  pool.cpu_reserved_vcpu = Number(body.cpu_reserved_vcpu) || 0
+  pool.mem_limit_gb = Number(body.mem_limit_gb) || 0
+  pool.mem_reserved_gb = Number(body.mem_reserved_gb) || 0
+  return c.json({ ok: true, pool })
+})
+
+// 资源池 — 删除（含运行 VM 时阻止，需先迁出）
+app.delete(`${API}/resource-pools/:id`, (c) => {
+  const id = Number(c.req.param('id'))
+  const idx = mockData.resource_pools.findIndex((p: any) => p.id === id)
+  if (idx < 0) return c.json({ error: '资源池不存在', code: 'NOT_FOUND' }, 404)
+  const pool = mockData.resource_pools[idx]
+  if (pool.vms > 0)
+    return c.json(
+      { error: `资源池内仍有 ${pool.vms} 台虚拟机，请先迁出后再删除`, code: 'HAS_VMS', children: [`${pool.vms} 台虚拟机`] },
+      409,
+    )
+  mockData.resource_pools.splice(idx, 1)
+  return c.json({ ok: true })
+})
 
 // 基础设施层级拓扑：数据中心 → 集群 → 主机 → VM（含每级聚合统计）
 app.get(`${API}/infrastructure/topology`, (c) => {

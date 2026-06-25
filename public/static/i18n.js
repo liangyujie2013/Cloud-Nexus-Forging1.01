@@ -429,6 +429,16 @@ const dict = {
     pool_title: '资源池', pool_add: '新建资源池', pool_cpu_limit: 'CPU 上限',
     pool_cpu_reserved: 'CPU 预留', pool_mem_limit: '内存上限', pool_mem_reserved: '内存预留', pool_vms: '虚拟机数',
     shares_high: '高份额', shares_normal: '正常份额', shares_low: '低份额',
+    pool_create: '新建资源池', pool_edit: '编辑资源池', pool_name_ph: '如：生产业务池 Prod-Pool',
+    pool_shares: '份额（Shares）', pool_shares_hint: '资源争用时按份额比例分配',
+    pool_shares_high_d: '争用时优先保障', pool_shares_normal_d: '默认优先级', pool_shares_low_d: '争用时优先让出',
+    pool_cpu_alloc: 'CPU 资源分配', pool_mem_alloc: '内存资源分配',
+    pool_err_cpu_reserve: 'CPU 预留不能超过上限', pool_err_mem_reserve: '内存预留不能超过上限',
+    // N1 术语澄清：区分「主机连接状态」与「虚拟机电源状态」（对标 VMware）
+    host_conn_rate: '主机连接率', host_conn_rate_tip: '该数据中心内「已连接」主机占全部主机的比例（主机连接状态，非虚拟机运行状态）',
+    vm_run_rate: '虚拟机运行率', vm_run_rate_tip: '处于「运行中」电源状态的虚拟机占比',
+    host_connected: '已连接', host_disconnected: '已断开', host_maintenance: '维护模式',
+    vm_powered_on: '运行中', vm_powered_off: '已关机', vm_suspended: '已暂停',
 
     // ===== 可用性 · 备份恢复 =====
     bk_title: '备份任务', bk_add: '新建备份任务', bk_target: '目标虚拟机', bk_job_name: '任务名',
@@ -502,7 +512,7 @@ const dict = {
     // ===== 主机管理 v2.0 (zh) =====
     nav_mod_hosts: '主机管理', nav_hosts_list: '主机列表', nav_hosts_detail: '主机管理 / 网络',
     host_search_ph: '搜索主机名 / IP / 集群', host_filter_all: '全部状态',
-    host_st_online: '在线', host_st_maint: '维护中', host_st_offline: '离线',
+    host_st_online: '已连接', host_st_maint: '维护模式', host_st_offline: '已断开',
     host_enter_maint: '进入维护模式', host_exit_maint: '退出维护模式', host_back: '返回列表',
     host_pick_hint: '请选择一台主机查看其概览 / 硬件 / HA 状态 / 虚拟机详情。', host_view_detail: '查看详情',
     // 主机管理 / 网络 页（按集群分组统一管理宿主机管理网络）
@@ -933,6 +943,15 @@ const dict = {
     pool_title: 'Resource Pools', pool_add: 'New Pool', pool_cpu_limit: 'CPU Limit',
     pool_cpu_reserved: 'CPU Reserved', pool_mem_limit: 'Mem Limit', pool_mem_reserved: 'Mem Reserved', pool_vms: 'VMs',
     shares_high: 'High Shares', shares_normal: 'Normal Shares', shares_low: 'Low Shares',
+    pool_create: 'New Resource Pool', pool_edit: 'Edit Resource Pool', pool_name_ph: 'e.g. Prod-Pool',
+    pool_shares: 'Shares', pool_shares_hint: 'Allocated proportionally under contention',
+    pool_shares_high_d: 'Prioritized under contention', pool_shares_normal_d: 'Default priority', pool_shares_low_d: 'Yields under contention',
+    pool_cpu_alloc: 'CPU Allocation', pool_mem_alloc: 'Memory Allocation',
+    pool_err_cpu_reserve: 'Reservation cannot exceed limit', pool_err_mem_reserve: 'Reservation cannot exceed limit',
+    host_conn_rate: 'Host Connectivity', host_conn_rate_tip: 'Percentage of hosts in "Connected" state in this datacenter (host connection state, not VM power state)',
+    vm_run_rate: 'VM Running Rate', vm_run_rate_tip: 'Percentage of VMs in "Running" power state',
+    host_connected: 'Connected', host_disconnected: 'Disconnected', host_maintenance: 'Maintenance',
+    vm_powered_on: 'Running', vm_powered_off: 'Powered Off', vm_suspended: 'Suspended',
 
     // ===== Availability backup =====
     bk_title: 'Backup Jobs', bk_add: 'New Backup Job', bk_target: 'Target VM', bk_job_name: 'Job Name',
@@ -1003,7 +1022,7 @@ const dict = {
     // ===== Host Management v2.0 (en) =====
     nav_mod_hosts: 'Host Management', nav_hosts_list: 'Host List', nav_hosts_detail: 'Hosts / Network',
     host_search_ph: 'Search hostname / IP / cluster', host_filter_all: 'All Status',
-    host_st_online: 'Online', host_st_maint: 'Maintenance', host_st_offline: 'Offline',
+    host_st_online: 'Connected', host_st_maint: 'Maintenance', host_st_offline: 'Disconnected',
     host_enter_maint: 'Enter Maintenance', host_exit_maint: 'Exit Maintenance', host_back: 'Back to List',
     host_pick_hint: 'Select a host to view its overview / hardware / HA status / VMs.', host_view_detail: 'View Details',
     hmn_title: 'Hosts / Management Network', hmn_intro: 'View and configure host management networks (IP / netmask / gateway / mgmt VLAN / uplink NIC), grouped by cluster.',
