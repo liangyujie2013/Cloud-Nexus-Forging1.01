@@ -135,18 +135,21 @@ export const mockData = {
   // 三版本特性对比矩阵（Community / Standard / Enterprise）
   license_editions: [
     {
+      // P24：社区版节点数 1-3
       key: 'community', name_zh: '社区版', name_en: 'Community', price: '免费 / Free',
-      max_nodes: 3, max_vms: 50, ha_enabled: false, live_migration: false,
+      min_nodes: 1, max_nodes: 3, nodes_label: '1 - 3', max_vms: 50, ha_enabled: false, live_migration: false,
       vlan_mgmt: '基础', storage: 'NFS / iSCSI / 本地', custom_roles: false, audit_log: false, api_access: '只读',
     },
     {
+      // P24：标准版节点数 4-31（介于社区与企业之间）
       key: 'standard', name_zh: '标准版', name_en: 'Standard', price: '¥12,800 / 年·节点',
-      max_nodes: 16, max_vms: 500, ha_enabled: true, live_migration: true,
+      min_nodes: 4, max_nodes: 31, nodes_label: '4 - 31', max_vms: 500, ha_enabled: true, live_migration: true,
       vlan_mgmt: '完整 VLAN', storage: 'NFS / iSCSI / 本地', custom_roles: true, audit_log: true, api_access: '读写',
     },
     {
+      // P24：企业版节点数 32-64
       key: 'enterprise', name_zh: '企业版', name_en: 'Enterprise', price: '联系销售 / Contact Sales',
-      max_nodes: 32, max_vms: 999999, ha_enabled: true, live_migration: true,
+      min_nodes: 32, max_nodes: 64, nodes_label: '32 - 64', max_vms: 999999, ha_enabled: true, live_migration: true,
       vlan_mgmt: 'VLAN + SDN', storage: 'NFS / iSCSI / 本地 / 分布式存储', custom_roles: true, audit_log: true, api_access: '读写 + Webhook',
     },
   ],

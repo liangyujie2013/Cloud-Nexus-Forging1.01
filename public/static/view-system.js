@@ -32,7 +32,7 @@ const SystemView = {
     // 对比表行定义：label i18n key + 取值函数 + 渲染类型
     const rows = computed(() => [
       { label: 'lic_price', get: (e) => e.price, type: 'text' },
-      { label: 'lic_feat_max_nodes', get: (e) => e.max_nodes, type: 'num' },
+      { label: 'lic_feat_max_nodes', get: (e) => e.nodes_label || String(e.max_nodes), type: 'text' },
       { label: 'lic_feat_max_vms', get: (e) => (e.max_vms >= 999999 ? t('lic_unlimited') : e.max_vms), type: 'num' },
       { label: 'lic_feat_ha', get: (e) => e.ha_enabled, type: 'bool' },
       { label: 'lic_feat_migration', get: (e) => e.live_migration, type: 'bool' },
