@@ -147,7 +147,7 @@ func (r *Repository) ListAuditLogs(ctx context.Context, limit int) ([]model.Audi
 			a      model.AuditLog
 			uid    sql.NullInt64
 			resID  sql.NullInt64
-			detail sql.RawBytes
+			detail []byte
 		)
 		if err := rows.Scan(&a.ID, &uid, &a.Username, &a.Action, &a.Resource, &resID, &detail, &a.IPAddress, &a.CreatedAt); err != nil {
 			return nil, err

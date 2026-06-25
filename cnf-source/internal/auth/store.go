@@ -173,7 +173,7 @@ func (s *Store) Authenticate(ctx context.Context, username, password string) (*m
 func scanRole(s interface{ Scan(...any) error }) (*model.Role, error) {
 	var (
 		r     model.Role
-		perms sql.RawBytes
+		perms []byte
 	)
 	if err := s.Scan(&r.ID, &r.Name, &r.Description, &perms, &r.IsBuiltin, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err

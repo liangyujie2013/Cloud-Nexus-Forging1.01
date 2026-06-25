@@ -39,8 +39,8 @@ func scanDatacenter(s scanner) (*model.Datacenter, error) {
 	var (
 		dc      model.Datacenter
 		uuidStr string
-		tags    sql.RawBytes
-		meta    sql.RawBytes
+		tags    []byte
+		meta    []byte
 	)
 	if err := s.Scan(
 		&dc.ID, &uuidStr, &dc.Name, &dc.Location, &dc.Description,
@@ -200,7 +200,7 @@ func scanCluster(s scanner) (*ClusterExt, error) {
 	var (
 		c          ClusterExt
 		uuidStr    string
-		ntpServers sql.RawBytes
+		ntpServers []byte
 	)
 	if err := s.Scan(
 		&c.ID, &uuidStr, &c.DatacenterID, &c.Name, &c.Description,
@@ -389,7 +389,7 @@ func (r *Repository) SaveHostHardware(ctx context.Context, id int, inventory map
 // LoadHostHardware 读取宿主机硬件清单与 OS 版本。
 func (r *Repository) LoadHostHardware(ctx context.Context, id int) (map[string]any, string, error) {
 	var (
-		inv sql.RawBytes
+		inv []byte
 		os  sql.NullString
 	)
 	err := r.db.QueryRowContext(ctx,

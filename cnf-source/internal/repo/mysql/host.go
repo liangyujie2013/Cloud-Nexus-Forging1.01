@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/cnf/cnfv1/internal/model"
 )
@@ -17,7 +16,7 @@ func scanHost(s scanner) (*model.Host, error) {
 	var (
 		h        model.Host
 		uuidStr  string
-		numaTopo sql.RawBytes
+		numaTopo []byte
 	)
 	err := s.Scan(
 		&h.ID, &uuidStr, &h.ClusterID, &h.Name, &h.Hostname, &h.IPAddress,

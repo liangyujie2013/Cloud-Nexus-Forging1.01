@@ -27,89 +27,95 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Get("/auth/me", h.me)
 	api.Post("/auth/change-password", h.changePassword)
 
+	// 说明（Fiber v3 路由语义）：
+	//   Get(path, handler, middleware...) 的执行顺序为 [middleware..., handler]，
+	//   即可变参的 middleware 先执行、handler 最后执行。因此这里把
+	//   RequirePermission 作为可变参中间件（先跑、做 RBAC 校验），
+	//   真实业务 handler 作为第二个参数（后跑）。
+
 	// ---- 用户管理（RBAC: user.*） ----
-	api.Get("/users", h.Mw.RequirePermission("user.read"), h.listUsers)
-	api.Post("/users", h.Mw.RequirePermission("user.create"), h.createUser)
-	api.Post("/users/:id/enabled", h.Mw.RequirePermission("user.update"), h.setUserEnabled)
-	api.Post("/users/:id/reset-password", h.Mw.RequirePermission("user.update"), h.resetUserPassword)
-	api.Delete("/users/:id", h.Mw.RequirePermission("user.delete"), h.deleteUser)
+	api.Get("/users", h.listUsers, h.Mw.RequirePermission("user.read"))
+	api.Post("/users", h.createUser, h.Mw.RequirePermission("user.create"))
+	api.Post("/users/:id/enabled", h.setUserEnabled, h.Mw.RequirePermission("user.update"))
+	api.Post("/users/:id/reset-password", h.resetUserPassword, h.Mw.RequirePermission("user.update"))
+	api.Delete("/users/:id", h.deleteUser, h.Mw.RequirePermission("user.delete"))
 
 	// ---- 角色管理（RBAC: role.*） ----
-	api.Get("/roles", h.Mw.RequirePermission("role.read"), h.listRoles)
-	api.Post("/roles", h.Mw.RequirePermission("role.create"), h.createRole)
-	api.Put("/roles/:id", h.Mw.RequirePermission("role.update"), h.updateRole)
-	api.Delete("/roles/:id", h.Mw.RequirePermission("role.delete"), h.deleteRole)
+	api.Get("/roles", h.listRoles, h.Mw.RequirePermission("role.read"))
+	api.Post("/roles", h.createRole, h.Mw.RequirePermission("role.create"))
+	api.Put("/roles/:id", h.updateRole, h.Mw.RequirePermission("role.update"))
+	api.Delete("/roles/:id", h.deleteRole, h.Mw.RequirePermission("role.delete"))
 
 	// ---- 数据中心（RBAC: datacenter.*） ----
-	api.Get("/datacenters", h.Mw.RequirePermission("datacenter.read"), h.listDatacenters)
-	api.Get("/datacenters/:id", h.Mw.RequirePermission("datacenter.read"), h.getDatacenter)
-	api.Post("/datacenters", h.Mw.RequirePermission("datacenter.create"), h.createDatacenter)
-	api.Put("/datacenters/:id", h.Mw.RequirePermission("datacenter.update"), h.updateDatacenter)
-	api.Delete("/datacenters/:id", h.Mw.RequirePermission("datacenter.delete"), h.deleteDatacenter)
+	api.Get("/datacenters", h.listDatacenters, h.Mw.RequirePermission("datacenter.read"))
+	api.Get("/datacenters/:id", h.getDatacenter, h.Mw.RequirePermission("datacenter.read"))
+	api.Post("/datacenters", h.createDatacenter, h.Mw.RequirePermission("datacenter.create"))
+	api.Put("/datacenters/:id", h.updateDatacenter, h.Mw.RequirePermission("datacenter.update"))
+	api.Delete("/datacenters/:id", h.deleteDatacenter, h.Mw.RequirePermission("datacenter.delete"))
 
 	// ---- 集群（RBAC: cluster.*） ----
-	api.Get("/clusters", h.Mw.RequirePermission("cluster.read"), h.listClusters)
-	api.Get("/clusters/:id", h.Mw.RequirePermission("cluster.read"), h.getCluster)
-	api.Post("/clusters", h.Mw.RequirePermission("cluster.create"), h.createCluster)
-	api.Put("/clusters/:id", h.Mw.RequirePermission("cluster.update"), h.updateCluster)
-	api.Delete("/clusters/:id", h.Mw.RequirePermission("cluster.delete"), h.deleteCluster)
+	api.Get("/clusters", h.listClusters, h.Mw.RequirePermission("cluster.read"))
+	api.Get("/clusters/:id", h.getCluster, h.Mw.RequirePermission("cluster.read"))
+	api.Post("/clusters", h.createCluster, h.Mw.RequirePermission("cluster.create"))
+	api.Put("/clusters/:id", h.updateCluster, h.Mw.RequirePermission("cluster.update"))
+	api.Delete("/clusters/:id", h.deleteCluster, h.Mw.RequirePermission("cluster.delete"))
 
 	// ---- 主机（RBAC: host.*；含纳管 onboarding） ----
-	api.Get("/hosts", h.Mw.RequirePermission("host.read"), h.listHosts)
-	api.Get("/hosts/:id", h.Mw.RequirePermission("host.read"), h.getHost)
-	api.Get("/hosts/:id/hardware", h.Mw.RequirePermission("host.read"), h.getHostHardware)
-	api.Post("/hosts/precheck", h.Mw.RequirePermission("host.create"), h.precheckHost)
-	api.Post("/hosts/onboard", h.Mw.RequirePermission("host.create"), h.onboardHost)
-	api.Post("/hosts/:id/enable-tcp", h.Mw.RequirePermission("host.update"), h.enableHostTCP)
-	api.Post("/hosts/:id/maintenance", h.Mw.RequirePermission("host.update"), h.setHostMaintenance)
-	api.Delete("/hosts/:id", h.Mw.RequirePermission("host.delete"), h.deleteHost)
+	api.Get("/hosts", h.listHosts, h.Mw.RequirePermission("host.read"))
+	api.Get("/hosts/:id", h.getHost, h.Mw.RequirePermission("host.read"))
+	api.Get("/hosts/:id/hardware", h.getHostHardware, h.Mw.RequirePermission("host.read"))
+	api.Post("/hosts/precheck", h.precheckHost, h.Mw.RequirePermission("host.create"))
+	api.Post("/hosts/onboard", h.onboardHost, h.Mw.RequirePermission("host.create"))
+	api.Post("/hosts/:id/enable-tcp", h.enableHostTCP, h.Mw.RequirePermission("host.update"))
+	api.Post("/hosts/:id/maintenance", h.setHostMaintenance, h.Mw.RequirePermission("host.update"))
+	api.Delete("/hosts/:id", h.deleteHost, h.Mw.RequirePermission("host.delete"))
 
 	// ---- 虚拟机生命周期（RBAC: vm.*） ----
-	api.Get("/vms", h.Mw.RequirePermission("vm.read"), h.listVMs)
-	api.Get("/vms/:id", h.Mw.RequirePermission("vm.read"), h.getVM)
-	api.Get("/vms/:id/xml", h.Mw.RequirePermission("vm.read"), h.vmXML)
-	api.Post("/vms", h.Mw.RequirePermission("vm.create"), h.createVM)
-	api.Delete("/vms/:id", h.Mw.RequirePermission("vm.delete"), h.deleteVM)
-	api.Post("/vms/:id/start", h.Mw.RequirePermission("vm.power"), h.startVM)
-	api.Post("/vms/:id/stop", h.Mw.RequirePermission("vm.power"), h.stopVM)
+	api.Get("/vms", h.listVMs, h.Mw.RequirePermission("vm.read"))
+	api.Get("/vms/:id", h.getVM, h.Mw.RequirePermission("vm.read"))
+	api.Get("/vms/:id/xml", h.vmXML, h.Mw.RequirePermission("vm.read"))
+	api.Post("/vms", h.createVM, h.Mw.RequirePermission("vm.create"))
+	api.Delete("/vms/:id", h.deleteVM, h.Mw.RequirePermission("vm.delete"))
+	api.Post("/vms/:id/start", h.startVM, h.Mw.RequirePermission("vm.power"))
+	api.Post("/vms/:id/stop", h.stopVM, h.Mw.RequirePermission("vm.power"))
 
 	// 热迁移
-	api.Post("/vms/:id/migrate", h.Mw.RequirePermission("vm.migrate"), h.migrateVM)
-	api.Get("/vms/:id/migrate/progress", h.Mw.RequirePermission("vm.read"), h.migrationProgress)
+	api.Post("/vms/:id/migrate", h.migrateVM, h.Mw.RequirePermission("vm.migrate"))
+	api.Get("/vms/:id/migrate/progress", h.migrationProgress, h.Mw.RequirePermission("vm.read"))
 
 	// 快照
-	api.Get("/vms/:id/snapshots", h.Mw.RequirePermission("vm.read"), h.listSnapshots)
-	api.Post("/vms/:id/snapshots", h.Mw.RequirePermission("vm.snapshot"), h.createSnapshot)
-	api.Post("/vms/:id/snapshots/:name/revert", h.Mw.RequirePermission("vm.snapshot"), h.revertSnapshot)
-	api.Delete("/vms/:id/snapshots/:name", h.Mw.RequirePermission("vm.snapshot"), h.deleteSnapshot)
+	api.Get("/vms/:id/snapshots", h.listSnapshots, h.Mw.RequirePermission("vm.read"))
+	api.Post("/vms/:id/snapshots", h.createSnapshot, h.Mw.RequirePermission("vm.snapshot"))
+	api.Post("/vms/:id/snapshots/:name/revert", h.revertSnapshot, h.Mw.RequirePermission("vm.snapshot"))
+	api.Delete("/vms/:id/snapshots/:name", h.deleteSnapshot, h.Mw.RequirePermission("vm.snapshot"))
 
 	// ---- 存储池（RBAC: storage.*） ----
-	api.Get("/storage-pools", h.Mw.RequirePermission("storage.read"), h.listStoragePools)
-	api.Get("/storage-pools/:id", h.Mw.RequirePermission("storage.read"), h.getStoragePool)
-	api.Post("/storage-pools", h.Mw.RequirePermission("storage.create"), h.createStoragePool)
-	api.Post("/storage-pools/:id/refresh", h.Mw.RequirePermission("storage.update"), h.refreshStoragePool)
-	api.Delete("/storage-pools/:id", h.Mw.RequirePermission("storage.delete"), h.deleteStoragePool)
+	api.Get("/storage-pools", h.listStoragePools, h.Mw.RequirePermission("storage.read"))
+	api.Get("/storage-pools/:id", h.getStoragePool, h.Mw.RequirePermission("storage.read"))
+	api.Post("/storage-pools", h.createStoragePool, h.Mw.RequirePermission("storage.create"))
+	api.Post("/storage-pools/:id/refresh", h.refreshStoragePool, h.Mw.RequirePermission("storage.update"))
+	api.Delete("/storage-pools/:id", h.deleteStoragePool, h.Mw.RequirePermission("storage.delete"))
 
 	// ---- 虚拟交换机 / 网络（RBAC: network.*） ----
-	api.Get("/vswitches", h.Mw.RequirePermission("network.read"), h.listVSwitches)
-	api.Post("/vswitches", h.Mw.RequirePermission("network.create"), h.createVSwitch)
-	api.Delete("/vswitches/:id", h.Mw.RequirePermission("network.delete"), h.deleteVSwitch)
-	api.Get("/networks", h.Mw.RequirePermission("network.read"), h.listNetworks)
-	api.Post("/networks", h.Mw.RequirePermission("network.create"), h.createNetwork)
-	api.Delete("/networks/:id", h.Mw.RequirePermission("network.delete"), h.deleteNetwork)
+	api.Get("/vswitches", h.listVSwitches, h.Mw.RequirePermission("network.read"))
+	api.Post("/vswitches", h.createVSwitch, h.Mw.RequirePermission("network.create"))
+	api.Delete("/vswitches/:id", h.deleteVSwitch, h.Mw.RequirePermission("network.delete"))
+	api.Get("/networks", h.listNetworks, h.Mw.RequirePermission("network.read"))
+	api.Post("/networks", h.createNetwork, h.Mw.RequirePermission("network.create"))
+	api.Delete("/networks/:id", h.deleteNetwork, h.Mw.RequirePermission("network.delete"))
 
 	// ---- GPU（RBAC: gpu.*） ----
-	api.Get("/gpus", h.Mw.RequirePermission("gpu.read"), h.listGPUs)
-	api.Get("/gpus/:id/metrics", h.Mw.RequirePermission("gpu.read"), h.gpuMetrics)
+	api.Get("/gpus", h.listGPUs, h.Mw.RequirePermission("gpu.read"))
+	api.Get("/gpus/:id/metrics", h.gpuMetrics, h.Mw.RequirePermission("gpu.read"))
 
 	// ---- 监控（RBAC: monitor.*） ----
-	api.Get("/metrics/stream", h.Mw.RequirePermission("monitor.read"), h.metricsStream)
-	api.Get("/metrics/history", h.Mw.RequirePermission("monitor.read"), h.metricsHistory)
-	api.Get("/alert-rules", h.Mw.RequirePermission("monitor.read"), h.listAlertRules)
-	api.Post("/alert-rules", h.Mw.RequirePermission("monitor.update"), h.createAlertRule)
-	api.Post("/alert-rules/:id/enabled", h.Mw.RequirePermission("monitor.update"), h.setAlertRuleEnabled)
-	api.Delete("/alert-rules/:id", h.Mw.RequirePermission("monitor.update"), h.deleteAlertRule)
+	api.Get("/metrics/stream", h.metricsStream, h.Mw.RequirePermission("monitor.read"))
+	api.Get("/metrics/history", h.metricsHistory, h.Mw.RequirePermission("monitor.read"))
+	api.Get("/alert-rules", h.listAlertRules, h.Mw.RequirePermission("monitor.read"))
+	api.Post("/alert-rules", h.createAlertRule, h.Mw.RequirePermission("monitor.update"))
+	api.Post("/alert-rules/:id/enabled", h.setAlertRuleEnabled, h.Mw.RequirePermission("monitor.update"))
+	api.Delete("/alert-rules/:id", h.deleteAlertRule, h.Mw.RequirePermission("monitor.update"))
 
 	// ---- 任务（RBAC: vm.*，复用 power 权限） ----
-	api.Post("/tasks/:uuid/cancel", h.Mw.RequirePermission("vm.power"), h.cancelTask)
+	api.Post("/tasks/:uuid/cancel", h.cancelTask, h.Mw.RequirePermission("vm.power"))
 }

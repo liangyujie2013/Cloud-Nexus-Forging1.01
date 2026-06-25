@@ -15,15 +15,16 @@ SET NAMES utf8mb4;
 INSERT INTO roles (name, description, permissions, is_builtin) VALUES
     ('admin', '系统管理员（全部权限）', JSON_ARRAY('*'), 1),
     ('operator', '运维操作员', JSON_ARRAY(
-        'vm.view','vm.create','vm.update','vm.delete','vm.power','vm.migrate','vm.snapshot',
-        'host.view','host.create','host.delete','host.maintenance',
-        'storage.view','storage.create','storage.delete',
-        'network.view','network.create','network.delete',
-        'datacenter.view','cluster.view','monitoring.view','task.view'
+        'vm.read','vm.create','vm.delete','vm.power','vm.migrate','vm.snapshot',
+        'host.read','host.create','host.update','host.delete',
+        'storage.read','storage.create','storage.update','storage.delete',
+        'network.read','network.create','network.delete',
+        'datacenter.read','cluster.read',
+        'gpu.read','monitor.read','monitor.update'
     ), 1),
     ('viewer', '只读用户', JSON_ARRAY(
-        'vm.view','host.view','storage.view','network.view',
-        'datacenter.view','cluster.view','monitoring.view','task.view','audit.view'
+        'vm.read','host.read','storage.read','network.read',
+        'datacenter.read','cluster.read','gpu.read','monitor.read'
     ), 1)
 ON DUPLICATE KEY UPDATE
     description = VALUES(description),

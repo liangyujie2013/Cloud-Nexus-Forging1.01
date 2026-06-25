@@ -21,7 +21,7 @@ func scanStoragePool(s scanner) (*model.StoragePool, error) {
 		p       model.StoragePool
 		cluster sql.NullInt64
 		host    sql.NullInt64
-		cfg     sql.RawBytes
+		cfg     []byte
 	)
 	if err := s.Scan(
 		&p.ID, &p.UUID, &cluster, &host, &p.Name, &p.Type,
@@ -127,7 +127,7 @@ func scanVSwitch(s scanner) (*model.VSwitch, error) {
 	var (
 		v       model.VSwitch
 		cluster sql.NullInt64
-		uplinks sql.RawBytes
+		uplinks []byte
 	)
 	if err := s.Scan(&v.ID, &v.UUID, &cluster, &v.Name, &v.Kind, &v.MTU, &v.BondMode, &uplinks,
 		&v.CreatedAt, &v.UpdatedAt); err != nil {

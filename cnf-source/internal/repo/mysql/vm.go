@@ -21,10 +21,10 @@ func scanVM(s scanner) (*model.VM, error) {
 		v          model.VM
 		uuidStr    string
 		libvirtRaw sql.NullString
-		pinnedMap  sql.RawBytes
-		pinnedCPUs sql.RawBytes
-		numaTopo   sql.RawBytes
-		bootOrder  sql.RawBytes
+		pinnedMap  []byte
+		pinnedCPUs []byte
+		numaTopo   []byte
+		bootOrder  []byte
 		hostID     sql.NullInt64
 	)
 	err := s.Scan(
