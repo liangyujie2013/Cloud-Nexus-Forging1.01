@@ -328,6 +328,11 @@ const dict = {
     iso_local_file: '选择本地 ISO 文件', iso_local_pick: '点击选择文件 (.iso)',
     iso_remote_url: '镜像下载地址', iso_remote_url_ph: 'https://… / ftp://… 指向 .iso 文件',
     iso_target_pool: '目标存储池', iso_md5: 'MD5 校验值（可选）', iso_md5_ph: '填写后将在上传完成后比对，留空则跳过校验',
+    iso_repo_title: 'ISO 镜像仓 · 存储位置与共享范围',
+    iso_repo_fallback: 'ISO 镜像存放于存储域（存储池）下的 iso 子目录；共享存储域（NFS/iSCSI）内的镜像对所属集群全部主机可见，本地存储域仅单台主机可见。',
+    iso_store_domain: '存储域', iso_scope: '共享范围', iso_visible_hosts: '可见主机',
+    iso_scope_cluster: '集群共享', iso_scope_host: '仅本机', iso_scope_unknown: '未知',
+    iso_hint_cluster: '共享存储域：该集群所有主机均可用此镜像创建/挂载虚拟机', iso_hint_host: '本地存储域：仅挂载该池的单台主机可见，不跨主机/集群/数据中心',
     iso_progress: '上传进度', iso_uploading: '正在上传…', iso_verifying: '正在校验 MD5…',
     iso_uploaded_ok: 'ISO「{name}」已上传完成', iso_size_label: '文件大小',
 
@@ -814,6 +819,11 @@ const dict = {
     iso_local_file: 'Select Local ISO File', iso_local_pick: 'Click to choose a file (.iso)',
     iso_remote_url: 'Download URL', iso_remote_url_ph: 'https://… / ftp://… pointing to a .iso file',
     iso_target_pool: 'Target Pool', iso_md5: 'MD5 Checksum (optional)', iso_md5_ph: 'If set, verified after upload; leave blank to skip',
+    iso_repo_title: 'ISO Image Repository · Storage & Sharing Scope',
+    iso_repo_fallback: 'ISO images live in the iso subdirectory of a storage domain (pool). Images on shared domains (NFS/iSCSI) are visible to all hosts of the owning cluster; local domains are visible to a single host only.',
+    iso_store_domain: 'Storage Domain', iso_scope: 'Scope', iso_visible_hosts: 'Visible Hosts',
+    iso_scope_cluster: 'Cluster-shared', iso_scope_host: 'Host-only', iso_scope_unknown: 'Unknown',
+    iso_hint_cluster: 'Shared domain: usable by all hosts in the cluster to create/attach VMs', iso_hint_host: 'Local domain: visible to the single mounting host only, not across hosts/clusters/datacenters',
     iso_progress: 'Upload Progress', iso_uploading: 'Uploading…', iso_verifying: 'Verifying MD5…',
     iso_uploaded_ok: 'ISO "{name}" uploaded', iso_size_label: 'File Size',
 

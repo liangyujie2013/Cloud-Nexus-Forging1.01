@@ -1013,3 +1013,14 @@
 .gpu-mgmt-card .gmc-meta { font-size:12.5px; color:var(--text-secondary); }
 .gpu-mgmt-card .gmc-ops { display:flex; gap:8px; margin-top:6px; }
 .gpu-mgmt-card .apple-btn.active { border-color:var(--color-blue); color:var(--color-blue); }
+
+/* ===== P9 ISO 镜像仓 · 存储位置与共享范围 ===== */
+.iso-repo-note { display:flex; gap:12px; align-items:flex-start; padding:14px 16px; margin-bottom:14px; border-radius:var(--radius-md); background:rgba(0,122,255,.07); border:1px solid rgba(0,122,255,.18); }
+.iso-repo-note > i { color:var(--color-blue); font-size:18px; margin-top:2px; }
+.iso-repo-card { display:flex; flex-direction:column; gap:8px; }
+.iso-repo-card .irc-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.iso-repo-card .irc-name { font-weight:600; display:flex; align-items:center; gap:7px; }
+.iso-repo-card .irc-meta { display:flex; align-items:center; gap:8px; font-size:12px; flex-wrap:wrap; }
+.iso-repo-card .irc-path { font-size:11.5px; color:var(--text-tertiary); word-break:break-all; }
+.iso-repo-card .irc-stat { font-size:12.5px; color:var(--text-secondary); }
+.iso-scope-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }

@@ -402,7 +402,59 @@ app.put(`${API}/clusters/:id/host-network`, async (c) => {
 // ============================================================================
 app.get(`${API}/vms`, (c) => c.json(mockData.vms))
 app.get(`${API}/vm-templates`, (c) => c.json(mockData.vm_templates))
-app.get(`${API}/iso-images`, (c) => c.json(mockData.iso_images))
+// ---- ISO 镜像：补充「存储域归属 + 共享范围」语义（P9：让用户知道 ISO 存哪、谁能用）----
+//  规则：ISO 落在某存储池(storage_pool)上；池若 shared=true 则该集群内所有主机可见，
+//  否则仅挂载该池的主机本地可见。datacenter 级共享 = 该 DC 下挂载同一共享池的所有集群可见。
+const enrichIso = (iso: any) => {
+  const pool = mockData.storage_pools.find((p) => p.name === iso.pool)
+  const cluster = pool ? mockData.clusters.find((cl) => cl.id === pool.cluster_id) : null
+  const dc = cluster ? mockData.datacenters.find((d) => d.id === cluster.datacenter_id) : null
+  const shared = pool ? !!pool.shared : false
+  // 共享范围：cluster=本集群共享 / host=仅本机 / unknown
+  const scope = !pool ? 'unknown' : shared ? 'cluster' : 'host'
+  return {
+    ...iso,
+    storage_pool: iso.pool,
+    pool_type: pool?.type || 'unknown',
+    pool_path: pool ? `/var/lib/libvirt/images/iso/${pool.name}/${iso.name}` : `/var/lib/libvirt/images/iso/${iso.name}`,
+    shared,
+    scope,
+    cluster_id: cluster?.id ?? null,
+    cluster_name: cluster?.name ?? '未关联集群',
+    datacenter_id: dc?.id ?? null,
+    datacenter_name: dc?.name ?? '未关联数据中心',
+    // 可见主机：共享池=该集群全部在线主机；本地池=挂载主机
+    visible_hosts: pool
+      ? (shared ? mockData.hosts.filter((h) => h.cluster_id === pool.cluster_id).map((h) => h.name)
+                : (pool.host_id ? mockData.hosts.filter((h) => h.id === pool.host_id).map((h) => h.name) : []))
+      : [],
+  }
+}
+app.get(`${API}/iso-images`, (c) => c.json(mockData.iso_images.map(enrichIso)))
+// ---- ISO 镜像仓概览：存储域列表 + 全局说明（P9 顶部说明横幅用）----
+app.get(`${API}/iso-repositories`, (c) => {
+  const repos = mockData.storage_pools
+    .filter((p) => p.type === 'nfs' || p.type === 'iscsi' || p.type === 'local')
+    .map((p) => {
+      const cluster = mockData.clusters.find((cl) => cl.id === p.cluster_id)
+      const dc = cluster ? mockData.datacenters.find((d) => d.id === cluster.datacenter_id) : null
+      const isos = mockData.iso_images.filter((i) => i.pool === p.name)
+      return {
+        id: p.id, name: p.name, type: p.type, shared: !!p.shared,
+        scope: p.shared ? 'cluster' : 'host',
+        cluster_id: p.cluster_id, cluster_name: cluster?.name || '未关联',
+        datacenter_id: dc?.id ?? null, datacenter_name: dc?.name || '未关联',
+        iso_count: isos.length,
+        used_gb: Math.round(isos.reduce((s, i) => s + (i.size_gb || 0), 0) * 10) / 10,
+        capacity_tb: p.capacity_tb,
+        mount_path: `/var/lib/libvirt/images/iso/${p.name}`,
+      }
+    })
+  return c.json({
+    repositories: repos,
+    note: 'ISO 镜像存放于存储域（storage pool）下的 iso 子目录。共享存储域（NFS/iSCSI）内的镜像对该存储域所属集群的全部主机可见，可直接用于该集群任意宿主机创建/挂载；本地存储域（local）的镜像仅挂载该池的单台主机可见，不跨主机、不跨集群、不跨数据中心。',
+  })
+})
 app.get(`${API}/gpus`, (c) => c.json(mockData.gpus))
 
 // VM 电源操作（右键菜单：开机/关机/重启/挂起/恢复/强制关机）
@@ -528,7 +580,7 @@ app.post(`${API}/iso-images`, async (c) => {
     checksum_ok: b.md5 ? true : true, md5: b.md5 || '', source: b.source || 'local',
   }
   mockData.iso_images.unshift(iso)
-  return c.json({ ...iso, message: `（原型）ISO「${iso.name}」已${b.source === 'url' ? '下载' : '上传'}完成` }, 201)
+  return c.json({ ...enrichIso(iso), message: `（原型）ISO「${iso.name}」已${b.source === 'url' ? '下载' : '上传'}完成` }, 201)
 })
 
 // libvirt domain XML 实时预览（真实可用：接收 VM 配置 → 生成 XML）

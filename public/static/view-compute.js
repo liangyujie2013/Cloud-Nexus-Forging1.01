@@ -27,6 +27,8 @@ const ComputeView = {
     const vms = ref([])
     const templates = ref([])
     const isos = ref([])
+    const isoRepos = ref([])          // P9：ISO 镜像仓（存储域）概览
+    const isoRepoNote = ref('')       // P9：全局存储/共享范围说明
     const loading = ref(false)
 
     // ---- 通用右键菜单管理器（智能边界 / ESC / 滚动 / 外部点击关闭）----
@@ -54,9 +56,20 @@ const ComputeView = {
       try {
         if (props.tab === 'vms') vms.value = await api('/vms')
         else if (props.tab === 'templates') templates.value = await api('/vm-templates')
-        else if (props.tab === 'isos') isos.value = await api('/iso-images')
+        else if (props.tab === 'isos') {
+          const [list, repo] = await Promise.all([api('/iso-images'), api('/iso-repositories')])
+          isos.value = list
+          isoRepos.value = (repo && repo.repositories) || []
+          isoRepoNote.value = (repo && repo.note) || ''
+        }
       } finally { loading.value = false }
     }
+    // P9：共享范围 → 中文标签 / 图标 / 颜色
+    const scopeMeta = (s) => ({
+      cluster: { txt: t('iso_scope_cluster'), icon: 'fa-share-nodes', color: 'var(--color-green)' },
+      host: { txt: t('iso_scope_host'), icon: 'fa-server', color: 'var(--color-orange)' },
+      unknown: { txt: t('iso_scope_unknown'), icon: 'fa-circle-question', color: 'var(--text-tertiary)' },
+    }[s] || { txt: s, icon: 'fa-circle-question', color: 'var(--text-tertiary)' })
     onMounted(() => load())
     watch(() => props.tab, () => { kw.value = ''; statusFilter.value = 'all'; selected.value = new Set(); page.value = 1; load() })
     // 顶部全局搜索联动
@@ -377,6 +390,7 @@ const ComputeView = {
       tplDlg, openTplCreate, saveTpl,
       deployDlg, openDeploy, doDeploy,
       isoDlg, openIsoUpload, onIsoFile, submitIso,
+      isoRepos, isoRepoNote, scopeMeta,
     }
   },
   template: `
@@ -481,22 +495,63 @@ const ComputeView = {
         </div>
       </template>
 
-      <!-- ===== isos：ISO 镜像 ===== -->
+      <!-- ===== isos：ISO 镜像（含存储域 / 共享范围说明 P9）===== -->
       <template v-else>
+        <!-- 说明横幅：ISO 存哪、谁能用 -->
+        <div class="iso-repo-note">
+          <i class="fas fa-circle-info"></i>
+          <div>
+            <strong>{{ t('iso_repo_title') }}</strong>
+            <div class="muted" style="margin-top:4px;line-height:1.6">{{ isoRepoNote || t('iso_repo_fallback') }}</div>
+          </div>
+        </div>
+
+        <!-- 镜像仓（存储域）概览卡片 -->
+        <div class="grid grid-3" style="margin-bottom:14px">
+          <div class="apple-card iso-repo-card" v-for="r in isoRepos" :key="r.id">
+            <div class="irc-head">
+              <div class="irc-name"><i class="fas fa-database" style="color:var(--color-indigo)"></i> {{ r.name }}</div>
+              <span class="iso-scope-pill" :style="{background:scopeMeta(r.scope).color+'1f',color:scopeMeta(r.scope).color}">
+                <i class="fas" :class="scopeMeta(r.scope).icon"></i> {{ scopeMeta(r.scope).txt }}
+              </span>
+            </div>
+            <div class="irc-meta">
+              <span class="hw-chip">{{ r.type.toUpperCase() }}</span>
+              <span class="muted">{{ r.datacenter_name }} · {{ r.cluster_name }}</span>
+            </div>
+            <div class="irc-path mono">{{ r.mount_path }}</div>
+            <div class="irc-stat"><i class="fas fa-compact-disc"></i> {{ r.iso_count }} {{ t('iso_title') }} · {{ r.used_gb }} GB / {{ r.capacity_tb }} TB</div>
+          </div>
+        </div>
+
         <div class="toolbar">
           <span class="muted">{{ isos.length }} {{ t('iso_title') }}</span>
           <div class="spacer"></div>
           <button class="apple-btn apple-btn--primary" @click="openIsoUpload"><i class="fas fa-upload"></i> {{ t('iso_upload') }}</button>
         </div>
-        <div class="apple-card" style="padding:0">
+        <div class="apple-card" style="padding:0;overflow-x:auto">
           <table class="apple-table">
-            <thead><tr><th>{{ t('name') }}</th><th>{{ t('iso_os_type') }}</th><th>{{ t('iso_size') }}</th><th>{{ t('iso_pool') }}</th><th>{{ t('iso_uploaded') }}</th><th>{{ t('iso_checksum') }}</th></tr></thead>
+            <thead><tr><th>{{ t('name') }}</th><th>{{ t('iso_os_type') }}</th><th>{{ t('iso_size') }}</th><th>{{ t('iso_store_domain') }}</th><th>{{ t('iso_scope') }}</th><th>{{ t('iso_visible_hosts') }}</th><th>{{ t('iso_uploaded') }}</th><th>{{ t('iso_checksum') }}</th></tr></thead>
             <tbody>
               <tr v-for="iso in isos" :key="iso.id">
-                <td class="mono"><i class="fas fa-compact-disc" style="color:var(--color-indigo)"></i> {{ iso.name }}</td>
+                <td class="mono"><i class="fas fa-compact-disc" style="color:var(--color-indigo)"></i> {{ iso.name }}
+                  <div class="muted" style="font-size:11px">{{ iso.pool_path }}</div>
+                </td>
                 <td><span class="apple-badge">{{ iso.os_type }}</span></td>
                 <td>{{ iso.size_gb }} GB</td>
-                <td class="muted">{{ iso.pool }}</td>
+                <td>
+                  <div><strong>{{ iso.storage_pool }}</strong> <span class="hw-chip">{{ (iso.pool_type||'').toUpperCase() }}</span></div>
+                  <div class="muted" style="font-size:11px">{{ iso.datacenter_name }} · {{ iso.cluster_name }}</div>
+                </td>
+                <td>
+                  <span class="iso-scope-pill" :style="{background:scopeMeta(iso.scope).color+'1f',color:scopeMeta(iso.scope).color}">
+                    <i class="fas" :class="scopeMeta(iso.scope).icon"></i> {{ scopeMeta(iso.scope).txt }}
+                  </span>
+                </td>
+                <td class="muted" style="font-size:12px">
+                  <span v-if="iso.visible_hosts && iso.visible_hosts.length">{{ iso.visible_hosts.join('、') }}</span>
+                  <span v-else>—</span>
+                </td>
                 <td class="muted">{{ iso.uploaded_at }}</td>
                 <td><i :class="iso.checksum_ok?'fas fa-circle-check':'fas fa-circle-xmark'" :style="{color:iso.checksum_ok?'var(--color-green)':'var(--color-red)'}"></i></td>
               </tr>
@@ -730,8 +785,13 @@ const ComputeView = {
               <div class="form-row">
                 <label>{{ t('iso_target_pool') }}</label>
                 <select class="apple-input" v-model="isoDlg.form.pool" :disabled="isoDlg.busy">
-                  <option value="prod-nfs-pool">prod-nfs-pool</option><option value="prod-iscsi-fast">prod-iscsi-fast</option><option value="backup-nfs">backup-nfs</option>
+                  <option v-for="r in isoRepos" :key="r.id" :value="r.name">{{ r.name }} · {{ r.datacenter_name }}/{{ r.cluster_name }} · {{ scopeMeta(r.scope).txt }}</option>
+                  <option v-if="!isoRepos.length" value="prod-nfs-pool">prod-nfs-pool</option>
                 </select>
+                <div class="form-hint" v-for="r in isoRepos.filter(x=>x.name===isoDlg.form.pool)" :key="r.id">
+                  <i class="fas" :class="scopeMeta(r.scope).icon" :style="{color:scopeMeta(r.scope).color}"></i>
+                  {{ r.scope==='cluster' ? t('iso_hint_cluster') : t('iso_hint_host') }} · {{ r.mount_path }}
+                </div>
               </div>
             </div>
             <div class="form-row">
