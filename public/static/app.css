@@ -123,6 +123,21 @@
 .numa-box.selected { border-color: var(--color-blue); background: rgba(0,122,255,0.05); }
 .numa-box .nh { font-weight:600; font-size:13px; margin-bottom:8px; display:flex; justify-content:space-between; }
 
+/* ===== P6: NUMA 节点选择卡 + 自动绑核预览（替代 128 格子）===== */
+.numa-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .numa-pick { grid-template-columns: 1fr; } }
+.numa-card { border: 1.5px solid var(--separator); border-radius: var(--radius-md); padding: 14px; cursor: pointer; transition: all var(--duration-fast); }
+.numa-card:hover { border-color: var(--color-blue); }
+.numa-card.selected { border-color: var(--color-blue); background: rgba(0,122,255,0.06); }
+.numa-card .nc-head { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.numa-card .nc-check { margin-left: auto; color: var(--color-blue); }
+.pin-section { border-top: 1px solid var(--separator); padding-top: 16px; }
+.pin-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.pin-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 7px; background: var(--bg-secondary); font-size: 11px; font-family: var(--font-mono); }
+.pin-chip .pc-v { color: var(--color-blue); font-weight: 600; }
+.pin-chip .pc-p { color: var(--color-purple, #af52de); font-weight: 600; }
+.pin-chip i { font-size: 9px; color: var(--text-tertiary); }
+
 /* XML 预览 */
 .xml-preview { background: #1e1e1e; color: #d4d4d4; font: 12px/1.6 var(--font-mono);
   border-radius: var(--radius-md); padding: 16px; overflow: auto; max-height: 420px; white-space: pre; }

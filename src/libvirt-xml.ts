@@ -49,6 +49,12 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 /** 生成 libvirt domain XML（与 Go 版逻辑一致的 TS 实现）。 */
 export function buildDomainXML(vm: VMConfig): string {
+  // 容错：缺省数组归一化，避免上游部分字段缺失时崩溃（reading 'length' of undefined）
+  vm.cpu_pinned_cpus = vm.cpu_pinned_cpus || []
+  vm.cpu_pinned_map = vm.cpu_pinned_map || []
+  vm.disks = vm.disks || []
+  vm.nics = vm.nics || []
+  vm.gpus = vm.gpus || []
   const vcpus = vm.cpu_sockets * vm.cpu_cores_per_socket * vm.cpu_threads_per_core
   const L: string[] = []
   L.push(`<domain type='kvm'>`)
