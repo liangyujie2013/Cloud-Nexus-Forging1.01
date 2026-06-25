@@ -134,3 +134,11 @@ func newUUIDOr0(u *uuid.UUID) string {
 	}
 	return u.String()
 }
+
+// newUUIDOr0Str 接收字符串形式 UUID（model 中以 string 存储的资源），空则生成新值。
+func newUUIDOr0Str(s string) string {
+	if s == "" {
+		return uuid.NewString()
+	}
+	return s
+}

@@ -11,8 +11,8 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0
 	go.etcd.io/etcd/client/v3 v3.5.17
 	golang.org/x/crypto v0.31.0
-	libvirt.org/go/libvirt v1.11000.0
-	libvirt.org/go/libvirtxml v1.11000.0
+	libvirt.org/go/libvirt v1.8000.0
+	libvirt.org/go/libvirtxml v1.8000.0
 )
 
 require (

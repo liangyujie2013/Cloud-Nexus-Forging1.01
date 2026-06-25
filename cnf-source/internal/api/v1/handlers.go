@@ -3,8 +3,11 @@ package v1
 import (
 	"strconv"
 
+	"github.com/cnf/cnfv1/internal/auth"
+	"github.com/cnf/cnfv1/internal/cache"
 	"github.com/cnf/cnfv1/internal/gpu"
 	"github.com/cnf/cnfv1/internal/model"
+	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/cnf/cnfv1/internal/service"
 	"github.com/cnf/cnfv1/internal/virt"
 	"github.com/gofiber/fiber/v3"
@@ -15,18 +18,34 @@ import (
 // 由 main.go 装配后通过 RegisterRoutes 注入。
 type Handlers struct {
 	Repo      service.Repository
+	MySQL     *mysql.Repository    // MySQL 仓储（层级/存储/网络等扩展 CRUD）
 	Conn      *virt.ConnManager
 	VM        *service.VMService
 	Migration *service.MigrationService
 	Snapshot  *service.SnapshotService
 	GPU       *gpu.Manager
 	Queue     *service.TaskQueue
+
+	// 鉴权 / RBAC / 缓存
+	Tokens *auth.TokenManager
+	Auth   *auth.Store
+	Mw     *auth.Middleware
+	Cache  *cache.Client
 }
 
 // ---- 工具 ----
 
 func paramInt(c fiber.Ctx, key string) (int, error) {
 	return strconv.Atoi(c.Params(key))
+}
+
+// paramQueryInt 解析查询串中的整数参数；缺省或非法返回 0。
+func paramQueryInt(c fiber.Ctx, key string) (int, error) {
+	v := c.Query(key)
+	if v == "" {
+		return 0, nil
+	}
+	return strconv.Atoi(v)
 }
 
 func badRequest(c fiber.Ctx, msg string) error {
