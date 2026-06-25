@@ -728,6 +728,54 @@ const hostsShareStorage = (srcHostId: number, dstHostId: number): { shared: bool
   if (src.cluster_id === dst.cluster_id && srcShared.length && dstShared.length) return { shared: true, pool: srcShared[0].name }
   return { shared: false }
 }
+// ---- N6 · 同指令集跨代 CPU 兼容性判定 ----
+//  规则（对标 VMware EVC / KVM CPU baseline）：
+//   1) 跨厂商（Intel↔AMD）指令集不兼容 → 热迁移不可，只能冷迁移
+//   2) 同厂商跨代：高代→低代 可（向下兼容，目标可呈现旧 baseline）；
+//      低代→高代 需以源 baseline 启动（EVC 模式），可热迁移但提示锁定基线
+//   3) 同代/同型号 → 完全兼容
+const cpuCompat = (src: any, dst: any): { compatible: boolean; live_ok: boolean; mode: 'same' | 'cross_gen_down' | 'cross_gen_up' | 'cross_vendor'; baseline: string; detail: string } => {
+  if (!src || !dst) return { compatible: false, live_ok: false, mode: 'cross_vendor', baseline: '', detail: 'CPU 信息缺失' }
+  const sv = src.cpu_vendor || 'intel'; const dv = dst.cpu_vendor || 'intel'
+  const sg = src.cpu_gen || 0; const dg = dst.cpu_gen || 0
+  if (sv !== dv)
+    return { compatible: false, live_ok: false, mode: 'cross_vendor', baseline: '', detail: `跨 CPU 厂商不兼容（源 ${sv.toUpperCase()} ${src.cpu_microarch} → 目标 ${dv.toUpperCase()} ${dst.cpu_microarch}），只能冷迁移` }
+  if (sg === dg)
+    return { compatible: true, live_ok: true, mode: 'same', baseline: dst.cpu_baseline, detail: `同代 CPU（${src.cpu_microarch}），完全兼容，可热迁移` }
+  if (sg > dg)
+    // 高代迁向低代：需将虚拟 CPU 呈现为目标的旧指令集基线
+    return { compatible: true, live_ok: true, mode: 'cross_gen_down', baseline: dst.cpu_baseline, detail: `同指令集跨代（${src.cpu_microarch} → ${dst.cpu_microarch}）：以目标基线 ${dst.cpu_baseline} 启动，可热迁移` }
+  // 低代迁向高代：以源基线启动（EVC），保证回迁兼容
+  return { compatible: true, live_ok: true, mode: 'cross_gen_up', baseline: src.cpu_baseline, detail: `同指令集跨代（${src.cpu_microarch} → ${dst.cpu_microarch}）：锁定源基线 ${src.cpu_baseline}（EVC）以保证可回迁，可热迁移` }
+}
+
+// ---- N6 · 网络一致性判定 ----
+//  被迁移 VM 的每块网卡所接入的端口组/VLAN，目标主机必须都能提供，
+//  否则迁移后 VM 网络不通 → 不允许热迁移，只能冷迁移（停机后人工调整网络）。
+const networkMatch = (vm: any, dst: any): { ok: boolean; missing: string[]; detail: string } => {
+  const cfg = vmConfigStore[vm.id]
+  const nics = cfg ? cfg.nics : [{ portgroup: '业务前端 VLAN', vlan_id: 10, model: 'virtio' }]
+  // 目标主机所属集群可用的端口组（按 vswitch 覆盖主机名）
+  const dstHostName = dst.name
+  const availPg = new Set<string>()
+  for (const vlan of mockData.vlans) {
+    const vsw = mockData.vswitches.find((s: any) => s.name === vlan.vswitch)
+    if (vsw && Array.isArray(vsw.hosts) && vsw.hosts.includes(dstHostName)) availPg.add(vlan.name)
+  }
+  const missing: string[] = []
+  for (const n of nics) {
+    // SR-IOV 网卡：目标主机须有同名 PF 才能热迁移（VF 直通设备不可热迁移，按冷处理）
+    if (n.model === 'sriov') { missing.push(`SR-IOV(${n.sriov_pf || 'VF'})`); continue }
+    if (n.portgroup && !availPg.has(n.portgroup)) missing.push(n.portgroup)
+  }
+  const ok = missing.length === 0
+  return {
+    ok,
+    missing,
+    detail: ok ? '目标主机具备 VM 所有网卡的端口组，网络一致' : `目标主机缺少端口组：${missing.join('、')}，热迁移后网络不通`,
+  }
+}
+
 // 计算源→目标主机的网络路径（同主机/同集群/跨集群/跨数据中心）
 const migrationScope = (vm: any, dst: any): { scope: string; label: string; path: string[] } => {
   const src = mockData.hosts.find((h) => h.id === vm.host_id)
@@ -789,27 +837,39 @@ app.post(`${API}/vms/:id/migration-plan`, async (c) => {
   const sc = migrationScope(vm, dst)
   const freeV = Math.max(0, dst.vcpus - Math.round(dst.vcpus * dst.cpu_usage / 100))
   const freeM = Math.max(0, dst.mem_total_gb - dst.mem_used_gb)
+  const cpu = cpuCompat(srcHost, dst)       // N6 同指令集跨代 CPU 兼容
+  const net = networkMatch(vm, dst)         // N6 网络一致性
   const checks = [
     { key: 'cpu', pass: freeV >= vm.vcpus, detail: `需 ${vm.vcpus} vCPU / 目标空闲 ${freeV} vCPU` },
     { key: 'mem', pass: freeM >= vm.mem_gb, detail: `需 ${vm.mem_gb} GB / 目标空闲 ${freeM} GB` },
     { key: 'host', pass: dst.status === 'connected' && !dst.maintenance_mode, detail: dst.status === 'connected' && !dst.maintenance_mode ? '目标主机在线可用' : '目标主机离线或维护中' },
-    { key: 'cpu_compat', pass: (srcHost?.cpu_model || '').split(' ')[1] === (dst.cpu_model || '').split(' ')[1] || sc.scope === 'intra_cluster', detail: sc.scope === 'intra_cluster' ? '同集群 CPU 兼容' : `源 ${srcHost?.cpu_model} → 目标 ${dst.cpu_model}` },
+    { key: 'cpu_compat', pass: cpu.compatible, detail: cpu.detail, cpu_mode: cpu.mode, baseline: cpu.baseline },
+    { key: 'network', pass: net.ok, detail: net.detail, missing: net.missing },
     { key: 'storage', pass: true, detail: sto.shared ? `共享存储 ${sto.pool}，无需迁移磁盘` : '非共享存储，需同步迁移虚拟磁盘（存储迁移）' },
     { key: 'gpu', pass: !(vm.gpus > 0), detail: vm.gpus > 0 ? 'VM 绑定 GPU 直通，热迁移受限，建议冷迁移' : '无 GPU 直通约束' },
   ]
-  // 迁移模式：运行中默认热迁移；停机只能冷迁移；带 GPU 直通时强制冷迁移
+  // ---- 迁移模式判定（N6 核心）----
+  //  强制冷迁移条件：① VM 停机 ② GPU 直通 ③ CPU 跨厂商不兼容 ④ 网络不一致（热迁后断网）
+  let coldReason: string | null = null
+  if (vm.status !== 'running') coldReason = 'VM 当前停机，只能执行冷迁移'
+  else if (vm.gpus > 0) coldReason = 'VM 绑定 GPU 直通设备，VF/PCI 直通不支持热迁移，需冷迁移'
+  else if (!cpu.live_ok) coldReason = cpu.detail
+  else if (!net.ok) coldReason = `目标主机网络不一致（缺少端口组：${net.missing.join('、')}），热迁移后虚拟机网络不通，只能冷迁移`
+  const forceCold = coldReason !== null
   const requestedLive = b.mode ? b.mode === 'live' : vm.status === 'running'
-  const forceCold = vm.status !== 'running' || vm.gpus > 0
   const mode = forceCold ? 'cold' : (requestedLive ? 'live' : 'cold')
+  // 硬阻断：资源不足 / 目标不可用 / CPU 完全不兼容（连冷迁移也需注意，但允许冷迁移）
   const blockers = checks.filter((ck) => !ck.pass && (ck.key === 'cpu' || ck.key === 'mem' || ck.key === 'host'))
   return c.json({
     vm_id: id, vm_name: vm.name,
     source_host: srcHost?.name, target_host: dst.name,
+    source_cpu: srcHost?.cpu_model, target_cpu: dst.cpu_model,
+    cpu_mode: cpu.mode, cpu_baseline: cpu.baseline,
+    network_consistent: net.ok, network_missing: net.missing,
     scope: sc.scope, scope_label: sc.label, network_path: sc.path,
     shared_storage: sto.shared, storage_pool: sto.pool || null,
     storage_migration: !sto.shared,
-    mode, mode_forced_cold: forceCold,
-    cold_reason: vm.status !== 'running' ? 'VM 当前停机，只能执行冷迁移' : vm.gpus > 0 ? 'VM 绑定 GPU 直通，建议冷迁移' : null,
+    mode, mode_forced_cold: forceCold, cold_reason: coldReason,
     checks,
     can_migrate: blockers.length === 0,
     blockers: blockers.map((x) => x.detail),
@@ -835,7 +895,18 @@ app.post(`${API}/vms/:id/migrate`, async (c) => {
   const srcHost = mockData.hosts.find((h) => h.id === vm.host_id)
   const sto = hostsShareStorage(vm.host_id, target.id)
   const sc = migrationScope(vm, target)
-  const forceCold = vm.status !== 'running' || vm.gpus > 0
+  const cpu = cpuCompat(srcHost, target)   // N6 同指令集跨代 CPU
+  const net = networkMatch(vm, target)     // N6 网络一致性
+  // N6 与迁移预演一致的强制冷迁移判定：① 停机 ② GPU 直通 ③ CPU 跨厂商 ④ 网络不一致
+  let coldReason: string | null = null
+  if (vm.status !== 'running') coldReason = 'VM 当前停机，只能执行冷迁移'
+  else if (vm.gpus > 0) coldReason = 'VM 绑定 GPU 直通设备，VF/PCI 直通不支持热迁移，需冷迁移'
+  else if (!cpu.live_ok) coldReason = cpu.detail
+  else if (!net.ok) coldReason = `目标主机网络不一致（缺少端口组：${net.missing.join('、')}），只能冷迁移`
+  const forceCold = coldReason !== null
+  // 用户请求热迁移但条件不满足 → 直接拒绝并说明原因（避免静默降级造成误操作）
+  if (b.mode === 'live' && forceCold)
+    return c.json({ error: `无法热迁移：${coldReason}`, code: 'LIVE_NOT_ALLOWED', cold_reason: coldReason }, 409)
   const mode = forceCold ? 'cold' : (b.mode === 'cold' ? 'cold' : 'live')
   // 变更归属（同时更新 cluster/datacenter，支持跨集群/跨 DC）
   vm.host_id = target.id
@@ -845,10 +916,13 @@ app.post(`${API}/vms/:id/migrate`, async (c) => {
     vm_id: id, vm_name: vm.name,
     source_host: srcHost?.name, target_host: target.name,
     scope: sc.scope, scope_label: sc.label,
-    mode, shared_storage: sto.shared, storage_migration: !sto.shared,
+    cpu_mode: cpu.mode, cpu_baseline: cpu.baseline,
+    network_consistent: net.ok, network_missing: net.missing,
+    mode, mode_forced_cold: forceCold, cold_reason: coldReason,
+    shared_storage: sto.shared, storage_migration: !sto.shared,
     status: vm.status === 'stopped' ? 'stopped' : 'running',
     task_uuid: genUUID(),
-    message: `${vm.name} 已${mode === 'live' ? '热' : '冷'}迁移到 ${target.name}（${sc.label}${sto.shared ? '·共享存储' : '·存储迁移'}）`,
+    message: `${vm.name} 已${mode === 'live' ? '热' : '冷'}迁移到 ${target.name}（${sc.label}${sto.shared ? '·共享存储' : '·存储迁移'}${forceCold && vm.status === 'running' ? '·已降级为冷迁移' : ''}）`,
   })
 })
 
