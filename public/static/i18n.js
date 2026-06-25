@@ -256,6 +256,7 @@ const dict = {
     // ===== 顶部工具栏 =====
     tb_search_ph: '搜索虚拟机 / 主机 / 任务…', tb_notifications: '通知中心',
     tb_mark_all_read: '全部已读', tb_no_notifications: '暂无通知', tb_logout: '退出登录',
+    logout_success: '已退出登录，正在跳转登录页…',
 
     // ===== 仪表板补充 =====
     dash_clusters_n: '个集群', dash_connected: '已连接', dash_connected_total: '台主机在线',
@@ -270,6 +271,42 @@ const dict = {
     tpl_spec: '规格', tpl_usage: '部署次数', tpl_updated: '更新时间',
     iso_title: 'ISO 镜像库', iso_upload: '上传 ISO', iso_os_type: '系统类型',
     iso_size: '大小', iso_pool: '存储池', iso_uploaded: '上传时间', iso_checksum: '校验',
+
+    // ===== P8 模板：新建 / 从模板部署 对话框 =====
+    tpl_new_title: '新建模板', tpl_source: '创建方式',
+    tpl_src_convert: '从停机虚拟机转换', tpl_src_blank: '新建空白模板',
+    tpl_src_convert_hint: '将一台已停机的虚拟机转换为可复用模板（克隆磁盘 + 通用化）',
+    tpl_src_blank_hint: '从零定义一个空白模板，后续可挂载 ISO 安装系统',
+    tpl_pick_vm: '选择源虚拟机（需已停机）', tpl_name_ph: '如：tpl-rocky9-base',
+    tpl_guest_os: '客户机操作系统', tpl_vcpu: 'vCPU 数', tpl_mem: '内存 (GB)', tpl_disk: '系统盘 (GB)',
+    tpl_tags: '预装组件标签', tpl_tags_ph: '如：cloud-init, qemu-guest-agent（逗号分隔）',
+    tpl_no_stopped_vm: '当前没有已停机的虚拟机可供转换',
+    tpl_deploy_title: '从模板部署虚拟机', tpl_deploy_from: '源模板',
+    tpl_deploy_count: '部署数量', tpl_deploy_prefix: '虚拟机名称前缀', tpl_deploy_prefix_ph: '如：web-prod-',
+    tpl_deploy_host: '目标宿主机', tpl_deploy_batch_hint: '数量 > 1 时按「前缀+序号」批量命名（web-prod-01、web-prod-02…）',
+    tpl_created: '模板「{name}」已创建', tpl_deployed: '已提交部署 {n} 台虚拟机（基于模板「{name}」）',
+
+    // ===== P9 ISO：上传对话框（本地/URL + MD5）=====
+    iso_upload_title: '上传 ISO 镜像', iso_src_local: '本地文件上传', iso_src_url: 'URL 远程下载',
+    iso_local_file: '选择本地 ISO 文件', iso_local_pick: '点击选择文件 (.iso)',
+    iso_remote_url: '镜像下载地址', iso_remote_url_ph: 'https://… / ftp://… 指向 .iso 文件',
+    iso_target_pool: '目标存储池', iso_md5: 'MD5 校验值（可选）', iso_md5_ph: '填写后将在上传完成后比对，留空则跳过校验',
+    iso_progress: '上传进度', iso_uploading: '正在上传…', iso_verifying: '正在校验 MD5…',
+    iso_uploaded_ok: 'ISO「{name}」已上传完成', iso_size_label: '文件大小',
+
+    // ===== P12 备份：新建任务对话框 =====
+    bk_new_title: '新建备份任务',
+    bk_scope: '备份对象', bk_scope_vm: '单台虚拟机', bk_scope_vms: '多台虚拟机', bk_scope_cluster: '整个集群',
+    bk_pick_vm: '选择虚拟机', bk_pick_vms: '选择多台虚拟机（可多选）', bk_pick_cluster: '选择集群',
+    bk_mode_label: '备份模式', bk_mode_differential: '差异', bk_mode_full_desc: '完整备份所有数据',
+    bk_mode_inc_desc: '仅备份上次备份后变化的数据', bk_mode_diff_desc: '备份上次全量后变化的数据',
+    bk_location: '存储位置', bk_loc_local: '本地存储池', bk_loc_nfs: 'NFS 共享', bk_loc_s3: 'S3 对象存储',
+    bk_loc_target: '目标位置', bk_s3_bucket: 'S3 Bucket', bk_s3_bucket_ph: '如：cnf-backup',
+    bk_nfs_path: 'NFS 路径', bk_nfs_path_ph: '如：192.168.10.50:/export/backup',
+    bk_sched_label: '调度策略', bk_sched_manual: '手动', bk_sched_cron: '定时（Cron）',
+    bk_cron_expr: 'Cron 表达式', bk_cron_ph: '如：0 3 * * *（每日 03:00）',
+    bk_retain_label: '保留策略', bk_retain_count: '保留最近 N 份', bk_retain_days: '保留最近 N 天',
+    bk_retain_n: '份数 / 天数', bk_created: '备份任务「{name}」已创建',
 
     // ===== 右键上下文菜单（分组标题 + 命令项 + 快捷键）=====
     ctx_group_power: '电源', ctx_group_console: '控制台', ctx_group_snapshot: '快照',
@@ -661,6 +698,7 @@ const dict = {
     // ===== Toolbar =====
     tb_search_ph: 'Search VMs / hosts / tasks…', tb_notifications: 'Notifications',
     tb_mark_all_read: 'Mark all read', tb_no_notifications: 'No notifications', tb_logout: 'Sign Out',
+    logout_success: 'Signed out, redirecting to login…',
 
     // ===== Dashboard extras =====
     dash_clusters_n: 'clusters', dash_connected: 'Connected', dash_connected_total: 'hosts online',
@@ -675,6 +713,42 @@ const dict = {
     tpl_spec: 'Spec', tpl_usage: 'Deployments', tpl_updated: 'Updated',
     iso_title: 'ISO Library', iso_upload: 'Upload ISO', iso_os_type: 'OS Type',
     iso_size: 'Size', iso_pool: 'Pool', iso_uploaded: 'Uploaded', iso_checksum: 'Checksum',
+
+    // ===== P8 Template: new / deploy dialogs =====
+    tpl_new_title: 'New Template', tpl_source: 'Creation Method',
+    tpl_src_convert: 'Convert from Stopped VM', tpl_src_blank: 'New Blank Template',
+    tpl_src_convert_hint: 'Convert a stopped VM into a reusable template (clone disk + generalize)',
+    tpl_src_blank_hint: 'Define a blank template from scratch; attach an ISO later to install the OS',
+    tpl_pick_vm: 'Source VM (must be stopped)', tpl_name_ph: 'e.g. tpl-rocky9-base',
+    tpl_guest_os: 'Guest OS', tpl_vcpu: 'vCPUs', tpl_mem: 'Memory (GB)', tpl_disk: 'System Disk (GB)',
+    tpl_tags: 'Preinstalled Tags', tpl_tags_ph: 'e.g. cloud-init, qemu-guest-agent (comma separated)',
+    tpl_no_stopped_vm: 'No stopped VM available to convert',
+    tpl_deploy_title: 'Deploy VM from Template', tpl_deploy_from: 'Source Template',
+    tpl_deploy_count: 'Deploy Count', tpl_deploy_prefix: 'VM Name Prefix', tpl_deploy_prefix_ph: 'e.g. web-prod-',
+    tpl_deploy_host: 'Target Host', tpl_deploy_batch_hint: 'When count > 1, VMs are named by prefix+index (web-prod-01, web-prod-02…)',
+    tpl_created: 'Template "{name}" created', tpl_deployed: 'Submitted deployment of {n} VM(s) from template "{name}"',
+
+    // ===== P9 ISO: upload dialog (local/URL + MD5) =====
+    iso_upload_title: 'Upload ISO Image', iso_src_local: 'Local File Upload', iso_src_url: 'Remote URL Download',
+    iso_local_file: 'Select Local ISO File', iso_local_pick: 'Click to choose a file (.iso)',
+    iso_remote_url: 'Download URL', iso_remote_url_ph: 'https://… / ftp://… pointing to a .iso file',
+    iso_target_pool: 'Target Pool', iso_md5: 'MD5 Checksum (optional)', iso_md5_ph: 'If set, verified after upload; leave blank to skip',
+    iso_progress: 'Upload Progress', iso_uploading: 'Uploading…', iso_verifying: 'Verifying MD5…',
+    iso_uploaded_ok: 'ISO "{name}" uploaded', iso_size_label: 'File Size',
+
+    // ===== P12 Backup: new job dialog =====
+    bk_new_title: 'New Backup Job',
+    bk_scope: 'Backup Scope', bk_scope_vm: 'Single VM', bk_scope_vms: 'Multiple VMs', bk_scope_cluster: 'Entire Cluster',
+    bk_pick_vm: 'Select VM', bk_pick_vms: 'Select VMs (multi-select)', bk_pick_cluster: 'Select Cluster',
+    bk_mode_label: 'Backup Mode', bk_mode_differential: 'Differential', bk_mode_full_desc: 'Back up all data',
+    bk_mode_inc_desc: 'Only data changed since last backup', bk_mode_diff_desc: 'Data changed since last full backup',
+    bk_location: 'Storage Location', bk_loc_local: 'Local Pool', bk_loc_nfs: 'NFS Share', bk_loc_s3: 'S3 Object Storage',
+    bk_loc_target: 'Target Location', bk_s3_bucket: 'S3 Bucket', bk_s3_bucket_ph: 'e.g. cnf-backup',
+    bk_nfs_path: 'NFS Path', bk_nfs_path_ph: 'e.g. 192.168.10.50:/export/backup',
+    bk_sched_label: 'Schedule', bk_sched_manual: 'Manual', bk_sched_cron: 'Scheduled (Cron)',
+    bk_cron_expr: 'Cron Expression', bk_cron_ph: 'e.g. 0 3 * * * (daily 03:00)',
+    bk_retain_label: 'Retention', bk_retain_count: 'Keep last N copies', bk_retain_days: 'Keep last N days',
+    bk_retain_n: 'Copies / Days', bk_created: 'Backup job "{name}" created',
 
     // ===== Context menu =====
     ctx_group_power: 'Power', ctx_group_console: 'Console', ctx_group_snapshot: 'Snapshot',

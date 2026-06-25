@@ -132,6 +132,28 @@ const App = {
     // ---- 用户菜单 ----
     const userOpen = ref(false)
 
+    // ---- P1/P22 退出登录 ----
+    //  企业级登出：清除本地会话凭证（JWT Token / 用户信息）→ 关闭后端会话 → 跳转登录页。
+    //  Token 键名与 fn9 前后端对接保持一致（window.api 注入 Authorization 时读取同一键）。
+    const TOKEN_KEYS = ['cnf_token', 'cnf_refresh_token', 'cnf_user']
+    const logout = async () => {
+      userOpen.value = false
+      try {
+        // 通知后端注销当前会话（失败不阻塞前端登出）
+        await api('/auth/logout', { method: 'POST' }).catch(() => {})
+      } finally {
+        // 清除所有本地会话凭证
+        TOKEN_KEYS.forEach((k) => { try { localStorage.removeItem(k); sessionStorage.removeItem(k) } catch (e) {} })
+        if (window.cnfToast) window.cnfToast(t('logout_success'), 'success')
+        // 跳转登录页（原型环境下无独立 /login 路由时回到根，触发重新认证）
+        setTimeout(() => {
+          const loginUrl = window.CNF_LOGIN_URL || '/login'
+          // 若部署了独立登录页则跳转，否则刷新当前页（清空内存态，回到登录态）
+          window.location.href = loginUrl
+        }, 350)
+      }
+    }
+
     // ---- 全局搜索（透传到计算资源 VM 列表） ----
     const searchText = ref('')
     const onSearch = () => {
@@ -195,7 +217,7 @@ const App = {
       modules, currentModule, currentTab, expanded, currentComponent,
       go, toggleModule, breadcrumb,
       notifications, notifOpen, unreadCount, markAllRead, notifIcon,
-      userOpen, searchText, onSearch,
+      userOpen, searchText, onSearch, logout,
       setTheme, themeLabel, setLocale,
       wizardOpen, hostWizardOpen, hostWizardPreset, onHostWizardDone, currentFocus, t,
     }
@@ -307,7 +329,7 @@ const App = {
               <div class="popover-head"><strong>administrator</strong></div>
               <div class="menu-row" @click="go('system','config'); userOpen=false"><i class="fas fa-gear"></i> {{ t('nav_mod_system') }}</div>
               <div class="menu-row" @click="go('access','audit'); userOpen=false"><i class="fas fa-clipboard-list"></i> {{ t('nav_acc_audit') }}</div>
-              <div class="menu-row danger"><i class="fas fa-right-from-bracket"></i> {{ t('tb_logout') }}</div>
+              <div class="menu-row danger" @click="logout"><i class="fas fa-right-from-bracket"></i> {{ t('tb_logout') }}</div>
             </div>
           </div>
         </div>

@@ -56,12 +56,75 @@ const AvailabilityView = {
 
     // ---- 备份 ----
     const backupJobs = ref([])
+    const clusters = ref([])
+    const allVms = ref([])
+
+    // ---- P12 新建备份任务对话框（对象/模式/位置/调度/保留 完整生命周期）----
+    const bkDlg = reactive({
+      open: false, busy: false,
+      form: {
+        name: '', scope: 'vm', target_vm_ids: [], cluster_id: null,
+        mode: 'full', location: 'local', location_target: '',
+        schedule_type: 'cron', cron: '0 3 * * *',
+        retention_type: 'count', retention_value: 7,
+      },
+      errors: {},
+    })
+    const openBackupCreate = async () => {
+      if (!allVms.value.length) allVms.value = await api('/vms')
+      if (!clusters.value.length) clusters.value = await api('/clusters')
+      bkDlg.form = {
+        name: '', scope: 'vm', target_vm_ids: allVms.value[0] ? [allVms.value[0].id] : [], cluster_id: clusters.value[0]?.id || null,
+        mode: 'full', location: 'local', location_target: '',
+        schedule_type: 'cron', cron: '0 3 * * *', retention_type: 'count', retention_value: 7,
+      }
+      bkDlg.errors = {}; bkDlg.busy = false; bkDlg.open = true
+    }
+    const toggleBkVm = (id) => {
+      const i = bkDlg.form.target_vm_ids.indexOf(id)
+      if (i >= 0) bkDlg.form.target_vm_ids.splice(i, 1); else bkDlg.form.target_vm_ids.push(id)
+    }
+    const validateBk = () => {
+      const e = {}
+      if (!(bkDlg.form.name || '').trim()) e.name = t('op_required')
+      if (bkDlg.form.scope === 'vm' && !bkDlg.form.target_vm_ids.length) e.target = t('op_required')
+      if (bkDlg.form.scope === 'vms' && !bkDlg.form.target_vm_ids.length) e.target = t('op_required')
+      if (bkDlg.form.scope === 'cluster' && !bkDlg.form.cluster_id) e.target = t('op_required')
+      if (bkDlg.form.schedule_type === 'cron' && !(bkDlg.form.cron || '').trim()) e.cron = t('op_required')
+      if (bkDlg.form.location !== 'local' && !(bkDlg.form.location_target || '').trim()) e.location_target = t('op_required')
+      if (!bkDlg.form.retention_value || bkDlg.form.retention_value < 1) e.retention_value = t('op_invalid')
+      bkDlg.errors = e
+      return Object.keys(e).length === 0
+    }
+    const saveBackup = async () => {
+      if (!validateBk()) return
+      bkDlg.busy = true
+      try {
+        const f = bkDlg.form
+        const body = {
+          name: f.name.trim(), scope: f.scope,
+          target_vm_ids: f.scope === 'cluster' ? [] : (f.scope === 'vm' ? f.target_vm_ids.slice(0, 1) : f.target_vm_ids),
+          cluster_id: f.scope === 'cluster' ? f.cluster_id : null,
+          mode: f.mode, location: f.location, location_target: f.location_target,
+          schedule_type: f.schedule_type, cron: f.cron,
+          retention_type: f.retention_type, retention_value: Number(f.retention_value),
+        }
+        const res = await api('/backup-jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        if (res.error) { showToast(res.error); bkDlg.busy = false; return }
+        backupJobs.value.unshift(res)
+        bkDlg.open = false
+        showToast(t('bk_created').replace('{name}', res.name))
+      } catch (err) { showToast(t('toast_failed')) }
+      finally { bkDlg.busy = false }
+    }
+    const runBackupNow = (b) => { showToast(t('bk_run_now') + ': ' + b.name + ' （原型）') }
 
     const showToast = (m) => { toast.value = m; setTimeout(() => (toast.value = ''), 3200) }
     const bkStatusBadge = (s) => ({
       success: { cls: 'apple-badge--running', label: t('bk_status_success') },
       warning: { cls: 'apple-badge--warning', label: t('bk_status_warning') },
       failed: { cls: 'apple-badge--error', label: t('bk_status_failed') },
+      pending: { cls: 'apple-badge--stopped', label: t('st_pending') || '待运行' },
     }[s] || { cls: '', label: s })
 
     const load = async () => {
@@ -80,7 +143,8 @@ const AvailabilityView = {
     watch(() => props.tab, load)
 
     return { props, configs, sel, hosts, members, pick, saveHA, toast,
-             vms, history, form, job, gpuBlocked, submitMigration, backupJobs, bkStatusBadge, t }
+             vms, history, form, job, gpuBlocked, submitMigration, backupJobs, bkStatusBadge, t,
+             clusters, allVms, bkDlg, openBackupCreate, toggleBkVm, saveBackup, runBackupNow }
   },
   template: `
     <div>
@@ -176,7 +240,7 @@ const AvailabilityView = {
 
       <!-- ===== backup：备份恢复 ===== -->
       <template v-else>
-        <div class="toolbar"><span class="muted">{{ backupJobs.length }} {{ t('bk_title') }}</span><div class="spacer"></div><button class="apple-btn apple-btn--primary"><i class="fas fa-plus"></i> {{ t('bk_add') }}</button></div>
+        <div class="toolbar"><span class="muted">{{ backupJobs.length }} {{ t('bk_title') }}</span><div class="spacer"></div><button class="apple-btn apple-btn--primary" @click="openBackupCreate"><i class="fas fa-plus"></i> {{ t('bk_add') }}</button></div>
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
             <thead><tr><th>{{ t('bk_job_name') }}</th><th>{{ t('bk_target') }}</th><th>{{ t('bk_schedule') }}</th><th>{{ t('bk_mode') }}</th><th>{{ t('bk_retention') }}</th><th>{{ t('bk_last_run') }}</th><th>{{ t('bk_last_status') }}</th><th>{{ t('bk_last_size') }}</th><th>{{ t('actions') }}</th></tr></thead>
@@ -185,17 +249,131 @@ const AvailabilityView = {
                 <td><strong>{{ b.name }}</strong></td>
                 <td class="mono">{{ b.target_vm }}</td>
                 <td>{{ b.schedule }}</td>
-                <td><span class="apple-badge">{{ b.mode==='full'?t('bk_mode_full'):t('bk_mode_incremental') }}</span></td>
+                <td><span class="apple-badge">{{ b.mode==='full'?t('bk_mode_full'):(b.mode==='differential'?t('bk_mode_differential'):t('bk_mode_incremental')) }}</span></td>
                 <td>{{ b.retention }}</td>
                 <td class="muted">{{ b.last_run }}</td>
                 <td><span class="apple-badge" :class="bkStatusBadge(b.last_status).cls"><span class="dot"></span>{{ bkStatusBadge(b.last_status).label }}</span></td>
                 <td class="mono">{{ b.last_size_gb }} GB</td>
-                <td><button class="apple-btn apple-btn--ghost apple-btn--sm"><i class="fas fa-play"></i> {{ t('bk_run_now') }}</button></td>
+                <td><button class="apple-btn apple-btn--ghost apple-btn--sm" @click="runBackupNow(b)"><i class="fas fa-play"></i> {{ t('bk_run_now') }}</button></td>
               </tr>
             </tbody>
           </table>
         </div>
       </template>
+
+      <!-- ===== P12 新建备份任务对话框 ===== -->
+      <div v-if="bkDlg.open" class="modal-mask" @click.self="!bkDlg.busy && (bkDlg.open=false)">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-head"><i class="fas fa-shield-halved" style="color:var(--color-green)"></i> {{ t('bk_new_title') }}</div>
+          <div class="modal-body">
+            <div class="form-row">
+              <label>{{ t('bk_job_name') }} <span class="req">*</span></label>
+              <input class="apple-input" v-model="bkDlg.form.name" :class="{invalid:bkDlg.errors.name}" placeholder="bk-prod-daily" />
+              <div v-if="bkDlg.errors.name" class="form-err">{{ bkDlg.errors.name }}</div>
+            </div>
+
+            <!-- 备份对象 -->
+            <div class="form-row">
+              <label>{{ t('bk_scope') }}</label>
+              <div class="seg-control" style="background:var(--bg-secondary)">
+                <button class="seg" :class="{active:bkDlg.form.scope==='vm'}" @click="bkDlg.form.scope='vm'">{{ t('bk_scope_vm') }}</button>
+                <button class="seg" :class="{active:bkDlg.form.scope==='vms'}" @click="bkDlg.form.scope='vms'">{{ t('bk_scope_vms') }}</button>
+                <button class="seg" :class="{active:bkDlg.form.scope==='cluster'}" @click="bkDlg.form.scope='cluster'">{{ t('bk_scope_cluster') }}</button>
+              </div>
+            </div>
+            <div class="form-row" v-if="bkDlg.form.scope==='vm'">
+              <label>{{ t('bk_pick_vm') }} <span class="req">*</span></label>
+              <select class="apple-input" :value="bkDlg.form.target_vm_ids[0]" @change="bkDlg.form.target_vm_ids=[Number($event.target.value)]" :class="{invalid:bkDlg.errors.target}">
+                <option v-for="v in allVms" :key="v.id" :value="v.id">{{ v.name }} · {{ v.os }}</option>
+              </select>
+              <div v-if="bkDlg.errors.target" class="form-err">{{ bkDlg.errors.target }}</div>
+            </div>
+            <div class="form-row" v-else-if="bkDlg.form.scope==='vms'">
+              <label>{{ t('bk_pick_vms') }} <span class="req">*</span></label>
+              <div class="multi-pick" :class="{invalid:bkDlg.errors.target}">
+                <label class="multi-pick-item" v-for="v in allVms" :key="v.id" :class="{active:bkDlg.form.target_vm_ids.includes(v.id)}">
+                  <input type="checkbox" :checked="bkDlg.form.target_vm_ids.includes(v.id)" @change="toggleBkVm(v.id)" />
+                  <span>{{ v.name }} <span class="muted">· {{ v.os }}</span></span>
+                </label>
+              </div>
+              <div v-if="bkDlg.errors.target" class="form-err">{{ bkDlg.errors.target }}</div>
+            </div>
+            <div class="form-row" v-else>
+              <label>{{ t('bk_pick_cluster') }} <span class="req">*</span></label>
+              <select class="apple-input" v-model="bkDlg.form.cluster_id" :class="{invalid:bkDlg.errors.target}">
+                <option v-for="cl in clusters" :key="cl.id" :value="cl.id">{{ cl.name }}</option>
+              </select>
+              <div v-if="bkDlg.errors.target" class="form-err">{{ bkDlg.errors.target }}</div>
+            </div>
+
+            <!-- 备份模式 -->
+            <div class="form-row">
+              <label>{{ t('bk_mode_label') }}</label>
+              <div class="choice-cards" style="grid-template-columns:1fr 1fr 1fr">
+                <label class="choice-card" :class="{active:bkDlg.form.mode==='full'}"><input type="radio" value="full" v-model="bkDlg.form.mode" /><div><div class="cc-title">{{ t('bk_mode_full') }}</div><div class="cc-sub muted">{{ t('bk_mode_full_desc') }}</div></div></label>
+                <label class="choice-card" :class="{active:bkDlg.form.mode==='incremental'}"><input type="radio" value="incremental" v-model="bkDlg.form.mode" /><div><div class="cc-title">{{ t('bk_mode_incremental') }}</div><div class="cc-sub muted">{{ t('bk_mode_inc_desc') }}</div></div></label>
+                <label class="choice-card" :class="{active:bkDlg.form.mode==='differential'}"><input type="radio" value="differential" v-model="bkDlg.form.mode" /><div><div class="cc-title">{{ t('bk_mode_differential') }}</div><div class="cc-sub muted">{{ t('bk_mode_diff_desc') }}</div></div></label>
+              </div>
+            </div>
+
+            <!-- 存储位置 -->
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label>{{ t('bk_location') }}</label>
+                <select class="apple-input" v-model="bkDlg.form.location">
+                  <option value="local">{{ t('bk_loc_local') }}</option>
+                  <option value="nfs">{{ t('bk_loc_nfs') }}</option>
+                  <option value="s3">{{ t('bk_loc_s3') }}</option>
+                </select>
+              </div>
+              <div class="form-row" v-if="bkDlg.form.location==='nfs'">
+                <label>{{ t('bk_nfs_path') }} <span class="req">*</span></label>
+                <input class="apple-input mono" v-model="bkDlg.form.location_target" :class="{invalid:bkDlg.errors.location_target}" :placeholder="t('bk_nfs_path_ph')" />
+              </div>
+              <div class="form-row" v-else-if="bkDlg.form.location==='s3'">
+                <label>{{ t('bk_s3_bucket') }} <span class="req">*</span></label>
+                <input class="apple-input mono" v-model="bkDlg.form.location_target" :class="{invalid:bkDlg.errors.location_target}" :placeholder="t('bk_s3_bucket_ph')" />
+              </div>
+            </div>
+
+            <!-- 调度策略 -->
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label>{{ t('bk_sched_label') }}</label>
+                <div class="seg-control" style="background:var(--bg-secondary)">
+                  <button class="seg" :class="{active:bkDlg.form.schedule_type==='manual'}" @click="bkDlg.form.schedule_type='manual'">{{ t('bk_sched_manual') }}</button>
+                  <button class="seg" :class="{active:bkDlg.form.schedule_type==='cron'}" @click="bkDlg.form.schedule_type='cron'">{{ t('bk_sched_cron') }}</button>
+                </div>
+              </div>
+              <div class="form-row" v-if="bkDlg.form.schedule_type==='cron'">
+                <label>{{ t('bk_cron_expr') }} <span class="req">*</span></label>
+                <input class="apple-input mono" v-model="bkDlg.form.cron" :class="{invalid:bkDlg.errors.cron}" :placeholder="t('bk_cron_ph')" />
+              </div>
+            </div>
+
+            <!-- 保留策略 -->
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label>{{ t('bk_retain_label') }}</label>
+                <div class="seg-control" style="background:var(--bg-secondary)">
+                  <button class="seg" :class="{active:bkDlg.form.retention_type==='count'}" @click="bkDlg.form.retention_type='count'">{{ t('bk_retain_count') }}</button>
+                  <button class="seg" :class="{active:bkDlg.form.retention_type==='days'}" @click="bkDlg.form.retention_type='days'">{{ t('bk_retain_days') }}</button>
+                </div>
+              </div>
+              <div class="form-row">
+                <label>{{ t('bk_retain_n') }} <span class="req">*</span></label>
+                <input class="apple-input" type="number" min="1" max="365" v-model.number="bkDlg.form.retention_value" :class="{invalid:bkDlg.errors.retention_value}" />
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--secondary" :disabled="bkDlg.busy" @click="bkDlg.open=false">{{ t('op_cancel') }}</button>
+            <button class="apple-btn apple-btn--primary" :disabled="bkDlg.busy" @click="saveBackup">
+              <i v-if="bkDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-check"></i> {{ t('op_confirm') }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>`,
 }
 

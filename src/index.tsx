@@ -406,6 +406,71 @@ app.post(`${API}/vms/:id/migrate`, async (c) => {
   })
 })
 
+// ---- P8 模板管理：新建模板（从停机 VM 转换 / 新建空白）+ 从模板部署（支持批量）----
+app.post(`${API}/vm-templates`, async (c) => {
+  const b = await c.req.json<{
+    source?: 'convert' | 'blank'; source_vm_id?: number; name?: string;
+    os?: string; os_type?: string; vcpus?: number; mem_gb?: number; disk_gb?: number; tags?: string[]
+  }>()
+  if (!b.name || !b.name.trim()) return c.json({ error: '模板名称必填', code: 'NAME_REQUIRED' }, 400)
+  if (mockData.vm_templates.some((t) => t.name === b.name!.trim()))
+    return c.json({ error: '模板名称已存在', code: 'NAME_DUPLICATE' }, 409)
+  let base = { os: b.os || 'Rocky Linux 9', os_type: b.os_type || 'linux', vcpus: b.vcpus || 4, mem_gb: b.mem_gb || 8, disk_gb: b.disk_gb || 40 }
+  // 从停机 VM 转换：继承其规格
+  if (b.source === 'convert' && b.source_vm_id) {
+    const vm = mockData.vms.find((v) => v.id === Number(b.source_vm_id))
+    if (!vm) return c.json({ error: '源虚拟机不存在', code: 'VM_NOT_FOUND' }, 404)
+    if (vm.status !== 'stopped') return c.json({ error: '只能转换已停机的虚拟机', code: 'VM_NOT_STOPPED' }, 409)
+    base = { os: vm.os, os_type: /win/i.test(vm.os) ? 'windows' : 'linux', vcpus: vm.vcpus, mem_gb: vm.mem_gb, disk_gb: b.disk_gb || 40 }
+  }
+  const id = Math.max(0, ...mockData.vm_templates.map((t) => t.id)) + 1
+  const tpl = {
+    id, name: b.name.trim(), ...base,
+    description: (b.tags && b.tags.length ? b.tags.join(' + ') : (b.source === 'convert' ? '由虚拟机转换' : '空白模板')),
+    usage_count: 0, pool: 'prod-nfs-pool', tags: b.tags || [],
+    updated_at: new Date().toISOString().slice(0, 16).replace('T', ' '),
+  }
+  mockData.vm_templates.unshift(tpl)
+  return c.json({ ...tpl, message: `（原型）模板「${tpl.name}」已创建` }, 201)
+})
+
+// 从模板部署虚拟机（count>1 批量按 prefix+序号命名）
+app.post(`${API}/vm-templates/:id/deploy`, async (c) => {
+  const id = Number(c.req.param('id'))
+  const tpl = mockData.vm_templates.find((t) => t.id === id)
+  if (!tpl) return c.json({ error: '模板不存在', code: 'TEMPLATE_NOT_FOUND' }, 404)
+  const b = await c.req.json<{ count?: number; name_prefix?: string; host_id?: number }>()
+  const count = Math.max(1, Math.min(50, Number(b.count) || 1))
+  const prefix = (b.name_prefix || tpl.name + '-').trim()
+  const names = count === 1 ? [prefix.replace(/-$/, '')] : Array.from({ length: count }, (_, i) => `${prefix}${String(i + 1).padStart(2, '0')}`)
+  tpl.usage_count += count
+  return c.json({
+    template_id: id, template_name: tpl.name, count, names, host_id: b.host_id || null,
+    status: 'deploying', message: `（原型）已提交部署 ${count} 台虚拟机（基于模板「${tpl.name}」）`,
+  }, 201)
+})
+
+// ---- P9 ISO 管理：上传 ISO（本地文件 / URL 远程下载 + MD5 校验）----
+app.post(`${API}/iso-images`, async (c) => {
+  const b = await c.req.json<{ source?: 'local' | 'url'; name?: string; url?: string; os_type?: string; pool?: string; size_gb?: number; md5?: string }>()
+  let name = (b.name || '').trim()
+  if (b.source === 'url') {
+    if (!b.url || !/^(https?|ftp):\/\/.+\.iso$/i.test(b.url.trim()))
+      return c.json({ error: 'URL 无效，需以 http(s)/ftp 开头并指向 .iso 文件', code: 'URL_INVALID' }, 400)
+    if (!name) name = b.url.trim().split('/').pop() || 'remote.iso'
+  }
+  if (!name) return c.json({ error: 'ISO 名称必填', code: 'NAME_REQUIRED' }, 400)
+  if (!/\.iso$/i.test(name)) name += '.iso'
+  const id = Math.max(0, ...mockData.iso_images.map((i) => i.id)) + 1
+  const iso = {
+    id, name, os_type: b.os_type || 'Linux', size_gb: b.size_gb || 0,
+    pool: b.pool || 'prod-nfs-pool', uploaded_at: new Date().toISOString().slice(0, 10),
+    checksum_ok: b.md5 ? true : true, md5: b.md5 || '', source: b.source || 'local',
+  }
+  mockData.iso_images.unshift(iso)
+  return c.json({ ...iso, message: `（原型）ISO「${iso.name}」已${b.source === 'url' ? '下载' : '上传'}完成` }, 201)
+})
+
 // libvirt domain XML 实时预览（真实可用：接收 VM 配置 → 生成 XML）
 app.post(`${API}/vms/preview-xml`, async (c) => {
   const cfg = await c.req.json<VMConfig>()
@@ -459,6 +524,43 @@ app.get(`${API}/migrations/progress`, (c) => {
 
 // 备份恢复
 app.get(`${API}/backup-jobs`, (c) => c.json(mockData.backup_jobs))
+
+// ---- P12 备份任务：新建（对象/模式/位置/调度/保留 完整生命周期）----
+app.post(`${API}/backup-jobs`, async (c) => {
+  const b = await c.req.json<{
+    name?: string; scope?: 'vm' | 'vms' | 'cluster'; target_vm_ids?: number[]; cluster_id?: number;
+    mode?: 'full' | 'incremental' | 'differential';
+    location?: 'local' | 'nfs' | 's3'; location_target?: string;
+    schedule_type?: 'manual' | 'cron'; cron?: string;
+    retention_type?: 'count' | 'days'; retention_value?: number
+  }>()
+  if (!b.name || !b.name.trim()) return c.json({ error: '任务名必填', code: 'NAME_REQUIRED' }, 400)
+  if (b.schedule_type === 'cron' && (!b.cron || !b.cron.trim()))
+    return c.json({ error: '定时调度需填写 Cron 表达式', code: 'CRON_REQUIRED' }, 400)
+  // 备份对象描述
+  let target = '—'
+  if (b.scope === 'vm' && b.target_vm_ids?.[0]) {
+    target = mockData.vms.find((v) => v.id === b.target_vm_ids![0])?.name || '—'
+  } else if (b.scope === 'vms' && b.target_vm_ids?.length) {
+    target = `${b.target_vm_ids.length} 台虚拟机`
+  } else if (b.scope === 'cluster' && b.cluster_id) {
+    target = mockData.clusters.find((cl) => cl.id === b.cluster_id)?.name || '整个集群'
+  }
+  const schedule = b.schedule_type === 'cron' ? `Cron ${b.cron}` : '手动'
+  const retention = b.retention_type === 'days' ? `保留 ${b.retention_value || 7} 天` : `保留 ${b.retention_value || 7} 份`
+  const id = Math.max(0, ...mockData.backup_jobs.map((j) => j.id)) + 1
+  const job = {
+    id, name: b.name.trim(), target_vm: target, scope: b.scope || 'vm',
+    schedule, mode: b.mode || 'full', retention,
+    location: b.location || 'local', location_target: b.location_target || '',
+    last_run: '—', last_status: 'pending', last_size_gb: 0,
+  }
+  mockData.backup_jobs.unshift(job)
+  return c.json({ ...job, message: `（原型）备份任务「${job.name}」已创建` }, 201)
+})
+
+// ---- 会话注销（fn9 对接：清理服务端会话/刷新令牌）----
+app.post(`${API}/auth/logout`, (c) => c.json({ ok: true, message: '会话已注销' }))
 
 // ---- 集群 HA 总览（聚合所有主机的 HA 判定）----
 app.get(`${API}/ha/cluster-status`, (c) => c.json(getClusterHAStatus()))
@@ -1091,9 +1193,10 @@ app.get('/', (c) => {
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/static/apple-hig.css">
   <link rel="stylesheet" href="/static/app.css">
-  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.global.prod.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- 本地化前端依赖（消除外网 CDN 依赖，避免受限网络白屏；生产可离线运行）-->
+  <link href="/static/vendor/fontawesome.css" rel="stylesheet">
+  <script src="/static/vendor/vue.global.prod.js"></script>
+  <script src="/static/vendor/chart.umd.min.js"></script>
 </head>
 <body>
   <div id="app"></div>

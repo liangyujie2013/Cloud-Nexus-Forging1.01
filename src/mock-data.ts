@@ -193,9 +193,9 @@ export const mockData = {
 
   // ===================== 计算资源 · 模板管理 =====================
   vm_templates: [
-    { id: 1, name: 'tpl-rocky9-base', os: 'Rocky Linux 9', os_type: 'linux', description: '企业基线模板：cloud-init + qemu-guest-agent', vcpus: 4, mem_gb: 8, disk_gb: 40, usage_count: 23, pool: 'prod-nfs-pool', updated_at: '2026-06-10 10:20' },
-    { id: 2, name: 'tpl-ubuntu2204-cuda', os: 'Ubuntu 22.04 + CUDA 12', os_type: 'linux', description: 'AI 训练模板：CUDA / cuDNN / PyTorch 预装', vcpus: 16, mem_gb: 64, disk_gb: 120, usage_count: 9, pool: 'gpu-local-nvme', updated_at: '2026-06-18 16:42' },
-    { id: 3, name: 'tpl-win2022-std', os: 'Windows Server 2022', os_type: 'windows', description: 'Windows 标准模板：virtio 驱动 + RDP', vcpus: 4, mem_gb: 16, disk_gb: 80, usage_count: 5, pool: 'prod-iscsi-fast', updated_at: '2026-05-28 09:15' },
+    { id: 1, name: 'tpl-rocky9-base', os: 'Rocky Linux 9', os_type: 'linux', description: '企业基线模板：cloud-init + qemu-guest-agent', vcpus: 4, mem_gb: 8, disk_gb: 40, usage_count: 23, pool: 'prod-nfs-pool', tags: ['cloud-init', 'qemu-guest-agent'], updated_at: '2026-06-10 10:20' },
+    { id: 2, name: 'tpl-ubuntu2204-cuda', os: 'Ubuntu 22.04 + CUDA 12', os_type: 'linux', description: 'AI 训练模板：CUDA / cuDNN / PyTorch 预装', vcpus: 16, mem_gb: 64, disk_gb: 120, usage_count: 9, pool: 'gpu-local-nvme', tags: ['CUDA', 'cuDNN', 'PyTorch'], updated_at: '2026-06-18 16:42' },
+    { id: 3, name: 'tpl-win2022-std', os: 'Windows Server 2022', os_type: 'windows', description: 'Windows 标准模板：virtio 驱动 + RDP', vcpus: 4, mem_gb: 16, disk_gb: 80, usage_count: 5, pool: 'prod-iscsi-fast', tags: ['virtio', 'RDP'], updated_at: '2026-05-28 09:15' },
   ],
   // ===================== 计算资源 · ISO 镜像 =====================
   iso_images: [
@@ -279,10 +279,10 @@ export const mockData = {
 
   // ===================== 可用性管理 · 备份恢复 =====================
   backup_jobs: [
-    { id: 1, target_vm: 'db-postgres-01', schedule: '每日 03:00', mode: 'snapshot', retention: '保留 14 份', last_run: '2026-06-24 03:00', last_status: 'success', last_size_gb: 312 },
-    { id: 2, target_vm: 'web-prod-01', schedule: '每日 02:30', mode: 'snapshot', retention: '保留 7 份', last_run: '2026-06-24 02:30', last_status: 'success', last_size_gb: 18 },
-    { id: 3, target_vm: 'cache-redis-01', schedule: '每周日 04:00', mode: 'full', retention: '保留 4 份', last_run: '2026-06-22 04:00', last_status: 'warning', last_size_gb: 22 },
-    { id: 4, target_vm: 'ai-training-01', schedule: '手动', mode: 'full', retention: '保留 2 份', last_run: '2026-06-20 18:00', last_status: 'failed', last_size_gb: 0 },
+    { id: 1, name: 'bk-db-daily', target_vm: 'db-postgres-01', scope: 'vm', schedule: '每日 03:00', mode: 'incremental', retention: '保留 14 份', location: 'nfs', last_run: '2026-06-24 03:00', last_status: 'success', last_size_gb: 312 },
+    { id: 2, name: 'bk-web-daily', target_vm: 'web-prod-01', scope: 'vm', schedule: '每日 02:30', mode: 'incremental', retention: '保留 7 份', location: 'nfs', last_run: '2026-06-24 02:30', last_status: 'success', last_size_gb: 18 },
+    { id: 3, name: 'bk-cache-weekly', target_vm: 'cache-redis-01', scope: 'vm', schedule: '每周日 04:00', mode: 'full', retention: '保留 4 份', location: 'local', last_run: '2026-06-22 04:00', last_status: 'warning', last_size_gb: 22 },
+    { id: 4, name: 'bk-ai-manual', target_vm: 'ai-training-01', scope: 'vm', schedule: '手动', mode: 'full', retention: '保留 2 份', location: 's3', last_run: '2026-06-20 18:00', last_status: 'failed', last_size_gb: 0 },
   ],
 
   // ===================== 监控告警 · 告警规则 =====================

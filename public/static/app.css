@@ -705,6 +705,28 @@
 .modal-dialog.modal-lg { width: 600px; }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 
+/* ---- 单选卡片组（创建方式 / 来源选择 等）---- */
+.choice-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.choice-card {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; cursor: pointer;
+  border: 1.5px solid var(--separator); border-radius: var(--radius-md); transition: all var(--duration-base);
+  background: var(--bg-secondary);
+}
+.choice-card:hover { border-color: color-mix(in srgb, var(--color-blue) 40%, var(--separator)); }
+.choice-card.active { border-color: var(--color-blue); background: color-mix(in srgb, var(--color-blue) 8%, transparent); }
+.choice-card input[type="radio"] { margin-top: 3px; accent-color: var(--color-blue); }
+.choice-card .cc-title { font-weight: 600; font-size: 13.5px; }
+.choice-card .cc-title > i { color: var(--color-blue); margin-right: 6px; }
+.choice-card .cc-sub { font-size: 11.5px; margin-top: 3px; line-height: 1.45; }
+
+/* ---- 多选列表（备份多台 VM 选择）---- */
+.multi-pick { max-height: 160px; overflow-y: auto; border: 1px solid var(--separator); border-radius: var(--radius-md); padding: 4px; }
+.multi-pick.invalid { border-color: var(--color-red); }
+.multi-pick-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
+.multi-pick-item:hover { background: var(--bg-secondary); }
+.multi-pick-item.active { background: color-mix(in srgb, var(--color-blue) 10%, transparent); }
+.multi-pick-item input[type="checkbox"] { accent-color: var(--color-blue); }
+
 /* ---- 添加主机向导：步骤条 ---- */
 .host-wizard-body { min-height: 240px; }
 .wiz-steps { display: flex; align-items: center; gap: 6px; padding: 14px 22px; border-bottom: 1px solid var(--separator); }

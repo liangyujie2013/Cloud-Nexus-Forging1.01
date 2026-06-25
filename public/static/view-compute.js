@@ -213,6 +213,158 @@ const ComputeView = {
     const refresh = () => { selected.value = new Set(); load(); toast(t('toast_success'), 'success') }
     const setFilter = (v) => { statusFilter.value = v; filterOpen.value = false; page.value = 1 }
 
+    // =====================================================================
+    //  P8 模板管理：新建模板（从停机 VM 转换 / 新建空白）+ 从模板部署（批量）
+    // =====================================================================
+    const GUEST_OS = [
+      'Rocky Linux 9', 'Rocky Linux 8', 'RHEL 9', 'RHEL 8', 'RHEL 10',
+      'Ubuntu 22.04', 'Ubuntu 20.04', 'CentOS Stream 9',
+      'Windows Server 2022', 'Windows Server 2019', 'Windows 11', 'Windows 10',
+    ]
+    const hostsRef = ref([])
+    const ensureHosts = async () => { if (!hostsRef.value.length) hostsRef.value = await api('/hosts') }
+
+    // ---- 新建模板对话框 ----
+    const tplDlg = reactive({
+      open: false, busy: false,
+      form: { source: 'blank', source_vm_id: null, name: '', os: 'Rocky Linux 9', vcpus: 4, mem_gb: 8, disk_gb: 40, tags: '' },
+      errors: {},
+    })
+    const stoppedVms = computed(() => vms.value.filter((v) => v.status === 'stopped'))
+    const openTplCreate = async () => {
+      // 需要 VM 列表来支持「从停机 VM 转换」
+      if (!vms.value.length) vms.value = await api('/vms')
+      tplDlg.form = { source: 'blank', source_vm_id: stoppedVms.value[0]?.id || null, name: '', os: 'Rocky Linux 9', vcpus: 4, mem_gb: 8, disk_gb: 40, tags: '' }
+      tplDlg.errors = {}; tplDlg.busy = false; tplDlg.open = true
+    }
+    // 选择源 VM 时自动带出其规格
+    watch(() => tplDlg.form.source_vm_id, (id) => {
+      if (tplDlg.form.source !== 'convert' || !id) return
+      const vm = vms.value.find((v) => v.id === Number(id))
+      if (vm) { tplDlg.form.os = vm.os; tplDlg.form.vcpus = vm.vcpus; tplDlg.form.mem_gb = vm.mem_gb }
+    })
+    const validateTpl = () => {
+      const e = {}
+      const name = (tplDlg.form.name || '').trim()
+      if (!name) e.name = t('op_required')
+      else if (!/^[A-Za-z0-9._-]{2,40}$/.test(name)) e.name = t('op_invalid')
+      if (tplDlg.form.source === 'convert' && !tplDlg.form.source_vm_id) e.source_vm_id = t('op_required')
+      if (!tplDlg.form.vcpus || tplDlg.form.vcpus < 1) e.vcpus = t('op_invalid')
+      if (!tplDlg.form.mem_gb || tplDlg.form.mem_gb < 1) e.mem_gb = t('op_invalid')
+      if (!tplDlg.form.disk_gb || tplDlg.form.disk_gb < 1) e.disk_gb = t('op_invalid')
+      tplDlg.errors = e
+      return Object.keys(e).length === 0
+    }
+    const saveTpl = async () => {
+      if (!validateTpl()) return
+      tplDlg.busy = true
+      try {
+        const tags = (tplDlg.form.tags || '').split(',').map((s) => s.trim()).filter(Boolean)
+        const res = await api('/vm-templates', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: tplDlg.form.source, source_vm_id: tplDlg.form.source_vm_id,
+            name: tplDlg.form.name.trim(), os: tplDlg.form.os, os_type: /win/i.test(tplDlg.form.os) ? 'windows' : 'linux',
+            vcpus: Number(tplDlg.form.vcpus), mem_gb: Number(tplDlg.form.mem_gb), disk_gb: Number(tplDlg.form.disk_gb), tags,
+          }),
+        })
+        if (res.error) { toast(res.error, 'error'); return }
+        templates.value.unshift(res)
+        tplDlg.open = false
+        toast(t('tpl_created').replace('{name}', res.name), 'success')
+      } catch (e) { toast(t('toast_failed'), 'error') }
+      finally { tplDlg.busy = false }
+    }
+
+    // ---- 从模板部署对话框 ----
+    const deployDlg = reactive({ open: false, busy: false, tpl: null, form: { count: 1, name_prefix: '', host_id: null }, errors: {} })
+    const openDeploy = async (tp) => {
+      await ensureHosts()
+      deployDlg.tpl = tp
+      deployDlg.form = { count: 1, name_prefix: tp.name + '-', host_id: hostsRef.value.find((h) => h.status === 'connected')?.id || null }
+      deployDlg.errors = {}; deployDlg.busy = false; deployDlg.open = true
+    }
+    const validateDeploy = () => {
+      const e = {}
+      const n = Number(deployDlg.form.count)
+      if (!n || n < 1 || n > 50) e.count = t('op_invalid')
+      if (n > 1 && !(deployDlg.form.name_prefix || '').trim()) e.name_prefix = t('op_required')
+      if (!deployDlg.form.host_id) e.host_id = t('op_required')
+      deployDlg.errors = e
+      return Object.keys(e).length === 0
+    }
+    const doDeploy = async () => {
+      if (!validateDeploy()) return
+      deployDlg.busy = true
+      try {
+        const res = await api('/vm-templates/' + deployDlg.tpl.id + '/deploy', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ count: Number(deployDlg.form.count), name_prefix: deployDlg.form.name_prefix.trim(), host_id: deployDlg.form.host_id }),
+        })
+        if (res.error) { toast(res.error, 'error'); return }
+        const tp = templates.value.find((x) => x.id === deployDlg.tpl.id)
+        if (tp) tp.usage_count = (tp.usage_count || 0) + Number(deployDlg.form.count)
+        deployDlg.open = false
+        toast(t('tpl_deployed').replace('{n}', res.count).replace('{name}', deployDlg.tpl.name), 'success')
+      } catch (e) { toast(t('toast_failed'), 'error') }
+      finally { deployDlg.busy = false }
+    }
+
+    // =====================================================================
+    //  P9 ISO 上传：本地文件 / URL 远程下载 + MD5 校验 + 进度反馈
+    // =====================================================================
+    const isoDlg = reactive({
+      open: false, busy: false, progress: 0, phase: '',
+      form: { source: 'local', name: '', url: '', os_type: 'Linux', pool: 'prod-nfs-pool', md5: '', size_gb: 0 },
+      errors: {},
+    })
+    const openIsoUpload = () => {
+      isoDlg.form = { source: 'local', name: '', url: '', os_type: 'Linux', pool: 'prod-nfs-pool', md5: '', size_gb: 0 }
+      isoDlg.errors = {}; isoDlg.busy = false; isoDlg.progress = 0; isoDlg.phase = ''; isoDlg.open = true
+    }
+    const onIsoFile = (ev) => {
+      const f = ev.target.files && ev.target.files[0]
+      if (!f) return
+      isoDlg.form.name = f.name
+      isoDlg.form.size_gb = Math.round((f.size / 1073741824) * 100) / 100
+    }
+    const validateIso = () => {
+      const e = {}
+      if (isoDlg.form.source === 'url') {
+        const u = (isoDlg.form.url || '').trim()
+        if (!u) e.url = t('op_required')
+        else if (!/^(https?|ftp):\/\/.+\.iso$/i.test(u)) e.url = t('op_invalid')
+      } else {
+        if (!(isoDlg.form.name || '').trim()) e.name = t('op_required')
+      }
+      isoDlg.errors = e
+      return Object.keys(e).length === 0
+    }
+    const submitIso = async () => {
+      if (!validateIso()) return
+      isoDlg.busy = true; isoDlg.progress = 0
+      isoDlg.phase = isoDlg.form.source === 'url' ? t('iso_uploading') : t('iso_uploading')
+      // 进度动画（原型：模拟上传/下载 + 校验）
+      await new Promise((resolve) => {
+        const timer = setInterval(() => {
+          isoDlg.progress = Math.min(100, isoDlg.progress + 12 + Math.random() * 10)
+          if (isoDlg.progress >= 100) { clearInterval(timer); resolve() }
+        }, 180)
+      })
+      if (isoDlg.form.md5) { isoDlg.phase = t('iso_verifying'); await new Promise((r) => setTimeout(r, 500)) }
+      try {
+        const res = await api('/iso-images', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...isoDlg.form, size_gb: Number(isoDlg.form.size_gb) || (isoDlg.form.source === 'url' ? 2.0 : 0) }),
+        })
+        if (res.error) { toast(res.error, 'error'); isoDlg.busy = false; return }
+        isos.value.unshift(res)
+        isoDlg.open = false
+        toast(t('iso_uploaded_ok').replace('{name}', res.name), 'success')
+      } catch (e) { toast(t('toast_failed'), 'error') }
+      finally { isoDlg.busy = false }
+    }
+
     return {
       props, vms, templates, isos, loading, ctx, onCtxAction,
       kw, statusFilter, filterOpen, batchOpen, selected, page,
@@ -221,6 +373,10 @@ const ComputeView = {
       editDlg, openEdit, saveEdit,
       migDlg, openMigrate, doMigrate,
       statusBadge, openWizard, refresh, setFilter, t,
+      GUEST_OS, hostsRef, stoppedVms,
+      tplDlg, openTplCreate, saveTpl,
+      deployDlg, openDeploy, doDeploy,
+      isoDlg, openIsoUpload, onIsoFile, submitIso,
     }
   },
   template: `
@@ -307,13 +463,13 @@ const ComputeView = {
         <div class="toolbar">
           <span class="muted">{{ templates.length }} {{ t('tpl_title') }}</span>
           <div class="spacer"></div>
-          <button class="apple-btn apple-btn--primary"><i class="fas fa-plus"></i> {{ t('tpl_add') }}</button>
+          <button class="apple-btn apple-btn--primary" @click="openTplCreate"><i class="fas fa-plus"></i> {{ t('tpl_add') }}</button>
         </div>
         <div class="grid grid-2">
           <div class="apple-card" v-for="tp in templates" :key="tp.id">
             <div class="flex between" style="margin-bottom:10px">
               <div><strong>{{ tp.name }}</strong><div class="muted" style="font-size:12px;margin-top:2px"><i class="fas fa-compact-disc"></i> {{ tp.os }}</div></div>
-              <button class="apple-btn apple-btn--secondary"><i class="fas fa-rocket"></i> {{ t('tpl_deploy') }}</button>
+              <button class="apple-btn apple-btn--secondary" @click="openDeploy(tp)"><i class="fas fa-rocket"></i> {{ t('tpl_deploy') }}</button>
             </div>
             <div class="muted" style="font-size:13px;margin-bottom:12px">{{ tp.description }}</div>
             <div class="gpu-stats">
@@ -330,7 +486,7 @@ const ComputeView = {
         <div class="toolbar">
           <span class="muted">{{ isos.length }} {{ t('iso_title') }}</span>
           <div class="spacer"></div>
-          <button class="apple-btn apple-btn--primary"><i class="fas fa-upload"></i> {{ t('iso_upload') }}</button>
+          <button class="apple-btn apple-btn--primary" @click="openIsoUpload"><i class="fas fa-upload"></i> {{ t('iso_upload') }}</button>
         </div>
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
@@ -428,6 +584,169 @@ const ComputeView = {
             <button class="apple-btn apple-btn--secondary" :disabled="migDlg.busy" @click="migDlg.open=false">{{ t('op_cancel') }}</button>
             <button class="apple-btn apple-btn--primary" :disabled="migDlg.busy || !migDlg.targetId" @click="doMigrate">
               <i v-if="migDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-truck-fast"></i> {{ t('mig_start') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== P8 新建模板对话框（从停机 VM 转换 / 新建空白）===== -->
+      <div v-if="tplDlg.open" class="modal-mask" @click.self="!tplDlg.busy && (tplDlg.open=false)">
+        <div class="modal-dialog">
+          <div class="modal-head"><i class="fas fa-clone" style="color:var(--color-blue)"></i> {{ t('tpl_new_title') }}</div>
+          <div class="modal-body">
+            <div class="form-row">
+              <label>{{ t('tpl_source') }}</label>
+              <div class="choice-cards">
+                <label class="choice-card" :class="{active:tplDlg.form.source==='blank'}">
+                  <input type="radio" value="blank" v-model="tplDlg.form.source" />
+                  <div><div class="cc-title"><i class="fas fa-file"></i> {{ t('tpl_src_blank') }}</div><div class="cc-sub muted">{{ t('tpl_src_blank_hint') }}</div></div>
+                </label>
+                <label class="choice-card" :class="{active:tplDlg.form.source==='convert'}">
+                  <input type="radio" value="convert" v-model="tplDlg.form.source" />
+                  <div><div class="cc-title"><i class="fas fa-arrow-right-arrow-left"></i> {{ t('tpl_src_convert') }}</div><div class="cc-sub muted">{{ t('tpl_src_convert_hint') }}</div></div>
+                </label>
+              </div>
+            </div>
+            <div class="form-row" v-if="tplDlg.form.source==='convert'">
+              <label>{{ t('tpl_pick_vm') }} <span class="req">*</span></label>
+              <select class="apple-input" v-model="tplDlg.form.source_vm_id" :class="{invalid:tplDlg.errors.source_vm_id}">
+                <option v-if="!stoppedVms.length" :value="null" disabled>{{ t('tpl_no_stopped_vm') }}</option>
+                <option v-for="v in stoppedVms" :key="v.id" :value="v.id">{{ v.name }} · {{ v.os }} · {{ v.vcpus }}vCPU / {{ v.mem_gb }}GB</option>
+              </select>
+              <div v-if="tplDlg.errors.source_vm_id" class="form-err">{{ tplDlg.errors.source_vm_id }}</div>
+            </div>
+            <div class="form-row">
+              <label>{{ t('col_name') }} <span class="req">*</span></label>
+              <input class="apple-input" v-model="tplDlg.form.name" :class="{invalid:tplDlg.errors.name}" :placeholder="t('tpl_name_ph')" />
+              <div v-if="tplDlg.errors.name" class="form-err">{{ tplDlg.errors.name }}</div>
+            </div>
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label>{{ t('tpl_guest_os') }}</label>
+                <select class="apple-input" v-model="tplDlg.form.os" :disabled="tplDlg.form.source==='convert'">
+                  <option v-for="o in GUEST_OS" :key="o" :value="o">{{ o }}</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>{{ t('tpl_vcpu') }} <span class="req">*</span></label>
+                <input class="apple-input" type="number" min="1" max="128" v-model.number="tplDlg.form.vcpus" :class="{invalid:tplDlg.errors.vcpus}" />
+              </div>
+            </div>
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label>{{ t('tpl_mem') }} <span class="req">*</span></label>
+                <input class="apple-input" type="number" min="1" max="2048" v-model.number="tplDlg.form.mem_gb" :class="{invalid:tplDlg.errors.mem_gb}" />
+              </div>
+              <div class="form-row">
+                <label>{{ t('tpl_disk') }} <span class="req">*</span></label>
+                <input class="apple-input" type="number" min="1" max="8192" v-model.number="tplDlg.form.disk_gb" :class="{invalid:tplDlg.errors.disk_gb}" />
+              </div>
+            </div>
+            <div class="form-row">
+              <label>{{ t('tpl_tags') }}</label>
+              <input class="apple-input" v-model="tplDlg.form.tags" :placeholder="t('tpl_tags_ph')" />
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--secondary" :disabled="tplDlg.busy" @click="tplDlg.open=false">{{ t('op_cancel') }}</button>
+            <button class="apple-btn apple-btn--primary" :disabled="tplDlg.busy" @click="saveTpl">
+              <i v-if="tplDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-check"></i> {{ t('op_confirm') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== P8 从模板部署对话框（支持批量）===== -->
+      <div v-if="deployDlg.open" class="modal-mask" @click.self="!deployDlg.busy && (deployDlg.open=false)">
+        <div class="modal-dialog">
+          <div class="modal-head"><i class="fas fa-rocket" style="color:var(--color-indigo)"></i> {{ t('tpl_deploy_title') }}</div>
+          <div class="modal-body">
+            <div class="info-alert"><i class="fas fa-circle-info"></i> {{ t('tpl_deploy_from') }}: <strong>{{ deployDlg.tpl && deployDlg.tpl.name }}</strong> · {{ deployDlg.tpl && deployDlg.tpl.os }} · {{ deployDlg.tpl && deployDlg.tpl.vcpus }}vCPU / {{ deployDlg.tpl && deployDlg.tpl.mem_gb }}GB</div>
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label>{{ t('tpl_deploy_count') }} <span class="req">*</span></label>
+                <input class="apple-input" type="number" min="1" max="50" v-model.number="deployDlg.form.count" :class="{invalid:deployDlg.errors.count}" />
+                <div v-if="deployDlg.errors.count" class="form-err">{{ deployDlg.errors.count }}</div>
+              </div>
+              <div class="form-row">
+                <label>{{ t('tpl_deploy_host') }} <span class="req">*</span></label>
+                <select class="apple-input" v-model="deployDlg.form.host_id" :class="{invalid:deployDlg.errors.host_id}">
+                  <option v-for="h in hostsRef" :key="h.id" :value="h.id" :disabled="h.status!=='connected'">{{ h.name }} · {{ h.ip }}{{ h.status!=='connected'?' (不可用)':'' }}</option>
+                </select>
+                <div v-if="deployDlg.errors.host_id" class="form-err">{{ deployDlg.errors.host_id }}</div>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>{{ t('tpl_deploy_prefix') }}<span v-if="deployDlg.form.count>1" class="req"> *</span></label>
+              <input class="apple-input" v-model="deployDlg.form.name_prefix" :class="{invalid:deployDlg.errors.name_prefix}" :placeholder="t('tpl_deploy_prefix_ph')" />
+              <div v-if="deployDlg.errors.name_prefix" class="form-err">{{ deployDlg.errors.name_prefix }}</div>
+              <div class="muted" style="font-size:12px;margin-top:4px" v-if="deployDlg.form.count>1">{{ t('tpl_deploy_batch_hint') }}</div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--secondary" :disabled="deployDlg.busy" @click="deployDlg.open=false">{{ t('op_cancel') }}</button>
+            <button class="apple-btn apple-btn--primary" :disabled="deployDlg.busy" @click="doDeploy">
+              <i v-if="deployDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-rocket"></i> {{ t('tpl_deploy') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== P9 ISO 上传对话框（本地/URL + MD5 + 进度）===== -->
+      <div v-if="isoDlg.open" class="modal-mask" @click.self="!isoDlg.busy && (isoDlg.open=false)">
+        <div class="modal-dialog">
+          <div class="modal-head"><i class="fas fa-upload" style="color:var(--color-blue)"></i> {{ t('iso_upload_title') }}</div>
+          <div class="modal-body">
+            <div class="form-row">
+              <div class="choice-cards">
+                <label class="choice-card" :class="{active:isoDlg.form.source==='local'}">
+                  <input type="radio" value="local" v-model="isoDlg.form.source" :disabled="isoDlg.busy" />
+                  <div><div class="cc-title"><i class="fas fa-hard-drive"></i> {{ t('iso_src_local') }}</div></div>
+                </label>
+                <label class="choice-card" :class="{active:isoDlg.form.source==='url'}">
+                  <input type="radio" value="url" v-model="isoDlg.form.source" :disabled="isoDlg.busy" />
+                  <div><div class="cc-title"><i class="fas fa-link"></i> {{ t('iso_src_url') }}</div></div>
+                </label>
+              </div>
+            </div>
+            <div class="form-row" v-if="isoDlg.form.source==='local'">
+              <label>{{ t('iso_local_file') }} <span class="req">*</span></label>
+              <input type="file" accept=".iso" @change="onIsoFile" :disabled="isoDlg.busy" />
+              <div v-if="isoDlg.form.name" class="muted" style="font-size:12px;margin-top:4px">{{ isoDlg.form.name }}<span v-if="isoDlg.form.size_gb"> · {{ isoDlg.form.size_gb }} GB</span></div>
+              <div v-if="isoDlg.errors.name" class="form-err">{{ isoDlg.errors.name }}</div>
+            </div>
+            <div class="form-row" v-else>
+              <label>{{ t('iso_remote_url') }} <span class="req">*</span></label>
+              <input class="apple-input" v-model="isoDlg.form.url" :class="{invalid:isoDlg.errors.url}" :placeholder="t('iso_remote_url_ph')" :disabled="isoDlg.busy" />
+              <div v-if="isoDlg.errors.url" class="form-err">{{ isoDlg.errors.url }}</div>
+            </div>
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label>{{ t('iso_os_type') }}</label>
+                <select class="apple-input" v-model="isoDlg.form.os_type" :disabled="isoDlg.busy">
+                  <option value="Linux">Linux</option><option value="Windows">Windows</option><option value="Drivers">Drivers</option><option value="Other">Other</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>{{ t('iso_target_pool') }}</label>
+                <select class="apple-input" v-model="isoDlg.form.pool" :disabled="isoDlg.busy">
+                  <option value="prod-nfs-pool">prod-nfs-pool</option><option value="prod-iscsi-fast">prod-iscsi-fast</option><option value="backup-nfs">backup-nfs</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>{{ t('iso_md5') }}</label>
+              <input class="apple-input mono" v-model="isoDlg.form.md5" :placeholder="t('iso_md5_ph')" :disabled="isoDlg.busy" />
+            </div>
+            <div v-if="isoDlg.busy" style="margin-top:6px">
+              <div class="flex between" style="margin-bottom:6px"><span class="muted">{{ isoDlg.phase }}</span><span class="mono">{{ Math.round(isoDlg.progress) }}%</span></div>
+              <div class="usage-bar" style="height:10px"><div class="fill" :style="{width:isoDlg.progress+'%',background:'var(--color-blue)',transition:'width .2s'}"></div></div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="apple-btn apple-btn--secondary" :disabled="isoDlg.busy" @click="isoDlg.open=false">{{ t('op_cancel') }}</button>
+            <button class="apple-btn apple-btn--primary" :disabled="isoDlg.busy" @click="submitIso">
+              <i v-if="isoDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-upload"></i> {{ t('iso_upload') }}
             </button>
           </div>
         </div>
