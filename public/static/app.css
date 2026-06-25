@@ -656,6 +656,34 @@
 /* ---- 数据中心统计卡 ---- */
 .dc-card { transition: box-shadow var(--duration-base), border-color var(--duration-base); }
 
+/* ===== P2: 基础设施 KPI 汇总条 ===== */
+.infra-kpi-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+@media (max-width: 880px) { .infra-kpi-bar { grid-template-columns: 1fr 1fr; } }
+.infra-kpi { display: flex; align-items: center; gap: 14px; background: var(--bg-card, #fff); border: 1px solid var(--separator); border-radius: var(--radius-lg, 14px); padding: 16px 18px; }
+.ik-ico { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; }
+.ik-num { font-size: 26px; font-weight: 700; line-height: 1.05; }
+.ik-num .ik-sub { font-size: 15px; color: var(--text-secondary); font-weight: 500; }
+.ik-lbl { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+/* ===== P2: 数据中心卡片 2.0 ===== */
+.dc-card2 { transition: box-shadow var(--duration-base), border-color var(--duration-base); }
+.dc-card2.focused { border-color: var(--color-blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-blue) 22%, transparent); }
+.dc2-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.dc2-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dc2-ico { width: 40px; height: 40px; border-radius: 11px; background: rgba(0,122,255,.12); color: var(--color-blue); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+.dc2-name { font-size: 16px; font-weight: 700; }
+.dc2-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.health-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+.health-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+.health-pill.ok { background: rgba(52,199,89,.14); color: var(--color-green); } .health-pill.ok .dot { background: var(--color-green); }
+.health-pill.warn { background: rgba(255,149,0,.14); color: var(--color-orange); } .health-pill.warn .dot { background: var(--color-orange); }
+.health-pill.bad { background: rgba(255,59,48,.14); color: var(--color-red); } .health-pill.bad .dot { background: var(--color-red); }
+.dc2-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.dc2-metric { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 12px 14px; }
+.dc2-metric .m-k { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+.dc2-metric .m-v { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.dc2-bar { margin-top: 2px; }
+
 /* ---- 跨视图聚焦高亮（拓扑树点击跳转定位）---- */
 .focused, tr.focused > td {
   animation: focus-pulse 2.2s ease-out;

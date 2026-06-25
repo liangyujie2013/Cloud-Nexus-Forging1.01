@@ -27,6 +27,25 @@ const InfrastructureView = {
     const clusters = computed(() => store.clusterStats.value)
     const hosts = computed(() => store.hostStats.value)
 
+    // ---- P2：全局 KPI 汇总条（数据中心页顶部，给出大盘视图）----
+    const infraSummary = computed(() => {
+      const dcs = datacenters.value
+      const cls = clusters.value
+      const hs = hosts.value
+      const hostOnline = hs.filter((h) => h.status === 'connected').length
+      const vmCount = hs.reduce((s, h) => s + (h.vm_count || 0), 0)
+      const vmRunning = hs.reduce((s, h) => s + (h.vm_running || 0), 0)
+      return {
+        dc: dcs.length, cluster: cls.length,
+        host: hs.length, hostOnline,
+        vm: vmCount, vmRunning,
+        hostRate: hs.length ? Math.round((hostOnline / hs.length) * 100) : 0,
+        vmRate: vmCount ? Math.round((vmRunning / vmCount) * 100) : 0,
+      }
+    })
+    // 每个 DC 的健康率（主机在线占比），用于卡片右上角徽标
+    const dcHealth = (dc) => (dc.host_count ? Math.round((dc.host_online / dc.host_count) * 100) : 0)
+
     // ---- 主机详情展开（显示该主机上运行的 VM 列表）----
     const expandedHost = ref(null)
     const toggleHost = (id) => { expandedHost.value = expandedHost.value === id ? null : id }
@@ -131,6 +150,7 @@ const InfrastructureView = {
 
     return {
       props, pools, datacenters, clusters, hosts,
+      infraSummary, dcHealth,
       expandedHost, toggleHost, blockDlg, addHost,
       delDatacenter, delCluster, delHost,
       dcDlg, openDcCreate, openDcEdit, saveDc,
@@ -140,38 +160,55 @@ const InfrastructureView = {
   },
   template: `
     <div>
-      <!-- ===== datacenter：资源拓扑树 + DC 统计卡 ===== -->
+      <!-- ===== datacenter：KPI 汇总条 + 资源拓扑树 + DC 卡片（P2 专业化 / P3 添加主机）===== -->
       <template v-if="props.tab==='datacenter'">
+        <!-- P2：顶部全局 KPI 汇总条（vCenter/CloudTower 风格大盘）-->
+        <div class="infra-kpi-bar">
+          <div class="infra-kpi"><div class="ik-ico" style="background:rgba(0,122,255,.12);color:var(--color-blue)"><i class="fas fa-building"></i></div><div><div class="ik-num">{{ infraSummary.dc }}</div><div class="ik-lbl">{{ t('nav_infra_datacenter') }}</div></div></div>
+          <div class="infra-kpi"><div class="ik-ico" style="background:rgba(88,86,214,.12);color:var(--color-indigo)"><i class="fas fa-layer-group"></i></div><div><div class="ik-num">{{ infraSummary.cluster }}</div><div class="ik-lbl">{{ t('nav_infra_clusters') }}</div></div></div>
+          <div class="infra-kpi"><div class="ik-ico" style="background:rgba(255,149,0,.12);color:var(--color-orange)"><i class="fas fa-server"></i></div><div><div class="ik-num">{{ infraSummary.hostOnline }}<span class="ik-sub">/{{ infraSummary.host }}</span></div><div class="ik-lbl">{{ t('host_machine') }} · {{ t('dash_online') }} {{ infraSummary.hostRate }}%</div></div></div>
+          <div class="infra-kpi"><div class="ik-ico" style="background:rgba(52,199,89,.12);color:var(--color-green)"><i class="fas fa-desktop"></i></div><div><div class="ik-num">{{ infraSummary.vmRunning }}<span class="ik-sub">/{{ infraSummary.vm }}</span></div><div class="ik-lbl">{{ t('dash_vms') }} · {{ t('dash_running') }} {{ infraSummary.vmRate }}%</div></div></div>
+        </div>
         <div class="crud-toolbar">
           <button class="apple-btn apple-btn--primary" @click="openDcCreate"><i class="fas fa-plus"></i> {{ t('dc_create') }}</button>
+          <button class="apple-btn apple-btn--secondary" @click="addHost(0)"><i class="fas fa-server"></i> {{ t('hw_add_host') }}</button>
           <div class="spacer"></div>
-          <span class="muted" style="font-size:13px">{{ datacenters.length }} {{ t('nav_infra_datacenter') }}</span>
+          <span class="muted" style="font-size:13px"><i class="fas fa-info-circle"></i> {{ t('topo_full_hint') }}</span>
         </div>
-        <div class="muted" style="margin-bottom:12px"><i class="fas fa-info-circle"></i> {{ t('topo_full_hint') }}</div>
         <div class="infra-topo-layout">
           <!-- 左：资源拓扑树 -->
           <TopologyTree />
-          <!-- 右：数据中心统计卡 -->
+          <!-- 右：数据中心卡片（清晰分层 + 容量进度条 + 行内添加主机）-->
           <div class="infra-topo-right">
-            <div class="grid grid-1" style="gap:12px">
-              <div class="apple-card dc-card" v-for="dc in datacenters" :key="dc.id"
+            <div class="grid grid-1" style="gap:14px">
+              <div class="apple-card dc-card2" v-for="dc in datacenters" :key="dc.id"
                    :class="{focused: focusType==='datacenter' && focusId===dc.id}">
-                <div class="flex between" style="margin-bottom:12px">
-                  <div><i class="fas fa-building" style="color:var(--color-blue)"></i> <strong>{{ dc.name }}</strong>
-                    <div class="muted" style="font-size:12px;margin-top:2px">{{ dc.location }} · {{ dc.description }}</div>
+                <div class="dc2-head">
+                  <div class="dc2-title">
+                    <span class="dc2-ico"><i class="fas fa-building"></i></span>
+                    <div>
+                      <div class="dc2-name">{{ dc.name }}</div>
+                      <div class="muted" style="font-size:12px"><i class="fas fa-location-dot"></i> {{ dc.location || '—' }}<template v-if="dc.description"> · {{ dc.description }}</template></div>
+                    </div>
                   </div>
-                  <div class="flex" style="gap:6px;align-items:center">
-                    <span class="apple-badge apple-badge--running"><span class="dot"></span>{{ dc.status }}</span>
+                  <div class="dc2-actions">
+                    <span class="health-pill" :class="dcHealth(dc)>=100?'ok':(dcHealth(dc)>=60?'warn':'bad')"><span class="dot"></span>{{ dcHealth(dc) }}% {{ t('dash_online') }}</span>
+                    <button class="icon-btn" :title="t('hw_add_host')" @click="addHost(0)"><i class="fas fa-server"></i></button>
                     <button class="icon-btn" :title="t('op_edit')" @click="openDcEdit(dc)"><i class="fas fa-pen"></i></button>
                     <button class="icon-btn danger" :title="t('op_delete')" @click="delDatacenter(dc)"><i class="fas fa-trash"></i></button>
                   </div>
                 </div>
-                <div class="gpu-stats">
-                  <div class="gpu-stat"><div class="k">{{ t('nav_infra_clusters') }}</div><div class="v">{{ dc.cluster_count }}</div></div>
-                  <div class="gpu-stat"><div class="k">{{ t('host_machine') }}</div><div class="v">{{ dc.host_online }}/{{ dc.host_count }}</div></div>
-                  <div class="gpu-stat"><div class="k">{{ t('dash_vms') }}</div><div class="v">{{ dc.vm_running }}/{{ dc.vm_count }}</div></div>
+                <div class="dc2-metrics">
+                  <div class="dc2-metric"><div class="m-k"><i class="fas fa-layer-group" style="color:var(--color-indigo)"></i> {{ t('nav_infra_clusters') }}</div><div class="m-v">{{ dc.cluster_count }}</div></div>
+                  <div class="dc2-metric"><div class="m-k"><i class="fas fa-server" style="color:var(--color-orange)"></i> {{ t('host_machine') }}</div><div class="m-v">{{ dc.host_online }}<span class="muted" style="font-size:14px">/{{ dc.host_count }}</span></div></div>
+                  <div class="dc2-metric"><div class="m-k"><i class="fas fa-desktop" style="color:var(--color-green)"></i> {{ t('dash_vms') }}</div><div class="m-v">{{ dc.vm_running }}<span class="muted" style="font-size:14px">/{{ dc.vm_count }}</span></div></div>
+                </div>
+                <div class="dc2-bar">
+                  <div class="flex between" style="font-size:12px;margin-bottom:4px"><span class="muted">{{ t('host_machine') }} {{ t('dash_online') }}</span><span class="mono">{{ dcHealth(dc) }}%</span></div>
+                  <div class="usage-bar"><div class="fill" :style="{width:dcHealth(dc)+'%',background:dcHealth(dc)>=100?'var(--color-green)':(dcHealth(dc)>=60?'var(--color-orange)':'var(--color-red)')}"></div></div>
                 </div>
               </div>
+              <div v-if="!datacenters.length" class="apple-card" style="text-align:center;padding:40px"><i class="fas fa-inbox" style="font-size:32px;color:var(--text-tertiary)"></i><div class="muted" style="margin-top:10px">{{ t('op_no_data') }}</div></div>
             </div>
           </div>
         </div>
