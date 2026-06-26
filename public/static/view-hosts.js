@@ -91,30 +91,94 @@ const HostsView = {
       return Array.from(map.values())
     })
 
-    // 单台主机管理网络编辑对话框
-    const netDlg = reactive({ open: false, busy: false, host: null, form: {}, errors: {} })
-    const openNetEdit = (h) => {
-      netDlg.host = h
-      netDlg.form = { ip: h.ip || '', netmask: h.netmask || '255.255.255.0', gateway: h.gateway || '', mgmt_vlan: h.mgmt_vlan ?? '', mgmt_nic: h.mgmt_nic || 'bond0' }
+    // 单台主机管理网络编辑对话框 —— 真实读取网卡（名称/MAC/UUID/模式 DHCP|static/IP/掩码/网关），
+    // 并支持 DHCP↔静态切换、写配置生效（后端 nmcli）。
+    const netDlg = reactive({
+      open: false, busy: false, loading: false, host: null,
+      nics: [], selected: null,        // 真实网卡列表 + 当前选中设备
+      info: null, loadError: '',
+      form: { mode: 'dhcp', device: '', ipv4: '', netmask: '255.255.255.0', gateway: '', dns: '' },
+      steps: [], errors: {}
+    })
+    // 选中某网卡 → 用其真实配置回填表单
+    const pickNic = (dev) => {
+      const n = netDlg.nics.find((x) => x.device === dev)
+      if (!n) return
+      netDlg.selected = dev
+      netDlg.form = {
+        mode: n.mode === 'static' ? 'static' : (n.mode === 'dhcp' ? 'dhcp' : 'dhcp'),
+        device: n.device,
+        ipv4: n.ipv4 || '',
+        netmask: n.netmask || '255.255.255.0',
+        gateway: n.gateway || '',
+        dns: (n.dns || []).join(', ')
+      }
       netDlg.errors = {}
+      netDlg.steps = []
+    }
+    const openNetEdit = async (h) => {
+      netDlg.host = h
+      netDlg.nics = []; netDlg.selected = null; netDlg.info = null
+      netDlg.loadError = ''; netDlg.errors = {}; netDlg.steps = []
+      netDlg.form = { mode: 'dhcp', device: '', ipv4: '', netmask: '255.255.255.0', gateway: '', dns: '' }
       netDlg.open = true
+      netDlg.loading = true
+      try {
+        // api() 在成功时解包 {data:...} → res 即为网卡数据对象；
+        // 出错（NO_CREDENTIAL/SSH_UNREACHABLE/COLLECT_FAILED）时透传 {error,code,data}。
+        const res = await api('/hosts/' + h.id + '/network')
+        if (!res || res.error || res.reachable === false) {
+          netDlg.loadError = (res && res.error) || '无法读取主机网卡（凭据缺失或主机不可达）'
+        } else {
+          netDlg.info = res
+          netDlg.nics = (res.nics || []).filter((n) => n.device !== 'lo')
+          // 默认选中默认路由出口网卡，否则第一块物理网卡
+          const def = netDlg.nics.find((n) => n.device === res.default_dev) ||
+                      netDlg.nics.find((n) => n.is_physical) || netDlg.nics[0]
+          if (def) pickNic(def.device)
+          else netDlg.loadError = '未发现可配置网卡'
+        }
+      } catch (err) {
+        netDlg.loadError = t('op_failed') || '读取网卡失败'
+      } finally { netDlg.loading = false }
     }
     const submitNet = async () => {
       const e = {}
-      if (!ipv4Re.test(netDlg.form.ip)) e.ip = t('hmn_ip_invalid')
-      if (!ipv4Re.test(netDlg.form.netmask)) e.netmask = t('hmn_netmask_invalid')
-      if (netDlg.form.gateway && !ipv4Re.test(netDlg.form.gateway)) e.gateway = t('hmn_gateway_invalid')
-      const vlan = netDlg.form.mgmt_vlan
-      if (vlan !== '' && (Number(vlan) < 0 || Number(vlan) > 4094)) e.mgmt_vlan = t('hmn_vlan_invalid')
+      if (!netDlg.form.device) e.device = '请选择网卡'
+      if (netDlg.form.mode === 'static') {
+        if (!ipv4Re.test(netDlg.form.ipv4)) e.ipv4 = t('hmn_ip_invalid')
+        if (!ipv4Re.test(netDlg.form.netmask)) e.netmask = t('hmn_netmask_invalid')
+        if (netDlg.form.gateway && !ipv4Re.test(netDlg.form.gateway)) e.gateway = t('hmn_gateway_invalid')
+      }
       netDlg.errors = e
       if (Object.keys(e).length) return
       netDlg.busy = true
+      netDlg.steps = []
       try {
-        const res = await api('/hosts/' + netDlg.host.id + '/network', { method: 'PUT', body: JSON.stringify(netDlg.form) })
-        if (res && res.error) { netDlg.errors = { ip: res.code === 'IP_CONFLICT' ? t('hmn_ip_conflict') : res.error }; return }
-        toast(res.message, 'success')
+        const payload = { device: netDlg.form.device, mode: netDlg.form.mode }
+        if (netDlg.form.mode === 'static') {
+          payload.ipv4 = netDlg.form.ipv4
+          payload.netmask = netDlg.form.netmask
+          payload.gateway = netDlg.form.gateway
+          payload.dns = netDlg.form.dns
+        }
+        const res = await api('/hosts/' + netDlg.host.id + '/network', { method: 'PUT', body: JSON.stringify(payload) })
+        if (res && res.error) {
+          netDlg.steps = res.steps || []
+          netDlg.errors = { device: res.error }
+          toast(res.error, 'error')
+          return
+        }
+        // 成功时 api() 解包 data → res 即 {steps:[...]}
+        netDlg.steps = (res && res.steps) || []
+        toast(t('toast_success') || '主机网络已更新并生效', 'success')
+        // 重新读取以反映最新模式（res 即网卡数据对象）
+        const fresh = await api('/hosts/' + netDlg.host.id + '/network')
+        if (fresh && !fresh.error && fresh.reachable !== false) {
+          netDlg.nics = (fresh.nics || []).filter((n) => n.device !== 'lo')
+          if (netDlg.selected) pickNic(netDlg.selected)
+        }
         await store.fetchAll()
-        netDlg.open = false
       } catch (err) { toast(t('op_failed'), 'error') } finally { netDlg.busy = false }
     }
 
@@ -381,7 +445,7 @@ const HostsView = {
       selectedId, detail, ha, detailTab, loading, showDetailView, detailHost, detailVMs,
       toggleMaintenance, maintBusy, blockDlg, gotoMigrate,
       hostCtx, onHostCtxAction,
-      clusterGroups, netDlg, openNetEdit, submitNet, batchDlg, openBatch, submitBatch,
+      clusterGroups, netDlg, openNetEdit, submitNet, pickNic, batchDlg, openBatch, submitBatch,
       haCheckList, haStatusColor, haStatusText, overallColor, overallText, evIcon, evColor,
       iommuBusy, pciBusy, gpuBusy, toggleIommu, togglePci, switchGpuMode, releaseGpu,
       ptState, gpuModeText, iommuConfirm, hwNetEdit, startHwNetEdit, saveHwNet,
@@ -810,22 +874,58 @@ const HostsView = {
       </div>
     </template>
 
-    <!-- 单台主机管理网络编辑对话框 -->
+    <!-- 单台主机管理网络编辑对话框 —— 真实网卡 + DHCP/静态切换 -->
     <div v-if="netDlg.open" class="modal-mask" @click.self="netDlg.open=false">
-      <div class="modal-dialog">
+      <div class="modal-dialog" style="max-width:640px">
         <div class="modal-head"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('hmn_edit_title') }} <span class="muted" style="font-weight:400">· {{ netDlg.host && netDlg.host.name }}</span></div>
         <div class="modal-body">
-          <div class="form-grid-2">
-            <div class="form-row"><label class="req">{{ t('hmn_col_ip') }}</label><input v-model="netDlg.form.ip" :class="{invalid:netDlg.errors.ip}" placeholder="192.168.1.100"><div v-if="netDlg.errors.ip" class="form-err">{{ netDlg.errors.ip }}</div></div>
-            <div class="form-row"><label class="req">{{ t('hmn_col_netmask') }}</label><input v-model="netDlg.form.netmask" :class="{invalid:netDlg.errors.netmask}" placeholder="255.255.255.0"><div v-if="netDlg.errors.netmask" class="form-err">{{ netDlg.errors.netmask }}</div></div>
-            <div class="form-row"><label>{{ t('hmn_col_gateway') }}</label><input v-model="netDlg.form.gateway" :class="{invalid:netDlg.errors.gateway}" placeholder="192.168.1.1"><div v-if="netDlg.errors.gateway" class="form-err">{{ netDlg.errors.gateway }}</div></div>
-            <div class="form-row"><label>{{ t('hmn_col_vlan') }}</label><input type="number" min="0" max="4094" v-model.number="netDlg.form.mgmt_vlan" :class="{invalid:netDlg.errors.mgmt_vlan}" placeholder="10"><div v-if="netDlg.errors.mgmt_vlan" class="form-err">{{ netDlg.errors.mgmt_vlan }}</div></div>
-            <div class="form-row"><label>{{ t('hmn_col_nic') }}</label><input v-model="netDlg.form.mgmt_nic" placeholder="bond0"></div>
-          </div>
+          <!-- 加载/错误态 -->
+          <div v-if="netDlg.loading" class="muted" style="padding:18px;text-align:center"><i class="fas fa-spinner fa-spin"></i> 正在读取主机网卡…</div>
+          <div v-else-if="netDlg.loadError" class="form-err" style="padding:12px;background:rgba(255,59,48,.08);border-radius:8px"><i class="fas fa-triangle-exclamation"></i> {{ netDlg.loadError }}</div>
+          <div v-else-if="!netDlg.nics.length" class="muted" style="padding:18px;text-align:center">未发现可配置网卡</div>
+          <template v-else>
+            <!-- 网卡选择 -->
+            <div class="form-row" style="margin-bottom:12px">
+              <label class="req">选择网卡</label>
+              <select v-model="netDlg.selected" @change="pickNic(netDlg.selected)" class="apple-input" style="width:100%">
+                <option v-for="n in netDlg.nics" :key="n.device" :value="n.device">
+                  {{ n.device }} · {{ n.type }} · {{ n.mode==='dhcp'?'DHCP':(n.mode==='static'?'静态':n.mode) }}{{ n.ipv4 ? (' · '+n.ipv4) : '' }}
+                </option>
+              </select>
+            </div>
+            <!-- 当前网卡真实信息（只读展示 MAC/UUID/状态） -->
+            <div v-if="netDlg.selected" class="hnv-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;margin:6px 0 14px;font-size:13px">
+              <div class="hnv-item"><span class="muted">MAC</span> <strong class="mono">{{ (netDlg.nics.find(x=>x.device===netDlg.selected)||{}).mac || '—' }}</strong></div>
+              <div class="hnv-item"><span class="muted">状态</span> <strong>{{ (netDlg.nics.find(x=>x.device===netDlg.selected)||{}).state || '—' }}</strong></div>
+              <div class="hnv-item" style="grid-column:1/3"><span class="muted">连接 UUID</span> <strong class="mono" style="font-size:11px">{{ (netDlg.nics.find(x=>x.device===netDlg.selected)||{}).conn_uuid || '—' }}</strong></div>
+            </div>
+            <!-- 模式切换 -->
+            <div class="form-row" style="margin-bottom:12px">
+              <label>寻址模式</label>
+              <div style="display:flex;gap:18px;align-items:center">
+                <label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="radio" value="dhcp" v-model="netDlg.form.mode"> DHCP（自动获取）</label>
+                <label style="display:flex;gap:6px;align-items:center;font-weight:500"><input type="radio" value="static" v-model="netDlg.form.mode"> 静态 IP</label>
+              </div>
+              <div v-if="netDlg.errors.device" class="form-err">{{ netDlg.errors.device }}</div>
+            </div>
+            <!-- 静态参数 -->
+            <div v-if="netDlg.form.mode==='static'" class="form-grid-2">
+              <div class="form-row"><label class="req">{{ t('hmn_col_ip') }}</label><input v-model="netDlg.form.ipv4" :class="{invalid:netDlg.errors.ipv4}" placeholder="192.168.1.100"><div v-if="netDlg.errors.ipv4" class="form-err">{{ netDlg.errors.ipv4 }}</div></div>
+              <div class="form-row"><label class="req">{{ t('hmn_col_netmask') }}</label><input v-model="netDlg.form.netmask" :class="{invalid:netDlg.errors.netmask}" placeholder="255.255.255.0"><div v-if="netDlg.errors.netmask" class="form-err">{{ netDlg.errors.netmask }}</div></div>
+              <div class="form-row"><label>{{ t('hmn_col_gateway') }}</label><input v-model="netDlg.form.gateway" :class="{invalid:netDlg.errors.gateway}" placeholder="192.168.1.1"><div v-if="netDlg.errors.gateway" class="form-err">{{ netDlg.errors.gateway }}</div></div>
+              <div class="form-row"><label>DNS</label><input v-model="netDlg.form.dns" placeholder="8.8.8.8, 1.1.1.1"></div>
+            </div>
+            <div v-else class="muted" style="font-size:13px;padding:8px 0"><i class="fas fa-circle-info"></i> 将清空静态地址，改由 DHCP 自动获取 IP/网关/DNS。</div>
+            <!-- 执行步骤回显 -->
+            <div v-if="netDlg.steps.length" style="margin-top:12px;padding:10px;background:rgba(52,199,89,.08);border-radius:8px;font-size:12px">
+              <div v-for="(s,i) in netDlg.steps" :key="i" class="mono"><i class="fas fa-check" :style="{color:C.green}"></i> {{ s }}</div>
+            </div>
+            <div class="hosts-pick-hint" style="margin-top:12px;font-size:12px"><i class="fas fa-triangle-exclamation"></i> 修改 IP 可能导致与该主机的连接短暂中断；改完后平台会自动重新读取确认。</div>
+          </template>
         </div>
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" @click="netDlg.open=false">{{ t('op_cancel') }}</button>
-          <button class="apple-btn apple-btn--primary" :disabled="netDlg.busy" @click="submitNet"><i v-if="netDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="netDlg.busy || netDlg.loading || !netDlg.nics.length" @click="submitNet"><i v-if="netDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
         </div>
       </div>
     </div>

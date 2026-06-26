@@ -72,6 +72,9 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/hosts/:id/enable-tcp", h.enableHostTCP, h.Mw.RequirePermission("host.update"))
 	// ---- 主机运维：实时状态 / 监控 / 防火墙 / SELinux / SSH 端口 / 改密码 ----
 	api.Get("/hosts/:id/status", h.getHostStatus, h.Mw.RequirePermission("host.read"))
+	// 主机网络：真实读取网卡（名称/MAC/UUID/模式/IP/掩码/网关）+ DHCP↔静态切换写配置
+	api.Get("/hosts/:id/network", h.getHostNetwork, h.Mw.RequirePermission("host.read"))
+	api.Put("/hosts/:id/network", h.updateHostNetwork, h.Mw.RequirePermission("host.update"))
 
 	// ---- 离线安装包仓库（自动部署 libvirt/KVM 时源不可用的兜底） ----
 	api.Get("/offline-packages", h.listOfflinePackages, h.Mw.RequirePermission("host.read"))
