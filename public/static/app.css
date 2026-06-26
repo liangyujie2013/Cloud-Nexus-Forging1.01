@@ -363,6 +363,22 @@
   transition: all var(--duration-fast);
 }
 .icon-btn:hover { color: var(--color-blue); border-color: var(--color-blue); }
+
+/* 后端模式徽标：demo（Mock）/ real（Go 后端） */
+.cnf-backend-badge {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px;
+  margin-left: 14px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  letter-spacing: 0.5px; cursor: pointer; border: 1px solid transparent;
+  transition: all var(--duration-fast); user-select: none;
+}
+.cnf-backend-badge.is-demo {
+  color: #8a6d00; background: #fff7e0; border-color: #f2d98a;
+}
+.cnf-backend-badge.is-demo:hover { background: #ffefc2; }
+.cnf-backend-badge.is-real {
+  color: #0a6b2f; background: #e3f8ec; border-color: #9fdcb8;
+}
+.cnf-backend-badge.is-real:hover { background: #d2f2e0; }
 .notif-badge {
   position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 4px;
   border-radius: 9px; background: var(--color-red); color: #fff;

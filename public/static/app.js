@@ -132,6 +132,24 @@ const App = {
     // ---- 用户菜单 ----
     const userOpen = ref(false)
 
+    // ---- 后端模式（demo / real）：真实 MVP 闭环切换 ----
+    const backendMode = ref((window.CNF_BACKEND && window.CNF_BACKEND.mode) || 'demo')
+    const toggleBackend = () => {
+      const next = backendMode.value === 'real' ? 'demo' : 'real'
+      if (next === 'real') {
+        const base = window.prompt(
+          '切换到真实 Go 后端。请输入 Go 后端 API 地址：\n（同源部署可填 /api/v1；跨域填 http://<服务器IP>:8080/api/v1）',
+          (window.CNF_BACKEND && window.CNF_BACKEND.realBase) || 'http://localhost:8080/api/v1'
+        )
+        if (base === null) return // 取消
+        if (window.cnfToast) window.cnfToast('已切换到真实后端，需先登录（admin/admin123）', 'info')
+        window.cnfSetBackend('real', base.trim())
+      } else {
+        if (window.cnfToast) window.cnfToast('已切换回 Demo Mock 后端', 'info')
+        window.cnfSetBackend('demo')
+      }
+    }
+
     // ---- P1/P22 退出登录 ----
     //  企业级登出：清除本地会话凭证（JWT Token / 用户信息）→ 关闭后端会话 → 跳转登录页。
     //  Token 键名与 fn9 前后端对接保持一致（window.api 注入 Authorization 时读取同一键）。
@@ -218,6 +236,7 @@ const App = {
       go, toggleModule, breadcrumb,
       notifications, notifOpen, unreadCount, markAllRead, notifIcon,
       userOpen, searchText, onSearch, logout,
+      backendMode, toggleBackend,
       setTheme, themeLabel, setLocale,
       wizardOpen, hostWizardOpen, hostWizardPreset, onHostWizardDone, currentFocus, t,
     }
@@ -270,6 +289,13 @@ const App = {
             <span class="crumb last">{{ breadcrumb[1] }}</span>
           </template>
         </nav>
+
+        <!-- 后端模式徽标：demo（Mock）/ real（Go 后端），点击切换 -->
+        <button class="cnf-backend-badge" :class="backendMode==='real' ? 'is-real' : 'is-demo'"
+                @click="toggleBackend" :title="backendMode==='real' ? '当前：真实 Go 后端（点击切回 Demo）' : '当前：Demo Mock 后端（点击切到真实 Go 后端）'">
+          <i class="fas" :class="backendMode==='real' ? 'fa-bolt' : 'fa-flask'"></i>
+          <span>{{ backendMode==='real' ? 'REAL' : 'DEMO' }}</span>
+        </button>
 
         <div class="spacer"></div>
 

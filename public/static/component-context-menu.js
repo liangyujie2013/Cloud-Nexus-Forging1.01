@@ -18,8 +18,87 @@ const { ref, computed, onMounted, onBeforeUnmount, nextTick } = Vue
 
 // ---- 全局基础设施 ----
 window.__CNF_VIEWS = window.__CNF_VIEWS || {}
-window.API_BASE = '/api/v1'
-window.api = (path, opts) => fetch(window.API_BASE + path, opts).then((r) => r.json())
+
+// =============================================================================
+//  后端模式：demo（Hono Mock，默认）vs real（Go 后端）
+//  —— 真实 MVP 闭环第一阶段：允许前端在不重写的前提下切换到真实 Go 后端。
+//
+//  配置来源（优先级从高到低）：
+//    1) localStorage 'cnf_backend_mode' / 'cnf_real_api_base'
+//    2) 全局变量 window.CNF_REAL_API_BASE（可在 index.html 注入）
+//    3) 默认 demo 模式，API_BASE='/api/v1'（与 Hono Mock 一致）
+//
+//  real 模式下：
+//    - API_BASE 指向 Go 后端（默认同源 /api/v1；跨域时设为 http://host:8080/api/v1）
+//    - window.api 自动附加 Authorization: Bearer <cnf_token>
+//    - 登录走真实 POST /auth/login（window.cnfLogin）
+// =============================================================================
+window.CNF_BACKEND = (function () {
+  let mode = 'demo'
+  let realBase = window.CNF_REAL_API_BASE || 'http://localhost:8080/api/v1'
+  try {
+    mode = localStorage.getItem('cnf_backend_mode') || 'demo'
+    realBase = localStorage.getItem('cnf_real_api_base') || realBase
+  } catch (e) {}
+  return { mode, realBase, demoBase: '/api/v1' }
+})()
+
+// 统一接口前缀：demo → Hono Mock；real → Go 后端
+window.API_BASE = window.CNF_BACKEND.mode === 'real'
+  ? window.CNF_BACKEND.realBase
+  : window.CNF_BACKEND.demoBase
+
+// 切换后端模式（持久化 + 刷新页面生效）。
+window.cnfSetBackend = function (mode, realBase) {
+  try {
+    localStorage.setItem('cnf_backend_mode', mode === 'real' ? 'real' : 'demo')
+    if (realBase) localStorage.setItem('cnf_real_api_base', realBase)
+  } catch (e) {}
+  window.location.reload()
+}
+
+// 是否真实后端模式
+window.cnfIsReal = () => window.CNF_BACKEND.mode === 'real'
+
+// 统一 fetch 客户端：real 模式自动注入 JWT 与 JSON 头；返回解析后的 JSON。
+window.api = function (path, opts) {
+  opts = opts || {}
+  const headers = Object.assign({}, opts.headers || {})
+  // 带 body 的请求默认 JSON
+  if (opts.body && !headers['Content-Type'] && !headers['content-type']) {
+    headers['Content-Type'] = 'application/json'
+  }
+  // real 模式注入 Bearer Token
+  if (window.cnfIsReal()) {
+    let tok = null
+    try { tok = localStorage.getItem('cnf_token') } catch (e) {}
+    if (tok) headers['Authorization'] = 'Bearer ' + tok
+  }
+  return fetch(window.API_BASE + path, Object.assign({}, opts, { headers }))
+    .then((r) => r.json().catch(() => ({})))
+}
+
+// 真实后端登录：调用 Go 后端 POST /auth/login，成功后保存 JWT 与用户信息。
+// 仅在 real 模式下有意义（demo 模式 Mock 后端无需鉴权）。
+window.cnfLogin = async function (username, password) {
+  const base = window.cnfIsReal() ? window.CNF_BACKEND.realBase : window.CNF_BACKEND.demoBase
+  const res = await fetch(base + '/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    // 统一错误格式 {code,message,details}
+    const msg = (data && (data.message || data.error)) || ('登录失败 HTTP ' + res.status)
+    throw new Error(msg)
+  }
+  try {
+    if (data.token) localStorage.setItem('cnf_token', data.token)
+    if (data.user) localStorage.setItem('cnf_user', JSON.stringify(data.user))
+  } catch (e) {}
+  return data
+}
 
 const t = window.t
 
