@@ -20,49 +20,49 @@ const { ref, computed, onMounted, onBeforeUnmount, nextTick } = Vue
 window.__CNF_VIEWS = window.__CNF_VIEWS || {}
 
 // =============================================================================
-//  后端模式：demo（Hono Mock，默认）vs real（Go 后端）
-//  —— 真实 MVP 闭环第一阶段：允许前端在不重写的前提下切换到真实 Go 后端。
+//  后端：真实 Go 后端（生产落地，唯一模式）
+//  —— 已彻底移除 demo / Mock 通路：整个产品以落地生产为目标，前端只与真实
+//     Go + libvirt + MySQL 后端联调，不再保留任何 Mock/Demo「垃圾」路径。
 //
 //  配置来源（优先级从高到低）：
-//    1) localStorage 'cnf_backend_mode' / 'cnf_real_api_base'
+//    1) localStorage 'cnf_real_api_base'（仅允许「相对路径」，防残留旧绝对 URL）
 //    2) 全局变量 window.CNF_REAL_API_BASE（可在 index.html 注入）
-//    3) 默认 demo 模式，API_BASE='/api/v1'（与 Hono Mock 一致）
+//    3) 默认同源 /api/v1（经 :3000 反向代理到 Go 后端，浏览器只访问同源相对路径）
 //
-//  real 模式下：
-//    - API_BASE 指向 Go 后端（默认同源 /api/v1；跨域时设为 http://host:8080/api/v1）
+//  始终：
 //    - window.api 自动附加 Authorization: Bearer <cnf_token>
 //    - 登录走真实 POST /auth/login（window.cnfLogin）
 // =============================================================================
 window.CNF_BACKEND = (function () {
-  let mode = 'demo'
   // 同源部署默认：真实后端经 :3000 反向代理到 /api/v1（浏览器只访问同源相对路径）。
   let realBase = window.CNF_REAL_API_BASE || '/api/v1'
   try {
-    mode = localStorage.getItem('cnf_backend_mode') || 'demo'
     const stored = localStorage.getItem('cnf_real_api_base')
-    // 关键修复：只沿用「相对路径」(以 / 开头) 的存储值；残留的旧绝对 URL
-    //（如旧公网 IP:8090）会导致跨域 / 不可达 → Failed to fetch，故一律回退同源默认。
+    // 只沿用「相对路径」(以 / 开头) 的存储值；残留的旧绝对 URL（如旧公网 IP:8090）
+    // 会导致跨域 / 不可达 → Failed to fetch，故一律回退同源默认。
     if (stored && stored.charAt(0) === '/') realBase = stored
+    // 清理历史遗留的 demo 模式标记，确保永远以真实后端运行。
+    if (localStorage.getItem('cnf_backend_mode') !== 'real') {
+      localStorage.setItem('cnf_backend_mode', 'real')
+    }
   } catch (e) {}
-  return { mode, realBase, demoBase: '/api/v1' }
+  return { mode: 'real', realBase, demoBase: realBase }
 })()
 
-// 统一接口前缀：demo → Hono Mock；real → Go 后端
-window.API_BASE = window.CNF_BACKEND.mode === 'real'
-  ? window.CNF_BACKEND.realBase
-  : window.CNF_BACKEND.demoBase
+// 统一接口前缀：始终指向真实 Go 后端（同源 /api/v1）
+window.API_BASE = window.CNF_BACKEND.realBase
 
-// 切换后端模式（持久化 + 刷新页面生效）。
-window.cnfSetBackend = function (mode, realBase) {
+// 设置真实后端地址（持久化 + 刷新页面生效）。保留以便运维切换反代地址。
+window.cnfSetBackend = function (_mode, realBase) {
   try {
-    localStorage.setItem('cnf_backend_mode', mode === 'real' ? 'real' : 'demo')
-    if (realBase) localStorage.setItem('cnf_real_api_base', realBase)
+    localStorage.setItem('cnf_backend_mode', 'real')
+    if (realBase && realBase.charAt(0) === '/') localStorage.setItem('cnf_real_api_base', realBase)
   } catch (e) {}
   window.location.reload()
 }
 
-// 是否真实后端模式
-window.cnfIsReal = () => window.CNF_BACKEND.mode === 'real'
+// 始终真实后端模式（demo 通路已移除）
+window.cnfIsReal = () => true
 
 // 统一 fetch 客户端：real 模式自动注入 JWT 与 JSON 头；返回解析后的 JSON。
 window.api = function (path, opts) {
@@ -72,8 +72,8 @@ window.api = function (path, opts) {
   if (opts.body && !headers['Content-Type'] && !headers['content-type']) {
     headers['Content-Type'] = 'application/json'
   }
-  // real 模式注入 Bearer Token
-  if (window.cnfIsReal()) {
+  // 注入 Bearer Token（真实后端鉴权）
+  {
     let tok = null
     try { tok = localStorage.getItem('cnf_token') } catch (e) {}
     if (tok) headers['Authorization'] = 'Bearer ' + tok
@@ -82,7 +82,7 @@ window.api = function (path, opts) {
     .then(async (r) => {
       const body = await r.json().catch(() => ({}))
       // 真实后端统一用 {data:...} 包裹成功结果，{code,message,details} 表示错误。
-      // demo Mock 直接返回裸结果。这里统一解包，让上层调用点无需区分 demo/real。
+      // 这里统一解包，让上层调用点无需关心包裹格式。
       if (body && typeof body === 'object') {
         // 错误响应（HTTP 非 2xx 或带 code 字段）：透传，附带 error 文本供上层判断
         if (!r.ok || body.code) {
@@ -100,9 +100,8 @@ window.api = function (path, opts) {
 }
 
 // 真实后端登录：调用 Go 后端 POST /auth/login，成功后保存 JWT 与用户信息。
-// 仅在 real 模式下有意义（demo 模式 Mock 后端无需鉴权）。
 window.cnfLogin = async function (username, password) {
-  const base = window.cnfIsReal() ? window.CNF_BACKEND.realBase : window.CNF_BACKEND.demoBase
+  const base = window.CNF_BACKEND.realBase
   const res = await fetch(base + '/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -350,4 +349,129 @@ const HostContextMenu = {
 }
 
 window.__CNF_VIEWS.HostContextMenu = HostContextMenu
+
+// =============================================================================
+//  数据中心右键菜单结构（N4）：分组 → 命令项
+//  设计理念（功能联动 / 友好交互）：
+//    · 新建：右键 DC 直接「在此 DC 下新建集群」「向此 DC 纳管主机」——预填归属，免去再选父级
+//    · 配置：编辑 DC 基本信息 / 查看拓扑详情（跳转聚焦该 DC）
+//    · 危险：删除 DC（级联校验由上层处理，存在子集群时阻断）
+//  状态联动：
+//    · 含子集群（cluster_count>0）时删除项灰显并提示需先清空
+// =============================================================================
+function buildDatacenterMenu(dc) {
+  const hasChildren = (dc.cluster_count || 0) > 0
+  return [
+    { group: 'dctx_group_create', items: [
+      { command: 'new_cluster', label: 'dctx_new_cluster', icon: 'fa-layer-group', hint: '在该数据中心下新建集群（自动归属）' },
+      { command: 'add_host', label: 'dctx_add_host', icon: 'fa-server', hint: '向该数据中心纳管宿主机' },
+    ]},
+    { group: 'dctx_group_config', items: [
+      { command: 'edit', label: 'dctx_edit', icon: 'fa-pen', shortcut: 'F2', hint: '编辑名称/位置/时区/描述' },
+      { command: 'open_detail', label: 'dctx_open_detail', icon: 'fa-sitemap', hint: '在拓扑中聚焦该数据中心' },
+    ]},
+    { group: 'dctx_group_danger', items: [
+      { command: 'delete', label: 'dctx_delete', icon: 'fa-trash', danger: true, disabled: hasChildren, shortcut: 'Del', hint: hasChildren ? t('dctx_delete_blocked') : '删除该数据中心' },
+    ]},
+  ]
+}
+
+const DatacenterContextMenu = {
+  props: {
+    datacenter: { type: Object, required: true },
+    x: { type: Number, default: 0 },
+    y: { type: Number, default: 0 },
+  },
+  emits: ['action', 'close'],
+  setup(props, { emit }) {
+    const menu = computed(() => buildDatacenterMenu(props.datacenter))
+    const style = computed(() => ({ left: props.x + 'px', top: props.y + 'px' }))
+    const pick = (item) => {
+      if (item.disabled) return
+      emit('action', { command: item.command, datacenter: props.datacenter, hint: item.hint })
+      emit('close')
+    }
+    return { menu, style, pick, t }
+  },
+  template: `
+    <div class="ctx-menu" :style="style" @click.stop @contextmenu.prevent @mousedown.stop>
+      <div class="ctx-header"><i class="fas fa-building"></i> <span>{{ datacenter.name }}</span></div>
+      <template v-for="(grp,gi) in menu" :key="gi">
+        <div class="ctx-group-label">{{ t(grp.group) }}</div>
+        <button v-for="(it,ii) in grp.items" :key="ii"
+          class="ctx-item" :class="{disabled:it.disabled, danger:it.danger}"
+          :title="it.hint || ''" @click="pick(it)">
+          <i class="fas ctx-ic" :class="it.icon"></i>
+          <span class="ctx-label">{{ t(it.label) }}</span>
+          <span v-if="it.shortcut" class="ctx-shortcut">{{ it.shortcut }}</span>
+        </button>
+        <div v-if="gi < menu.length-1" class="ctx-sep"></div>
+      </template>
+    </div>`,
+}
+
+window.__CNF_VIEWS.DatacenterContextMenu = DatacenterContextMenu
+
+// =============================================================================
+//  集群右键菜单结构（N4）：分组 → 命令项
+//  设计理念（功能联动 / 友好交互）：
+//    · 纳管：右键集群直接「向该集群纳管主机」——预填集群归属，一步到位
+//    · 导航：跳转到「主机视图」并按集群过滤聚焦，承上启下的层级联动
+//    · 配置：编辑集群（HA/DRS/超分/NTP）/ 查看拓扑详情聚焦
+//    · 危险：删除集群（含主机时阻断，级联校验由上层处理）
+//  状态联动：
+//    · 含主机（host_count>0）时删除项灰显并提示需先移除主机
+// =============================================================================
+function buildClusterMenu(cl) {
+  const hasHosts = (cl.host_count || 0) > 0
+  return [
+    { group: 'cctx_group_manage', items: [
+      { command: 'add_host', label: 'cctx_add_host', icon: 'fa-server', hint: '向该集群纳管宿主机（自动归属）' },
+      { command: 'view_hosts', label: 'cctx_view_hosts', icon: 'fa-diagram-project', hint: '跳转到主机视图并聚焦该集群' },
+    ]},
+    { group: 'cctx_group_config', items: [
+      { command: 'edit', label: 'cctx_edit', icon: 'fa-sliders', shortcut: 'F2', hint: '编辑 HA/DRS/CPU超分/NTP 等策略' },
+      { command: 'open_detail', label: 'cctx_open_detail', icon: 'fa-sitemap', hint: '在拓扑中聚焦该集群' },
+    ]},
+    { group: 'cctx_group_danger', items: [
+      { command: 'delete', label: 'cctx_delete', icon: 'fa-trash', danger: true, disabled: hasHosts, shortcut: 'Del', hint: hasHosts ? t('cctx_delete_blocked') : '删除该集群' },
+    ]},
+  ]
+}
+
+const ClusterContextMenu = {
+  props: {
+    cluster: { type: Object, required: true },
+    x: { type: Number, default: 0 },
+    y: { type: Number, default: 0 },
+  },
+  emits: ['action', 'close'],
+  setup(props, { emit }) {
+    const menu = computed(() => buildClusterMenu(props.cluster))
+    const style = computed(() => ({ left: props.x + 'px', top: props.y + 'px' }))
+    const pick = (item) => {
+      if (item.disabled) return
+      emit('action', { command: item.command, cluster: props.cluster, hint: item.hint })
+      emit('close')
+    }
+    return { menu, style, pick, t }
+  },
+  template: `
+    <div class="ctx-menu" :style="style" @click.stop @contextmenu.prevent @mousedown.stop>
+      <div class="ctx-header"><i class="fas fa-layer-group"></i> <span>{{ cluster.name }}</span></div>
+      <template v-for="(grp,gi) in menu" :key="gi">
+        <div class="ctx-group-label">{{ t(grp.group) }}</div>
+        <button v-for="(it,ii) in grp.items" :key="ii"
+          class="ctx-item" :class="{disabled:it.disabled, danger:it.danger}"
+          :title="it.hint || ''" @click="pick(it)">
+          <i class="fas ctx-ic" :class="it.icon"></i>
+          <span class="ctx-label">{{ t(it.label) }}</span>
+          <span v-if="it.shortcut" class="ctx-shortcut">{{ it.shortcut }}</span>
+        </button>
+        <div v-if="gi < menu.length-1" class="ctx-sep"></div>
+      </template>
+    </div>`,
+}
+
+window.__CNF_VIEWS.ClusterContextMenu = ClusterContextMenu
 })()

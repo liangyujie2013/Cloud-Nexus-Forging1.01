@@ -15,9 +15,14 @@ const { ref, computed, onMounted, watch } = Vue
 const t = window.t
 const store = window.cnfTopology
 const toast = window.cnfToast
+const useContextMenu = window.useContextMenu
 
 const InfrastructureView = {
-  components: { TopologyTree: window.__CNF_VIEWS.TopologyTree },
+  components: {
+    TopologyTree: window.__CNF_VIEWS.TopologyTree,
+    DatacenterContextMenu: window.__CNF_VIEWS.DatacenterContextMenu,
+    ClusterContextMenu: window.__CNF_VIEWS.ClusterContextMenu,
+  },
   props: { tab: { type: String, default: 'datacenter' }, focus: { type: Object, default: null } },
   setup(props) {
     const pools = ref([])
@@ -177,6 +182,46 @@ const InfrastructureView = {
       toast(t('toast_success'), 'success')
     }
 
+    // ============================================================
+    //  右键上下文菜单（N4）：数据中心 / 集群
+    //  · dcCtx / clCtx：独立菜单管理器（智能边界 / ESC / 滚动 / 外部点击关闭）
+    //  · 动作统一回流到既有的 CRUD / 纳管 / 导航函数，体现「功能联动」：
+    //      DC：新建集群(预填DC) / 纳管主机(预填DC) / 编辑 / 拓扑聚焦 / 删除
+    //      集群：纳管主机(预填集群) / 跳转主机视图(聚焦) / 编辑 / 拓扑聚焦 / 删除
+    // ============================================================
+    const dcCtx = useContextMenu()
+    const clCtx = useContextMenu()
+
+    // 在指定数据中心下新建集群：预填 datacenter_id，免去再选父级
+    const newClusterUnderDc = (dc) => {
+      openClCreate()
+      clDlg.value.form.datacenter_id = dc.id
+    }
+
+    const onDcCtxAction = async ({ command, datacenter }) => {
+      switch (command) {
+        case 'new_cluster': return newClusterUnderDc(datacenter)
+        case 'add_host': return addHost(0)
+        case 'edit': return openDcEdit(datacenter)
+        case 'open_detail': return store.navigateTo('datacenter', datacenter.id)
+        case 'delete': return delDatacenter(datacenter)
+      }
+    }
+
+    const onClCtxAction = async ({ command, cluster }) => {
+      switch (command) {
+        case 'add_host': return addHost(cluster.id)
+        case 'view_hosts':
+          // 跳转到主机视图，并以该集群作为聚焦上下文（承上启下的层级联动）
+          return window.dispatchEvent(new CustomEvent('cnf:navigate', {
+            detail: { module: 'infrastructure', tab: 'hosts', focusType: 'cluster', focusId: cluster.id },
+          }))
+        case 'edit': return openClEdit(cluster)
+        case 'open_detail': return store.navigateTo('cluster', cluster.id)
+        case 'delete': return delCluster(cluster)
+      }
+    }
+
     const load = async () => {
       await store.fetchAll()
       if (props.tab === 'pools' && !pools.value.length) pools.value = await window.api('/resource-pools')
@@ -204,6 +249,7 @@ const InfrastructureView = {
       dcDlg, openDcCreate, openDcEdit, saveDc,
       clDlg, openClCreate, openClEdit, saveCl, clNtpHosts,
       poolDlg, openPoolCreate, openPoolEdit, savePool, delPool, poolClusterName,
+      dcCtx, clCtx, onDcCtxAction, onClCtxAction,
       focusId, focusType, sharesLabel, t,
     }
   },
@@ -231,7 +277,8 @@ const InfrastructureView = {
           <div class="infra-topo-right">
             <div class="grid grid-1" style="gap:14px">
               <div class="apple-card dc-card2" v-for="dc in datacenters" :key="dc.id"
-                   :class="{focused: focusType==='datacenter' && focusId===dc.id}">
+                   :class="{focused: focusType==='datacenter' && focusId===dc.id}"
+                   @contextmenu="dcCtx.open($event, dc)">
                 <div class="dc2-head">
                   <div class="dc2-title">
                     <span class="dc2-ico"><i class="fas fa-building"></i></span>
@@ -245,6 +292,7 @@ const InfrastructureView = {
                     <button class="icon-btn" :title="t('hw_add_host')" @click="addHost(0)"><i class="fas fa-server"></i></button>
                     <button class="icon-btn" :title="t('op_edit')" @click="openDcEdit(dc)"><i class="fas fa-pen"></i></button>
                     <button class="icon-btn danger" :title="t('op_delete')" @click="delDatacenter(dc)"><i class="fas fa-trash"></i></button>
+                    <button class="icon-btn" :title="t('ctx_more_actions')" @click.stop="dcCtx.open($event, dc)"><i class="fas fa-ellipsis-vertical"></i></button>
                   </div>
                 </div>
                 <div class="dc2-metrics">
@@ -277,7 +325,8 @@ const InfrastructureView = {
               <th>{{ t('host_machine') }}</th><th>{{ t('dash_vms') }}</th><th style="width:120px">{{ t('op_actions') }}</th>
             </tr></thead>
             <tbody>
-              <tr v-for="c in clusters" :key="c.id" :class="{focused: focusType==='cluster' && focusId===c.id}">
+              <tr v-for="c in clusters" :key="c.id" :class="{focused: focusType==='cluster' && focusId===c.id}"
+                  @contextmenu="clCtx.open($event, c)">
                 <td><strong>{{ c.name }}</strong><div class="muted" style="font-size:12px">{{ c.description }}</div></td>
                 <td><span class="apple-badge"><i class="fas fa-building"></i> {{ c.datacenter_name }}</span></td>
                 <td><i :class="c.ha_enabled?'fas fa-circle-check':'far fa-circle'" :style="{color:c.ha_enabled?'var(--color-green)':'var(--text-tertiary)'}"></i></td>
@@ -289,6 +338,7 @@ const InfrastructureView = {
                   <button class="icon-btn" :title="t('hw_add_host')" @click="addHost(c.id)"><i class="fas fa-plus"></i></button>
                   <button class="icon-btn" :title="t('op_edit')" @click="openClEdit(c)"><i class="fas fa-pen"></i></button>
                   <button class="icon-btn danger" :title="t('op_delete')" @click="delCluster(c)"><i class="fas fa-trash"></i></button>
+                  <button class="icon-btn" :title="t('ctx_more_actions')" @click.stop="clCtx.open($event, c)"><i class="fas fa-ellipsis-vertical"></i></button>
                 </td>
               </tr>
             </tbody>
@@ -548,6 +598,10 @@ const InfrastructureView = {
           </div>
         </div>
       </div>
+
+      <!-- ===== 右键上下文菜单（N4）：数据中心 / 集群 ===== -->
+      <DatacenterContextMenu v-if="dcCtx.visible.value" :datacenter="dcCtx.payload.value" :x="dcCtx.x.value" :y="dcCtx.y.value" @action="onDcCtxAction" @close="dcCtx.close" />
+      <ClusterContextMenu v-if="clCtx.visible.value" :cluster="clCtx.payload.value" :x="clCtx.x.value" :y="clCtx.y.value" @action="onClCtxAction" @close="clCtx.close" />
     </div>`,
 }
 

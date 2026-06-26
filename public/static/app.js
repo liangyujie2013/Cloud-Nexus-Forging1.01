@@ -132,25 +132,12 @@ const App = {
     // ---- 用户菜单 ----
     const userOpen = ref(false)
 
-    // ---- 后端模式（demo / real）：真实 MVP 闭环切换 ----
-    const backendMode = ref((window.CNF_BACKEND && window.CNF_BACKEND.mode) || 'demo')
-    const toggleBackend = async () => {
-      const next = backendMode.value === 'real' ? 'demo' : 'real'
-      if (next === 'real') {
-        // 切到真实后端：先记下 real 模式，再跳转专业登录页 /login 完成认证。
-        try {
-          localStorage.setItem('cnf_backend_mode', 'real')
-          // 默认同源 /api/v1；登录页可在「高级」里改地址
-          if (!localStorage.getItem('cnf_real_api_base')) {
-            localStorage.setItem('cnf_real_api_base', '/api/v1')
-          }
-        } catch (e) {}
-        const loginUrl = window.CNF_LOGIN_URL || '/login'
-        window.location.href = loginUrl
-      } else {
-        if (window.cnfToast) window.cnfToast('已切换回 Demo Mock 后端', 'info')
-        window.cnfSetBackend('demo')
-      }
+    // ---- 后端：真实 Go 后端（唯一模式，demo/Mock 通路已移除）----
+    const backendMode = ref('real')
+    const toggleBackend = () => {
+      // 仅保留一个动作：重新登录（跳转专业登录页）。不再有 demo 可切。
+      const loginUrl = window.CNF_LOGIN_URL || '/login'
+      window.location.href = loginUrl
     }
 
     // ---- P1/P22 退出登录 ----
@@ -292,7 +279,7 @@ const App = {
       </nav>
 
       <div class="sidebar-footer">
-        <span class="apple-badge apple-badge--running"><span class="dot"></span>{{ t('mode_demo') }}</span>
+        <span class="apple-badge apple-badge--running"><span class="dot"></span>{{ t('mode_prod') }}</span>
       </div>
     </aside>
 
@@ -311,11 +298,11 @@ const App = {
           </template>
         </nav>
 
-        <!-- 后端模式徽标：demo（Mock）/ real（Go 后端），点击切换 -->
-        <button class="cnf-backend-badge" :class="backendMode==='real' ? 'is-real' : 'is-demo'"
-                @click="toggleBackend" :title="backendMode==='real' ? '当前：真实 Go 后端（点击切回 Demo）' : '当前：Demo Mock 后端（点击切到真实 Go 后端）'">
-          <i class="fas" :class="backendMode==='real' ? 'fa-bolt' : 'fa-flask'"></i>
-          <span>{{ backendMode==='real' ? 'REAL' : 'DEMO' }}</span>
+        <!-- 后端徽标：真实 Go 后端（唯一模式）。点击重新登录。 -->
+        <button class="cnf-backend-badge is-real"
+                @click="toggleBackend" title="当前：真实 Go 后端（点击重新登录）">
+          <i class="fas fa-bolt"></i>
+          <span>REAL</span>
         </button>
 
         <div class="spacer"></div>
