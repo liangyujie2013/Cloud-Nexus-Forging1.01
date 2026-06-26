@@ -52,7 +52,7 @@ func Precheck(c *SSHClient, tcpPort int) (*BootstrapResult, error) {
 
 	// libvirt 是否运行：单体看 libvirtd；模块化看 virtqemud.socket/.service 任一 active。
 	// 模块化采用 socket 激活，.service 平时不常驻，故 .socket active 即算「就绪」。
-	runCnt := c.RunQuiet("systemctl is-active libvirtd virtqemud.socket virtqemud.service 2>/dev/null | grep -c active")
+	runCnt := c.RunQuiet("systemctl is-active libvirtd.socket libvirtd.service libvirtd-ro.socket virtqemud.socket virtqemud.service 2>/dev/null | grep -cx active")
 	r.LibvirtRunning = atoiSafe(runCnt) > 0
 
 	// TCP 端口监听状态
@@ -72,11 +72,87 @@ func Precheck(c *SSHClient, tcpPort int) (*BootstrapResult, error) {
 	return r, nil
 }
 
+// PrecheckItem 单项预检结果（用于流式实时反馈）。
+type PrecheckItem struct {
+	Key    string `json:"key"`    // virt / libvirt / tcp / cpu / mem ...
+	OK     bool   `json:"ok"`     // 是否通过（warn 也置 false，由 Level 区分）
+	Level  string `json:"level"`  // success / warn / error
+	Detail string `json:"detail"` // 人类可读结果
+}
+
+// PrecheckStream 流式只读预检：每完成一项立即通过 onItem 回调反馈，
+// 避免前端「6 项一起转圈、全部跑完才一次性出结果」的迟滞观感。
+// 返回最终聚合的 BootstrapResult（与 Precheck 一致，便于 onboard 复用）。
+//
+// 探测顺序按「快→慢」编排，让用户尽快看到前几项变绿：
+// CPU 虚拟化 → libvirt 组件 → libvirt 运行 → 守护进程模式 → TCP 监听。
+func PrecheckStream(c *SSHClient, tcpPort int, onItem func(PrecheckItem)) (*BootstrapResult, error) {
+	if tcpPort == 0 {
+		tcpPort = 16509
+	}
+	r := &BootstrapResult{TCPPort: tcpPort}
+	emit := func(it PrecheckItem) {
+		if onItem != nil {
+			onItem(it)
+		}
+	}
+
+	// 1) CPU 虚拟化支持（最快）
+	vmx := c.RunQuiet("grep -E -c '(vmx|svm)' /proc/cpuinfo 2>/dev/null")
+	kvmDev := c.RunQuiet("test -e /dev/kvm && echo yes")
+	r.KVMSupported = atoiSafe(vmx) > 0 || kvmDev == "yes"
+	if r.KVMSupported {
+		emit(PrecheckItem{Key: "virt", OK: true, Level: "success", Detail: "已支持（VT-x/AMD-V · /dev/kvm）"})
+	} else {
+		emit(PrecheckItem{Key: "virt", OK: false, Level: "error", Detail: "BIOS 未开启虚拟化或无 /dev/kvm"})
+	}
+
+	// 2) libvirt 组件是否安装（单体 libvirtd 或模块化 virtqemud 任一即可）
+	r.LibvirtInstalled = c.RunQuiet(
+		"{ command -v libvirtd >/dev/null 2>&1 || command -v virtqemud >/dev/null 2>&1 || rpm -q libvirt >/dev/null 2>&1; } && echo yes") == "yes"
+
+	// 3) libvirt 是否运行（顺带判定守护进程模式，给出更精准的 detail）
+	osMajor := c.RunQuiet(`. /etc/os-release 2>/dev/null; echo "${VERSION_ID%%.*}"`)
+	model := detectServiceModel(c, osMajor)
+	runCnt := c.RunQuiet("systemctl is-active libvirtd.socket libvirtd.service libvirtd-ro.socket virtqemud.socket virtqemud.service 2>/dev/null | grep -cx active")
+	r.LibvirtRunning = atoiSafe(runCnt) > 0
+	switch {
+	case !r.LibvirtInstalled:
+		emit(PrecheckItem{Key: "libvirt", OK: false, Level: "warn", Detail: "缺失 · 纳管时由平台推送离线依赖包补齐"})
+	case r.LibvirtRunning:
+		emit(PrecheckItem{Key: "libvirt", OK: true, Level: "success", Detail: fmt.Sprintf("已安装并运行（%s）", model.String())})
+	default:
+		emit(PrecheckItem{Key: "libvirt", OK: true, Level: "warn", Detail: fmt.Sprintf("已安装但未运行（纳管时将自动启动 · %s）", model.String())})
+	}
+
+	// 4) TCP 监听状态（最后探测）
+	listen := c.RunQuiet(fmt.Sprintf("ss -ltn 2>/dev/null | grep -c ':%d '", tcpPort))
+	r.TCPListening = atoiSafe(listen) > 0
+	if r.TCPListening {
+		emit(PrecheckItem{Key: "tcp", OK: true, Level: "success", Detail: fmt.Sprintf("TCP %d 已监听", tcpPort)})
+	} else {
+		emit(PrecheckItem{Key: "tcp", OK: false, Level: "warn", Detail: "未监听 · 纳管时自动配置"})
+	}
+
+	// 汇总 message（与 Precheck 保持一致）
+	switch {
+	case !r.LibvirtInstalled:
+		r.Message = "目标主机未安装 libvirt，纳管时将由平台推送离线依赖包补齐"
+	case !r.KVMSupported:
+		r.Message = "目标主机 BIOS 未开启硬件虚拟化（VT-x/AMD-V）或 /dev/kvm 不存在"
+	case !r.TCPListening:
+		r.Message = "libvirt 未监听 TCP，纳管时将按版本自动配置（EL8 libvirtd / EL9·EL10 virtproxyd）"
+	default:
+		r.Message = "前置条件满足，可直接以 qemu+tcp 纳管"
+	}
+	return r, nil
+}
+
 // EnableTCP 在目标主机开启 libvirt 远程 TCP 监听（需要 sudo/root）。
 //
 // 这是纳管阶段唯一会修改目标主机的操作，且仅在用户显式请求时执行。
 // 按目标主机的守护进程模式自动选择正确实现：
-//   - EL8 单体 libvirtd：改 libvirtd.conf + LIBVIRTD_ARGS="--listen"，重启 libvirtd。
+//   - EL8 单体 libvirtd（socket 激活）：设 auth_tcp=none + 启用 libvirtd-tcp.socket（不使用 --listen）。
 //   - EL9/EL10 模块化：通过 virtproxyd-tcp.socket（socket 激活）开启监听。
 func EnableTCP(c *SSHClient, tcpPort int) (*BootstrapResult, error) {
 	if tcpPort == 0 {
@@ -267,10 +343,49 @@ func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *Ste
 	missing, summary := detectMissingComponents(c, emitter)
 	record(InstallStep{Name: detectName, Command: "detect-components", Output: summary, OK: true})
 
-	// 1.0) 若核心组件齐全，跳过安装直接进入服务配置阶段（装了就不装）。
+	// 1.1) 模块化系统（EL9/EL10）专项校验：核心组件「rpm 视角」可能已齐全，
+	//      但模块化 daemon 包（libvirt-daemon-driver-qemu / libvirt-daemon-common 等）
+	//      未安装时，virtqemud 的 systemd 单元根本不存在 → 启动必然失败。
+	//      这正是「组件已齐全·跳过安装」却仍在启动步骤报「virtqemud 未就绪」的根因。
+	//      因此：模块化模式下若缺 virtqemud 单元，把模块化 daemon 包补进待装清单。
+	if model == modelModular && !hasVirtqemudUnit(c) {
+		emitter.line("◇ 模块化系统但未检测到 virtqemud 单元 → 需补装模块化 daemon 包（virtqemud 等）")
+		for _, pkg := range modularDaemonPackages() {
+			// 仅补「未安装」的；已装的不重复加入。
+			if c.RunQuiet("rpm -q "+pkg+" >/dev/null 2>&1 && echo yes") != "yes" {
+				alreadyQueued := false
+				for _, m := range missing {
+					if m == pkg {
+						alreadyQueued = true
+						break
+					}
+				}
+				if !alreadyQueued {
+					missing = append(missing, pkg)
+					emitter.line(fmt.Sprintf("  + 待补装：%s", pkg))
+				}
+			}
+		}
+	}
+
+	// 1.0) 若核心组件齐全：核心虚拟化组件无需重装，但仍按需补装常用运维/监控工具
+	//      （htop/tmux/sysstat 等，满足「纳管主机即自带运维工具」）。
+	//      工具补装走离线本地仓库「按名安装」，dnf 自动跳过已装项，幂等且不动基础包。
 	if len(missing) == 0 {
-		emitter.line("✓ 核心虚拟化组件已齐全，跳过安装，直接进入服务配置阶段")
+		emitter.line("✓ 核心虚拟化组件已齐全，跳过虚拟化组件安装")
 		record(InstallStep{Name: "安装虚拟化计算组件", Command: "skip", Output: "组件已齐全，无需安装", OK: true})
+		if opts.OfflineRepo != nil && opts.OfflineRepo.HasPackagesFor(osTag) {
+			name := "离线补装常用运维/监控工具（htop 等）"
+			emitter.step(name, "push RPMs → dnf install (tools)")
+			out, oerr := opts.OfflineRepo.PushAndInstall(c, osTag, nil, emitter.line)
+			st := InstallStep{Name: name, Command: "offline-tools-install", Output: truncate(out, 3000), OK: oerr == nil}
+			if oerr != nil {
+				// 工具补装失败不致命（核心组件已齐），仅记录告警，不阻断纳管。
+				st.Error = oerr.Error()
+				emitter.line("⚠️ 运维工具离线补装未完全成功（不影响核心纳管，可后续重试）")
+			}
+			record(st)
+		}
 	} else {
 		// 2) 补齐缺失组件：平台离线包优先。
 		//    平台预置了适配该 OS 版本的离线依赖包 → 直接推送本地安装（不依赖目标机在线源）；
@@ -287,7 +402,7 @@ func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *Ste
 			name := fmt.Sprintf("平台推送离线依赖包并本地安装（%s · 缺 %d 项）", orDash(osTag), len(missing))
 			emitter.step(name, "push RPMs → dnf install --disablerepo='*'")
 			emitter.line(fmt.Sprintf("缺失组件：%s", strings.Join(missing, " ")))
-			out, oerr := opts.OfflineRepo.PushAndInstall(c, osTag, emitter.line)
+			out, oerr := opts.OfflineRepo.PushAndInstall(c, osTag, missing, emitter.line)
 			st := InstallStep{Name: name, Command: "offline-install", Output: truncate(out, 4000), OK: oerr == nil}
 			if oerr != nil {
 				st.Error = oerr.Error()
@@ -299,7 +414,7 @@ func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *Ste
 		// 在线安装：仅安装缺失的包（dnf 自动跳过已装项）。
 		tryOnline := func() bool {
 			onlineName := fmt.Sprintf("目标主机在线源安装缺失组件（缺 %d 项）", len(missing))
-			onlineCmd := pm + " install -y " + strings.Join(missing, " ")
+			onlineCmd := pm + " install -y --allowerasing " + strings.Join(missing, " ")
 			emitter.step(onlineName, onlineCmd)
 			out, err := c.RunStream(sudoWrap(c, onlineCmd), emitter.line)
 			st := InstallStep{Name: onlineName, Command: onlineCmd, Output: truncate(out, 4000), OK: err == nil}

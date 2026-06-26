@@ -35,9 +35,9 @@ type GPUInfo struct {
 
 // DiskInfo 块设备。
 type DiskInfo struct {
-	Name      string `json:"name"`
-	SizeBytes int64  `json:"size_bytes"`
-	Rotational bool  `json:"rotational"`
+	Name       string `json:"name"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Rotational bool   `json:"rotational"`
 }
 
 // NICInfo 物理网卡。

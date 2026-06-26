@@ -189,6 +189,74 @@ func (h *Handlers) onboardHostStream(c fiber.Ctx) error {
 }
 
 // ============================================================================
+//  流式预检（SSE）：POST /hosts/precheck-stream
+//
+//  目的：把环境预检的每一项（网络 / SSH / CPU虚拟化 / libvirt组件 / 运行状态 / TCP /
+//        硬件采集）逐项实时推给前端，避免「6 项一起转圈、全部跑完才一次性出结果」的
+//        迟滞观感（用户反馈预检很慢、看不到进展）。
+//
+//  事件类型（event:）：
+//    item   —— 单项预检完成   data: {"key","ok","level","detail"}
+//    hw     —— 硬件采集完成   data: {hardware}
+//    result —— 全流程结束     data: {"ok","precheck","hardware","error"}
+//    error  —— 致命错误       data: {"error"}
+// ============================================================================
+
+// precheckHostStream POST /hosts/precheck-stream —— SSE 流式预检。
+func (h *Handlers) precheckHostStream(c fiber.Ctx) error {
+	var req onboardRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return badRequest(c, "请求体非法")
+	}
+	if req.IPAddress == "" {
+		return badRequest(c, "ip_address 必填")
+	}
+
+	c.Set("Content-Type", "text/event-stream")
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Connection", "keep-alive")
+	c.Set("X-Accel-Buffering", "no")
+
+	return c.SendStreamWriter(func(w *bufio.Writer) {
+		sse := &sseWriter{w: w}
+
+		// 1) 网络可达 + SSH 连接（合并：Dial 成功即代表两者通过）
+		cli, err := onboard.Dial(req.sshConfig())
+		if err != nil {
+			// 区分「网络不可达」与「SSH 认证失败」，给出更精准的逐项反馈。
+			sse.send("item", fiber.Map{"key": "net", "ok": false, "level": "error", "detail": "不可达 / SSH 拒绝"})
+			sse.send("item", fiber.Map{"key": "ssh", "ok": false, "level": "error", "detail": err.Error()})
+			sse.send("result", fiber.Map{"ok": false, "error": "SSH 连接失败: " + err.Error()})
+			return
+		}
+		defer cli.Close()
+		sse.send("item", fiber.Map{"key": "net", "ok": true, "level": "success", "detail": "可达 · SSH 端口已开放"})
+		sse.send("item", fiber.Map{"key": "ssh", "ok": true, "level": "success", "detail": "认证成功（" + req.SSHUser + "）"})
+
+		// 2) 逐项预检（每完成一项立即下发）
+		pre, err := onboard.PrecheckStream(cli, req.LibvirtPort, func(it onboard.PrecheckItem) {
+			sse.send("item", fiber.Map{"key": it.Key, "ok": it.OK, "level": it.Level, "detail": it.Detail})
+		})
+		if err != nil {
+			sse.send("result", fiber.Map{"ok": false, "error": "预检失败: " + err.Error()})
+			return
+		}
+
+		// 3) 采集硬件（较慢，单独一项，完成后下发 hw 事件）
+		hw, herr := onboard.CollectHardware(cli)
+		if herr != nil {
+			sse.send("item", fiber.Map{"key": "mem", "ok": false, "level": "warn", "detail": "硬件采集失败: " + herr.Error()})
+		} else {
+			sse.send("item", fiber.Map{"key": "mem", "ok": true, "level": "success",
+				"detail": fmt.Sprintf("%d MB · %d 核 · %s", hw.MemoryTotalMB, hw.CPUSockets*hw.CPUCoresPerSock*hw.CPUThreadsPerCo, hw.OSVersion)})
+			sse.send("hw", hw)
+		}
+
+		sse.send("result", fiber.Map{"ok": true, "precheck": pre, "hardware": hw})
+	})
+}
+
+// ============================================================================
 //  离线安装包管理：GET /offline-packages
 //
 //  列出平台预置的 libvirt/KVM 离线 RPM 包（按 os 版本分组）。当目标宿主机的

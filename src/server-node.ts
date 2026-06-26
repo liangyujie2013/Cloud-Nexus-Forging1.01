@@ -36,16 +36,34 @@ if (PROXY_TARGET) {
     const upstream = target + url.pathname + url.search
     const headers = new Headers(c.req.raw.headers)
     headers.delete('host')
+    headers.delete('accept-encoding') // 禁止上游压缩，避免流式 SSE 被缓冲
     const init: RequestInit = { method: c.req.method, headers }
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
       init.body = await c.req.raw.arrayBuffer()
     }
+    // SSE / 流式接口（纳管部署、预检流）必须「边收边转」，不能 await arrayBuffer()
+    // 把整条流读完——长连接会被 fetch 判定 terminated（即 UI 报「代理到真实后端失败: terminated」）。
+    // 关闭 fetch 的超时（duplex 半双工流式透传），并直接把上游 body 作为可读流回传。
+    ;(init as any).duplex = 'half'
     try {
       const resp = await fetch(upstream, init)
-      const body = await resp.arrayBuffer()
       const respHeaders = new Headers(resp.headers)
       respHeaders.delete('content-encoding')
       respHeaders.delete('content-length')
+      const ctype = (resp.headers.get('content-type') || '').toLowerCase()
+      const isStream =
+        ctype.includes('text/event-stream') ||
+        ctype.includes('application/x-ndjson') ||
+        (resp.headers.get('transfer-encoding') || '').toLowerCase().includes('chunked')
+      if (isStream && resp.body) {
+        // 关键：SSE 透传需禁用缓冲并保留实时性。
+        respHeaders.set('cache-control', 'no-cache, no-transform')
+        respHeaders.set('x-accel-buffering', 'no')
+        respHeaders.set('connection', 'keep-alive')
+        return new Response(resp.body, { status: resp.status, headers: respHeaders })
+      }
+      // 普通接口：可直接读完返回。
+      const body = await resp.arrayBuffer()
       return new Response(body, { status: resp.status, headers: respHeaders })
     } catch (err: any) {
       return c.json(

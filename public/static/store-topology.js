@@ -178,6 +178,81 @@ async function precheckHostSSH(payload) {
   return { ok: true, precheck: b.precheck, hardware: b.hardware }
 }
 
+// 通用 SSE 读取器：fetch + ReadableStream 解析「event:/data:」帧，逐帧回调 onFrame(event, obj)。
+// 返回 Promise<{ ok, error }>（仅表示流是否正常读完；业务结果由 onFrame 内部聚合）。
+async function readSSE(path, payload, onFrame) {
+  const headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' }
+  try {
+    const tok = localStorage.getItem('cnf_token')
+    if (tok) headers['Authorization'] = 'Bearer ' + tok
+  } catch (e) {}
+
+  let resp
+  try {
+    resp = await fetch(window.API_BASE + path, { method: 'POST', headers, body: JSON.stringify(payload) })
+  } catch (err) {
+    return { ok: false, error: '网络请求失败：' + (err && err.message || err) }
+  }
+  if (!resp.ok && resp.headers.get('content-type') && resp.headers.get('content-type').includes('json')) {
+    const j = await resp.json().catch(() => ({}))
+    return { ok: false, error: j.error || j.message || ('请求失败 HTTP ' + resp.status) }
+  }
+  if (!resp.body) return { ok: false, error: '当前浏览器不支持流式响应，请升级浏览器' }
+
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buf = ''
+  const parseFrames = () => {
+    let idx
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      let ev = 'message', dataLines = []
+      frame.split('\n').forEach((ln) => {
+        if (ln.startsWith('event:')) ev = ln.slice(6).trim()
+        else if (ln.startsWith('data:')) dataLines.push(ln.slice(5).trim())
+      })
+      if (dataLines.length) {
+        let obj = {}
+        try { obj = JSON.parse(dataLines.join('\n')) } catch (e) { obj = { raw: dataLines.join('\n') } }
+        onFrame(ev, obj)
+      }
+    }
+  }
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      parseFrames()
+    }
+    buf += decoder.decode()
+    parseFrames()
+  } catch (err) {
+    return { ok: false, error: '读取流失败：' + (err && err.message || err) }
+  }
+  return { ok: true }
+}
+
+// 流式预检：调用 POST /hosts/precheck-stream（SSE），每完成一项立即回调，消除「全部转圈」迟滞。
+// 回调 handlers：
+//   onItem({key, ok, level, detail}) —— 单项预检完成
+//   onHardware(hw)                   —— 硬件采集完成
+// 返回 Promise<{ ok, precheck, hardware, error }>（result 事件内容）。
+async function precheckHostStreamSSH(payload, handlers) {
+  handlers = handlers || {}
+  let finalResult = null
+  const r = await readSSE('/hosts/precheck-stream', payload, (event, obj) => {
+    if (event === 'item' && handlers.onItem) handlers.onItem(obj)
+    else if (event === 'hw' && handlers.onHardware) handlers.onHardware(obj)
+    else if (event === 'result') finalResult = obj
+    else if (event === 'error') finalResult = { ok: false, error: obj.error || '未知错误' }
+  })
+  if (!r.ok) return { ok: false, error: r.error }
+  if (!finalResult) return { ok: false, error: '连接中断，未收到最终结果' }
+  return finalResult
+}
+
 // 真实 SSH 纳管：调用后端 POST /hosts/onboard（采集硬件→落库→qemu+tcp 验证）。
 // auto_install=true 时后端会在缺组件时自动安装 libvirt+KVM 并配置 TCP。
 // 返回 { ok, host, precheck, install, message } 或 { ok:false, error, install }。
@@ -457,7 +532,7 @@ window.cnfTopology = {
   state,
   fetchAll,
   datacenterStats, clusterStats, hostStats, topologyTree,
-  addHostToCluster, precheckHostSSH, onboardHostSSH, onboardHostStreamSSH, getOfflinePackages, getMigrationTargets, migrateVm,
+  addHostToCluster, precheckHostSSH, precheckHostStreamSSH, onboardHostSSH, onboardHostStreamSSH, getOfflinePackages, getMigrationTargets, migrateVm,
   createDatacenter, updateDatacenter, createCluster, updateCluster,
   deleteDatacenter, deleteCluster, removeHost,
   navigateTo,

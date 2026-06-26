@@ -82,62 +82,60 @@ const HostWizard = {
       const it = precheck.find((p) => p.key === key)
       if (it) { it.status = status; it.result = result }
     }
-    // 真实预检：调用后端 POST /hosts/precheck（SSH 只读探测 + 采集硬件）。
+    // 真实预检：调用后端 POST /hosts/precheck-stream（SSE），每完成一项立即实时反馈，
+    // 不再「6 项一起转圈、跑完才一次性出结果」——逐项变绿，体验更快更透明。
     const runPrecheck = async () => {
       prechecking.value = true
       precheckError.value = ''
       precheckRan.value = false
-      precheck.forEach((p) => { p.status = 'running'; p.result = t('hw_check_running') })
+      // 初始：全部置「等待」，并把第一项标记为进行中，给出即时反馈。
+      precheck.forEach((p, i) => { p.status = i === 0 ? 'running' : 'pending'; p.result = i === 0 ? t('hw_check_running') : t('hw_check_wait') })
 
-      const res = await store.precheckHostSSH({
-        ip_address: form.ip_address.trim(),
-        ssh_port: form.ssh_port,
-        ssh_user: form.ssh_user.trim(),
-        password: form.ssh_password,
-        libvirt_port: 16509,
-      })
+      // 后端 item.key → 前端结果映射。warn 级别在「未开自动安装」时按 error 展示阻断。
+      const applyItem = (it) => {
+        if (!it || !it.key) return
+        let status = it.level || (it.ok ? 'success' : 'error')
+        // libvirt/tcp 的 warn：若用户未开自动安装，则视为阻断（error）。
+        if ((it.key === 'libvirt' || it.key === 'tcp') && status === 'warn' && !form.auto_install) {
+          status = 'error'
+        }
+        setItem(it.key, status, it.detail || '')
+        // 下一项标记为进行中，让用户看到「正在检测下一项」。
+        const order = ['net', 'ssh', 'virt', 'libvirt', 'tcp', 'mem']
+        const ni = order.indexOf(it.key) + 1
+        if (ni > 0 && ni < order.length) {
+          const next = precheck.find((p) => p.key === order[ni])
+          if (next && next.status === 'pending') { next.status = 'running'; next.result = t('hw_check_running') }
+        }
+      }
+
+      const res = await store.precheckHostStreamSSH(
+        {
+          ip_address: form.ip_address.trim(),
+          ssh_port: form.ssh_port,
+          ssh_user: form.ssh_user.trim(),
+          password: form.ssh_password,
+          libvirt_port: 16509,
+        },
+        {
+          onItem: applyItem,
+          onHardware: (hw) => { hardwareInfo.value = hw },
+        }
+      )
       prechecking.value = false
       precheckRan.value = true
 
       if (!res.ok) {
-        // SSH 连接 / 鉴权失败：网络与 SSH 项标红，给出真实错误。
-        setItem('net', 'error', t('hw_check_unreachable'))
-        setItem('ssh', 'error', res.error || t('hw_check_failed'))
-        precheck.filter((p) => !['net', 'ssh'].includes(p.key)).forEach((p) => { p.status = 'pending'; p.result = '—' })
+        // 致命错误（多为 SSH 连接/鉴权失败）：若尚未逐项标红，则补标。
+        const net = precheck.find((p) => p.key === 'net')
+        if (net && net.status !== 'error' && net.status !== 'success') setItem('net', 'error', t('hw_check_unreachable'))
+        const ssh = precheck.find((p) => p.key === 'ssh')
+        if (ssh && ssh.status === 'running') setItem('ssh', 'error', res.error || t('hw_check_failed'))
+        precheck.filter((p) => p.status === 'running' || p.status === 'pending').forEach((p) => { p.status = 'pending'; p.result = '—' })
         precheckError.value = res.error || t('hw_check_failed')
         return
       }
-
-      const pc = res.precheck || {}
-      const hw = res.hardware || {}
-      hardwareInfo.value = hw
-
-      // 网络 + SSH：能拿到预检结果即说明 SSH 通了。
-      setItem('net', 'success', t('hw_check_reachable'))
-      setItem('ssh', 'success', t('hw_check_ssh_ok').replace('{user}', form.ssh_user))
-      // CPU 虚拟化
-      setItem('virt', pc.kvm_supported ? 'success' : 'error',
-        pc.kvm_supported ? t('hw_check_virt_ok') : t('hw_check_virt_no'))
-      // libvirt 安装/运行
-      if (pc.libvirt_installed && pc.libvirt_running) {
-        setItem('libvirt', 'success', t('hw_check_libvirt_ok'))
-      } else if (pc.libvirt_installed) {
-        setItem('libvirt', 'warn', t('hw_check_libvirt_stopped'))
-      } else {
-        setItem('libvirt', form.auto_install ? 'warn' : 'error',
-          form.auto_install ? t('hw_check_libvirt_autoinstall') : t('hw_check_libvirt_no'))
-      }
-      // TCP 监听
-      if (pc.tcp_listening) {
-        setItem('tcp', 'success', t('hw_check_tcp_ok').replace('{port}', pc.tcp_port || 16509))
-      } else {
-        setItem('tcp', form.auto_install ? 'warn' : 'error',
-          form.auto_install ? t('hw_check_tcp_autoinstall') : t('hw_check_tcp_no'))
-      }
-      // 内存
-      const memGb = hw.memory_total_mb ? Math.round(hw.memory_total_mb / 1024) : 0
-      setItem('mem', memGb > 0 ? 'success' : 'warn',
-        memGb > 0 ? (memGb + ' GB · ' + (hw.cpu_model || '')) : t('hw_check_mem_unknown'))
+      if (res.hardware) hardwareInfo.value = res.hardware
     }
     // 是否可进入纳管：CPU 虚拟化必须支持；libvirt/TCP 缺失但开了自动安装则放行。
     const precheckPassed = computed(() => {
@@ -158,6 +156,7 @@ const HostWizard = {
     // installSteps：实时步骤列表。每个 = { name, command, ok(null=进行中), error, lines:[] }
     const installSteps = ref([])
     const currentStepIdx = ref(-1)
+    const deployActivity = ref('') // 当前实时活动（最新一行输出），驱动"心跳"避免进度像卡死
     const logBox = ref(null) // 终端日志容器（用于自动滚到底）
 
     const scrollLogToEnd = () => {
@@ -185,13 +184,14 @@ const HostWizard = {
           auto_install: form.auto_install,
         },
         {
-          // 某步骤开始：追加一个 running 步骤
+          // 某步骤开始：追加一个 running 步骤，并把当前活动名同步到进度区（让用户随时知道"在干嘛"）
           onStep: (s) => {
             installSteps.value.push({ name: s.name || '执行中', command: s.command || '', ok: null, error: '', lines: [] })
             currentStepIdx.value = installSteps.value.length - 1
+            deployMessage.value = s.name || deployMessage.value
             scrollLogToEnd()
           },
-          // 实时一行输出：追加到当前步骤的 lines
+          // 实时一行输出：追加到当前步骤的 lines；同时把最新一行作为"当前活动"显示在进度区下方
           onLine: (line) => {
             const idx = currentStepIdx.value
             if (idx >= 0 && installSteps.value[idx]) {
@@ -199,6 +199,8 @@ const HostWizard = {
               // 限制每步行数，避免超长输出拖慢页面
               if (installSteps.value[idx].lines.length > 500) installSteps.value[idx].lines.shift()
             }
+            // 推送/安装等长步骤会刷很多行，用最新一行驱动"活动心跳"，避免进度条像卡死
+            if (line && line.trim()) deployActivity.value = line.trim().slice(0, 80)
             scrollLogToEnd()
           },
           // 步骤结束：更新 ok/error/输出
@@ -237,13 +239,21 @@ const HostWizard = {
       toast(deployMessage.value, 'success')
     }
 
-    // 进度百分比：按已完成步骤 / 总步骤估算（仅展示用）。
+    // 进度百分比：用「预期总步骤数」做分母（避免分母随步骤出现而变化、导致前期卡在 5%）。
+    // 纳管全流程预期步骤数（自动安装时较多）：SSH→预检→检测→[安装→健康修复→启动→KVM→TCP→防火墙]→采集→落库→验证。
+    const expectedSteps = computed(() => (form.auto_install ? 12 : 6))
     const deployProgress = computed(() => {
       if (deployDone.value) return 100
-      if (!installSteps.value.length) return deploying.value ? 5 : 0
+      if (!installSteps.value.length) return deploying.value ? 3 : 0
       const done = installSteps.value.filter((s) => s.ok !== null).length
-      const pct = Math.round((done / Math.max(installSteps.value.length, 1)) * 90) + 5
-      return Math.min(pct, 95)
+      // 已完成步骤贡献主进度；当前进行中的步骤再按其输出行数给一点「心跳」增量（最多 +6%）。
+      const cur = installSteps.value[currentStepIdx.value]
+      let intra = 0
+      if (cur && cur.ok === null && cur.lines && cur.lines.length) {
+        intra = Math.min(6, Math.round(cur.lines.length / 8))
+      }
+      const base = Math.round((done / expectedSteps.value) * 92) + 3
+      return Math.min(base + intra, 96)
     })
 
     // ---- 校验 ----
@@ -292,7 +302,7 @@ const HostWizard = {
       step, steps, form, errors,
       datacenters, availableClusters, selectedCluster, onDatacenterChange,
       precheck, prechecking, runPrecheck, precheckPassed, precheckError, precheckRan, hardwareInfo,
-      deployProgress, deployStatus, deployMessage, deploying, deployDone, runDeploy, installSteps, currentStepIdx, logBox,
+      deployProgress, deployStatus, deployMessage, deployActivity, deploying, deployDone, runDeploy, installSteps, currentStepIdx, logBox,
       offline, loadOffline,
       next, prev, nextLabel, t,
     }
@@ -427,6 +437,9 @@ const HostWizard = {
               <i v-else-if="deployStatus==='success'" class="fas fa-circle-check"></i>
               <i v-else-if="deployStatus==='exception'" class="fas fa-circle-xmark"></i>
               <span>{{ deployMessage || (form.auto_install ? t('hw_dep_ready_auto') : t('hw_dep_ready')) }}</span>
+            </div>
+            <div v-if="deploying && deployActivity" class="deploy-activity" style="margin-top:6px;font-size:12px;color:var(--text-muted,#86868b);font-family:ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              <i class="fas fa-angle-right"></i> {{ deployActivity }}
             </div>
           </div>
           <!-- 真实安装步骤日志（实时流式，含每行 stdout/stderr）-->

@@ -66,6 +66,7 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Get("/hosts/:id/hardware", h.getHostHardware, h.Mw.RequirePermission("host.read"))
 	api.Post("/hosts", h.createHost, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/precheck", h.precheckHost, h.Mw.RequirePermission("host.create"))
+	api.Post("/hosts/precheck-stream", h.precheckHostStream, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/onboard", h.onboardHost, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/onboard-stream", h.onboardHostStream, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/:id/enable-tcp", h.enableHostTCP, h.Mw.RequirePermission("host.update"))
