@@ -35,10 +35,14 @@ window.__CNF_VIEWS = window.__CNF_VIEWS || {}
 // =============================================================================
 window.CNF_BACKEND = (function () {
   let mode = 'demo'
-  let realBase = window.CNF_REAL_API_BASE || 'http://localhost:8080/api/v1'
+  // 同源部署默认：真实后端经 :3000 反向代理到 /api/v1（浏览器只访问同源相对路径）。
+  let realBase = window.CNF_REAL_API_BASE || '/api/v1'
   try {
     mode = localStorage.getItem('cnf_backend_mode') || 'demo'
-    realBase = localStorage.getItem('cnf_real_api_base') || realBase
+    const stored = localStorage.getItem('cnf_real_api_base')
+    // 关键修复：只沿用「相对路径」(以 / 开头) 的存储值；残留的旧绝对 URL
+    //（如旧公网 IP:8090）会导致跨域 / 不可达 → Failed to fetch，故一律回退同源默认。
+    if (stored && stored.charAt(0) === '/') realBase = stored
   } catch (e) {}
   return { mode, realBase, demoBase: '/api/v1' }
 })()

@@ -1770,8 +1770,14 @@ app.get('/login', (c) => {
     <div class="hint">默认账号：admin / admin123<br>同源部署后端地址填 /api/v1</div>
   </div>
   <script>
+    // 同源部署：后端经 :3000 的 /api/v1 反向代理透传，浏览器只需访问同源相对路径。
+    // 关键修复：默认强制用同源 '/api/v1'，忽略 localStorage 里残留的旧绝对地址
+    //（如旧公网 IP:8090），那是「登录失败：Failed to fetch」(跨域/不可达) 的根因。
     var DEFAULT_BASE = '/api/v1';
-    var apiBase = localStorage.getItem('cnf_real_api_base') || DEFAULT_BASE;
+    // 仅当存储的是相对路径(以 / 开头)时才沿用；绝对 URL 一律回退到同源默认值。
+    var stored = '';
+    try { stored = localStorage.getItem('cnf_real_api_base') || ''; } catch (e) {}
+    var apiBase = (stored && stored.charAt(0) === '/') ? stored : DEFAULT_BASE;
     document.getElementById('api').value = apiBase;
     document.getElementById('toggleApi').onclick = function(){
       var w = document.getElementById('apiWrap');
@@ -1802,7 +1808,9 @@ app.get('/login', (c) => {
         msg.className = 'msg ok'; msg.textContent = '登录成功，正在进入…';
         setTimeout(function(){ window.location.href = '/'; }, 400);
       } catch (err) {
-        msg.className = 'msg err'; msg.textContent = '登录失败：' + (err.message || err);
+        var hint = (String(err.message || err).indexOf('fetch') >= 0)
+          ? '（无法连接后端，请确认「高级·后端地址」为 /api/v1）' : '';
+        msg.className = 'msg err'; msg.textContent = '登录失败：' + (err.message || err) + hint;
         btn.disabled = false; btn.textContent = '登 录';
       }
     };
