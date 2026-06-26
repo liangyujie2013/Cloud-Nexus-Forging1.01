@@ -134,16 +134,45 @@ const App = {
 
     // ---- 后端模式（demo / real）：真实 MVP 闭环切换 ----
     const backendMode = ref((window.CNF_BACKEND && window.CNF_BACKEND.mode) || 'demo')
-    const toggleBackend = () => {
+    const toggleBackend = async () => {
       const next = backendMode.value === 'real' ? 'demo' : 'real'
       if (next === 'real') {
         const base = window.prompt(
-          '切换到真实 Go 后端。请输入 Go 后端 API 地址：\n（同源部署可填 /api/v1；跨域填 http://<服务器IP>:8080/api/v1）',
-          (window.CNF_BACKEND && window.CNF_BACKEND.realBase) || 'http://localhost:8080/api/v1'
+          '切换到真实 Go 后端。请输入 Go 后端 API 地址：\n（同源部署填 /api/v1；跨域填 http://<服务器IP>:8090/api/v1）',
+          (window.CNF_BACKEND && window.CNF_BACKEND.realBase) || '/api/v1'
         )
         if (base === null) return // 取消
-        if (window.cnfToast) window.cnfToast('已切换到真实后端，需先登录（admin/admin123）', 'info')
-        window.cnfSetBackend('real', base.trim())
+        // 先持久化 real 模式与地址（但不刷新），以便随后用 real base 登录
+        try {
+          localStorage.setItem('cnf_backend_mode', 'real')
+          localStorage.setItem('cnf_real_api_base', base.trim())
+        } catch (e) {}
+        // 真实落地：切到 real 必须真正登录后端拿 JWT，否则所有 API 401。
+        const username = window.prompt('请输入后端登录用户名：', 'admin')
+        if (username === null) return
+        const password = window.prompt('请输入密码：', 'admin123')
+        if (password === null) return
+        try {
+          // 直接对填写的 base 发起登录（此时 window.CNF_BACKEND 尚未刷新，故用本地 base）
+          const res = await fetch(base.trim() + '/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+          })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok || !data.token) {
+            const msg = (data && (data.message || data.error)) || ('HTTP ' + res.status)
+            if (window.cnfToast) window.cnfToast('登录失败：' + msg, 'error', 4000)
+            return
+          }
+          try {
+            localStorage.setItem('cnf_token', data.token)
+            if (data.user) localStorage.setItem('cnf_user', JSON.stringify(data.user))
+          } catch (e) {}
+          if (window.cnfToast) window.cnfToast('已登录真实后端，正在加载…', 'success')
+          setTimeout(() => window.location.reload(), 500)
+        } catch (err) {
+          if (window.cnfToast) window.cnfToast('连接后端失败：' + (err && err.message || err), 'error', 4000)
+        }
       } else {
         if (window.cnfToast) window.cnfToast('已切换回 Demo Mock 后端', 'info')
         window.cnfSetBackend('demo')
@@ -214,7 +243,43 @@ const App = {
       currentTab.value = d.tab
     }
 
+    // real 模式下确保已登录：无 token 则引导登录（拿 JWT 后刷新）。
+    const ensureRealLogin = async () => {
+      if (!window.cnfIsReal || !window.cnfIsReal()) return true
+      let tok = null
+      try { tok = localStorage.getItem('cnf_token') } catch (e) {}
+      if (tok) return true
+      if (window.cnfToast) window.cnfToast('真实后端模式需要登录', 'warning', 3000)
+      const username = window.prompt('真实后端登录 - 用户名：', 'admin')
+      if (username === null) return false
+      const password = window.prompt('密码：', 'admin123')
+      if (password === null) return false
+      try {
+        const base = window.CNF_BACKEND.realBase
+        const res = await fetch(base + '/auth/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data.token) {
+          if (window.cnfToast) window.cnfToast('登录失败：' + ((data && (data.message || data.error)) || res.status), 'error', 4000)
+          return false
+        }
+        localStorage.setItem('cnf_token', data.token)
+        if (data.user) localStorage.setItem('cnf_user', JSON.stringify(data.user))
+        if (window.cnfToast) window.cnfToast('登录成功，正在加载…', 'success')
+        setTimeout(() => window.location.reload(), 400)
+        return false // 刷新后重新走流程
+      } catch (err) {
+        if (window.cnfToast) window.cnfToast('连接后端失败：' + (err && err.message || err), 'error', 4000)
+        return false
+      }
+    }
+
     onMounted(async () => {
+      // real 模式：先确保登录（拿到 JWT）再加载数据，避免全量 401。
+      const authed = await ensureRealLogin()
+      if (!authed) return
       notifications.value = await api('/notifications')
       // 预加载统一拓扑数据（数据中心/集群/主机/虚拟机的层级血缘）
       if (window.cnfTopology) window.cnfTopology.fetchAll()

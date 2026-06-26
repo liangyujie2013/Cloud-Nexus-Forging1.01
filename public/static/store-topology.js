@@ -32,10 +32,11 @@ async function fetchAll(force) {
     const [dcs, cls, hs, vms] = await Promise.all([
       api('/datacenters'), api('/clusters'), api('/hosts'), api('/vms'),
     ])
-    state.datacenters = dcs || []
-    state.clusters = cls || []
-    state.hosts = hs || []
-    state.vms = vms || []
+    // 真实后端解包后应为数组；若为 error 对象（如 401）则置空数组，避免渲染崩溃。
+    state.datacenters = Array.isArray(dcs) ? dcs : []
+    state.clusters = Array.isArray(cls) ? cls : []
+    state.hosts = Array.isArray(hs) ? hs : []
+    state.vms = Array.isArray(vms) ? vms : []
     state.loaded = true
   } finally {
     state.loading = false

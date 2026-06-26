@@ -75,7 +75,24 @@ window.api = function (path, opts) {
     if (tok) headers['Authorization'] = 'Bearer ' + tok
   }
   return fetch(window.API_BASE + path, Object.assign({}, opts, { headers }))
-    .then((r) => r.json().catch(() => ({})))
+    .then(async (r) => {
+      const body = await r.json().catch(() => ({}))
+      // 真实后端统一用 {data:...} 包裹成功结果，{code,message,details} 表示错误。
+      // demo Mock 直接返回裸结果。这里统一解包，让上层调用点无需区分 demo/real。
+      if (body && typeof body === 'object') {
+        // 错误响应（HTTP 非 2xx 或带 code 字段）：透传，附带 error 文本供上层判断
+        if (!r.ok || body.code) {
+          return Object.assign({}, body, {
+            error: body.message || body.error || ('请求失败 HTTP ' + r.status),
+            _status: r.status,
+          })
+        }
+        // 成功且有 data 字段（真实后端）→ 解包返回 data
+        if ('data' in body) return body.data
+      }
+      return body
+    })
+    .catch((err) => ({ error: '网络请求失败：' + (err && err.message || err), _status: 0 }))
 }
 
 // 真实后端登录：调用 Go 后端 POST /auth/login，成功后保存 JWT 与用户信息。
