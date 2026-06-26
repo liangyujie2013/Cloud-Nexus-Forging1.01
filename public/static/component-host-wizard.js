@@ -5,9 +5,11 @@
 //    步骤2 连接信息：主机名 / 管理IP / SSH 端口 / SSH 用户 / SSH 密码
 //                    + 「自动安装虚拟化计算组件（libvirt / KVM）」开关
 //    步骤3 环境预检：真实调用 POST /hosts/precheck —— SSH 探测虚拟化组件/KVM/TCP + 采集硬件
-//    步骤4 纳管部署：真实调用 POST /hosts/onboard-stream —— 检测组件→缺失部分由平台
-//                    推送离线依赖包本地安装（装了就跳过）→ 采集硬件 → 落库 →
-//                    qemu+tcp 验证 → 置 connected。SSE 展示真实执行步骤与错误。
+//    步骤4 纳管部署：真实调用 POST /hosts/onboard-stream —— 判定守护进程模式
+//                    （EL8 单体 libvirtd / EL9·EL10 模块化 virtqemud）→ 检测组件→缺失
+//                    部分由平台推送离线依赖包本地安装（装了就跳过）→ 系统健康修复
+//                    （对齐 openssl/systemd 防符号断裂）→ 按模式启动守护进程 → 采集硬件
+//                    → 落库 → qemu+tcp 验证 → 置 connected。SSE 展示真实执行步骤与错误。
 //  Apple HIG：毛玻璃 modal / 12px 圆角 / 流畅过渡。无任何第三方 UI 框架。
 //  通过自定义事件 cnf:open-host-wizard 打开（可携带 presetClusterId）。
 // =============================================================================

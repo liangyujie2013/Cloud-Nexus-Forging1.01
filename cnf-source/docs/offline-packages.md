@@ -69,11 +69,23 @@
 | 差异点 | EL8 | EL9 / EL10 |
 |--------|-----|------------|
 | 网桥工具 | `bridge-utils`（可下载） | 已移除，用系统自带 `iproute`（无需单独下载） |
-| libvirt 守护进程 | 单一 `libvirtd` | **Modular daemon**：`virtqemud` / `virtnetworkd` / `virtstoraged` / `virtproxyd`（由 `libvirt` 元包带入，无需单独下载，但 **TCP 监听配置方式不同**，平台后端按版本分支处理） |
-| TCP 监听 | `libvirtd --listen` + `/etc/libvirt/libvirtd.conf` | 推荐 `virtproxyd` + socket（EL9+ 旧 `--listen` 已弃用） |
+| libvirt 守护进程 | 单体 `libvirtd`（默认） | **模块化 daemon**（EL9 默认 / EL10 唯一）：`virtqemud` / `virtnetworkd` / `virtstoraged` / `virtproxyd`（由 `libvirt` 元包带入，无需单独下载） |
+| 启动方式 | `systemctl enable --now libvirtd` | `systemctl enable/start virtqemud.socket`（含 ro/admin）等，**socket 激活**，首次连接自动拉起 `.service` |
+| TCP 监听 | `libvirtd.conf`（`listen_tcp`/`tcp_port`）+ `LIBVIRTD_ARGS="--listen"`，重启 libvirtd | `virtproxyd-tcp.socket`（socket 激活；`*.conf` 内 `listen_tcp` **被忽略**），鉴权在 `virtproxyd.conf` 设 `auth_tcp="none"` |
 
-> ⚠️ **重要**：EL9/EL10 的 modular daemon 的 TCP 开启方式与 EL8 不同，平台后端的 `EnableTCP`
-> 需要做版本适配（计划中）。但**软件包层面**，`libvirt` 元包已包含这些 daemon，**你下载时无需额外列出**。
+> ✅ **已实现（平台后端自动适配，无需人工干预）**：后端 `internal/onboard/service.go` 会按目标主机
+> `/etc/os-release` 主版本与实际存在的 systemd 单元，自动判定守护进程模式并执行正确启动 / TCP 流程：
+> - **EL8** → 单体 `libvirtd`（`enable --now libvirtd` + `libvirtd.conf` 开 TCP）。
+> - **EL9** → 默认模块化 `virtqemud.socket` 等（socket 激活）；远程走 `virtproxyd-tcp.socket`。
+> - **EL10** → 单体 `libvirtd` 已弃用/不可用，**强制** 模块化 + `virtproxyd`（这正是早期 EL10 纳管在
+>   `systemctl enable --now libvirtd` 处失败的根因之一）。
+>
+> 此外，后端在启动守护进程**之前**会用离线仓库里的系统基础包（`openssl-libs`/`systemd`/`glibc` 等）
+> 做一次 `dnf upgrade --disablerepo='*'` 健康修复，对齐版本，**预防/修复**「新 systemd + 旧 openssl-libs」
+> 造成的 `EVP_MD_CTX_get_size_ex / OPENSSL_3.4.0` 符号查找失败（`systemctl` status 127）。
+>
+> **软件包层面**：`libvirt` 元包已包含这些 daemon，**你下载离线包时无需额外列出**。但请确保离线仓库里
+> **包含与目标系统匹配的 `openssl-libs` / `systemd` 等基础包**（一键脚本默认会带上），健康修复才能生效。
 
 ---
 

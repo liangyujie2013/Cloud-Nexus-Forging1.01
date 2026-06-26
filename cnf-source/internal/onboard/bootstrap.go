@@ -40,17 +40,20 @@ func Precheck(c *SSHClient, tcpPort int) (*BootstrapResult, error) {
 	}
 	r := &BootstrapResult{TCPPort: tcpPort}
 
-	// libvirtd 是否安装
-	r.LibvirtInstalled = c.RunQuiet("command -v libvirtd >/dev/null 2>&1 && echo yes") == "yes"
+	// libvirt 是否安装：单体 libvirtd 或模块化 virtqemud 任一存在即视为已安装
+	// （EL10 默认无单体 libvirtd，只有 virtqemud，旧判定会误报「未安装」）。
+	r.LibvirtInstalled = c.RunQuiet(
+		"{ command -v libvirtd >/dev/null 2>&1 || command -v virtqemud >/dev/null 2>&1 || rpm -q libvirt >/dev/null 2>&1; } && echo yes") == "yes"
 
 	// KVM 硬件虚拟化支持
 	vmx := c.RunQuiet("grep -E -c '(vmx|svm)' /proc/cpuinfo 2>/dev/null")
 	kvmDev := c.RunQuiet("test -e /dev/kvm && echo yes")
 	r.KVMSupported = atoiSafe(vmx) > 0 || kvmDev == "yes"
 
-	// libvirtd 是否运行
-	active := c.RunQuiet("systemctl is-active libvirtd 2>/dev/null")
-	r.LibvirtRunning = active == "active"
+	// libvirt 是否运行：单体看 libvirtd；模块化看 virtqemud.socket/.service 任一 active。
+	// 模块化采用 socket 激活，.service 平时不常驻，故 .socket active 即算「就绪」。
+	runCnt := c.RunQuiet("systemctl is-active libvirtd virtqemud.socket virtqemud.service 2>/dev/null | grep -c active")
+	r.LibvirtRunning = atoiSafe(runCnt) > 0
 
 	// TCP 端口监听状态
 	listen := c.RunQuiet(fmt.Sprintf("ss -ltn 2>/dev/null | grep -c ':%d '", tcpPort))
@@ -69,36 +72,20 @@ func Precheck(c *SSHClient, tcpPort int) (*BootstrapResult, error) {
 	return r, nil
 }
 
-// EnableTCP 在目标主机开启 libvirtd TCP 监听（需要 sudo/root）。
+// EnableTCP 在目标主机开启 libvirt 远程 TCP 监听（需要 sudo/root）。
 //
-// 步骤：写 /etc/libvirt/libvirtd.conf 开启 listen_tcp / 关闭 auth_tcp，
-// 在 sysconfig 给 libvirtd 加 --listen，重启服务并验证端口。
 // 这是纳管阶段唯一会修改目标主机的操作，且仅在用户显式请求时执行。
+// 按目标主机的守护进程模式自动选择正确实现：
+//   - EL8 单体 libvirtd：改 libvirtd.conf + LIBVIRTD_ARGS="--listen"，重启 libvirtd。
+//   - EL9/EL10 模块化：通过 virtproxyd-tcp.socket（socket 激活）开启监听。
 func EnableTCP(c *SSHClient, tcpPort int) (*BootstrapResult, error) {
 	if tcpPort == 0 {
 		tcpPort = 16509
 	}
-	cmds := []string{
-		// 备份原配置
-		`cp -n /etc/libvirt/libvirtd.conf /etc/libvirt/libvirtd.conf.cnf.bak 2>/dev/null || true`,
-		// 开启 TCP 监听与端口
-		`sed -i 's/^#\?listen_tcp.*/listen_tcp = 1/' /etc/libvirt/libvirtd.conf`,
-		`grep -q '^listen_tcp' /etc/libvirt/libvirtd.conf || echo 'listen_tcp = 1' >> /etc/libvirt/libvirtd.conf`,
-		`sed -i 's/^#\?auth_tcp.*/auth_tcp = "none"/' /etc/libvirt/libvirtd.conf`,
-		`grep -q '^auth_tcp' /etc/libvirt/libvirtd.conf || echo 'auth_tcp = "none"' >> /etc/libvirt/libvirtd.conf`,
-		fmt.Sprintf(`sed -i 's/^#\?tcp_port.*/tcp_port = "%d"/' /etc/libvirt/libvirtd.conf`, tcpPort),
-		// 让 libvirtd 以 --listen 启动（EL8 socket 激活需关闭后用传统模式）
-		`(grep -q 'LIBVIRTD_ARGS' /etc/sysconfig/libvirtd 2>/dev/null && sed -i 's/^#\?LIBVIRTD_ARGS.*/LIBVIRTD_ARGS="--listen"/' /etc/sysconfig/libvirtd) || echo 'LIBVIRTD_ARGS="--listen"' >> /etc/sysconfig/libvirtd`,
-		`systemctl stop libvirtd-tcp.socket libvirtd-tls.socket 2>/dev/null || true`,
-		`systemctl restart libvirtd`,
-	}
-	for _, cmd := range cmds {
-		if _, err := c.Run(sudoWrap(c, cmd)); err != nil {
-			// sed/grep 容错命令已带 || true，真正失败的是 restart
-			if strings.Contains(cmd, "restart") {
-				return nil, fmt.Errorf("重启 libvirtd 失败: %w", err)
-			}
-		}
+	osMajor := c.RunQuiet(`. /etc/os-release 2>/dev/null; echo "${VERSION_ID%%.*}"`)
+	model := detectServiceModel(c, osMajor)
+	if err := enableTCPForModel(c, model, tcpPort, func(string) {}); err != nil {
+		return nil, err
 	}
 	return Precheck(c, tcpPort)
 }
@@ -216,11 +203,14 @@ func InstallVirtualization(c *SSHClient, tcpPort int) (*InstallResult, error) {
 // InstallVirtualizationStream 自动安装的核心实现，支持流式日志回调；离线包优先。
 //
 // 支持：RHEL 8/9/10 及衍生版（Rocky / AlmaLinux / CentOS Stream），使用 dnf。
-// 流程：探测包管理器 → 检测已装/缺失虚拟化组件（装了就不装）→ 补齐缺失组件
+// 流程：探测包管理器 → 判定守护进程模式（EL8 单体 / EL9·EL10 模块化）→
 //
+//	检测已装/缺失虚拟化组件（装了就不装）→ 补齐缺失组件
 //	（平台离线包优先：缺什么由平台推送对应离线 RPM 本地安装，不依赖目标机在线源；
-//	 平台未预置该 OS 离线包时才回退目标机自带源）→ enable --now libvirtd →
-//	 开启 TCP 16509 → 防火墙放行 → 复检。
+//	 平台未预置该 OS 离线包时才回退目标机自带源）→
+//	系统健康修复（对齐 openssl/systemd 防符号断裂）→
+//	按模式启动守护进程（单体 libvirtd / 模块化 virtqemud.socket）→
+//	按模式开启 TCP 16509（libvirtd.conf / virtproxyd-tcp.socket）→ 防火墙放行 → 复检。
 //
 // 每步通过 emitter 实时回传命令、逐行输出与结果，前端可在白色方块里看到真实执行状态。
 func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *StepEmitter) (*InstallResult, error) {
@@ -234,6 +224,18 @@ func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *Ste
 	res.OS = c.RunQuiet(`. /etc/os-release 2>/dev/null; echo "$PRETTY_NAME"`)
 	osMajor := c.RunQuiet(`. /etc/os-release 2>/dev/null; echo "${VERSION_ID%%.*}"`)
 	osTag := OSTagFromMajor(osMajor)
+
+	// 0.0) 提前确定 libvirt 守护进程模式（EL8 单体 / EL9·EL10 模块化），
+	//      并立刻告知用户——避免「跑了半天才发现用错模式而失败」的体验。
+	model := detectServiceModel(c, osMajor)
+	emitter.line(fmt.Sprintf("◆ 目标系统：%s（主版本 el%s）", orDash(res.OS), orDash(osMajor)))
+	emitter.line(fmt.Sprintf("◆ libvirt 守护进程模式：%s", model.String()))
+	switch model {
+	case modelMonolithic:
+		emitter.line("  （EL8 默认单体 libvirtd：将用 systemctl enable --now libvirtd 启动）")
+	case modelModular:
+		emitter.line("  （EL9/EL10 模块化：将启用 virtqemud.socket 等，socket 激活，远程走 virtproxyd-tcp.socket）")
+	}
 
 	// 记录并推送一个步骤的工具函数。
 	record := func(step InstallStep) {
@@ -342,17 +344,38 @@ func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *Ste
 		}
 	}
 
-	// 2) 启动 libvirtd
+	// 1.5) 系统健康修复（关键，防止「跳过安装」时遗留的部分升级 ABI 断裂）：
+	//      即便核心组件已齐全，目标机也可能因历史失败安装处于「新 systemd + 旧 openssl-libs」
+	//      状态——此时 systemctl 一运行就符号查找失败（status 127）。这里用离线包里的
+	//      系统基础包（openssl-libs/systemd/glibc 等）做一次 dnf upgrade 对齐，先把系统修好，
+	//      再去碰 systemctl。仅当平台预置了该 OS 离线基础包时执行；否则静默跳过。
+	if opts.OfflineRepo != nil && opts.OfflineRepo.HasPackagesFor(osTag) {
+		name := "系统健康修复（对齐 openssl/systemd 防符号断裂）"
+		emitter.step(name, "offline base dnf upgrade")
+		did, out, rerr := opts.OfflineRepo.RepairSystemABI(c, osTag, emitter.line)
+		if !did {
+			emitter.line("（离线仓库未含系统基础包，跳过健康修复）")
+			record(InstallStep{Name: name, Command: "skip", Output: "无系统基础离线包，跳过", OK: true})
+		} else {
+			st := InstallStep{Name: name, Command: "offline-base-upgrade", Output: truncate(out, 2000), OK: rerr == nil}
+			if rerr != nil {
+				st.Error = rerr.Error()
+			}
+			record(st)
+		}
+	}
+
+	// 2) 启动 libvirt 守护进程（按版本选择正确模式：EL8 单体 / EL9·EL10 模块化）。
+	//    替代旧的「无脑 systemctl enable --now libvirtd」——在 EL10 上单体已弃用/不可用。
 	{
-		name := "启动并设置开机自启 libvirtd"
-		cmd := "systemctl enable --now libvirtd"
-		emitter.step(name, cmd)
-		out, err := c.RunStream(sudoWrap(c, cmd), emitter.line)
-		st := InstallStep{Name: name, Command: cmd, Output: truncate(out, 600), OK: err == nil}
+		name := "启动并设置开机自启 libvirt 守护进程"
+		emitter.step(name, "startLibvirtService("+model.String()+")")
+		cmd, out, err := startLibvirtService(c, model, emitter.line)
+		st := InstallStep{Name: name, Command: cmd, Output: truncate(out, 800), OK: err == nil}
 		if err != nil {
 			st.Error = err.Error()
 			record(st)
-			res.Message = "libvirtd 启动失败"
+			res.Message = "libvirt 守护进程启动失败（" + model.String() + "）"
 			pc, _ := Precheck(c, tcpPort)
 			res.Precheck = pc
 			return res, fmt.Errorf("%s 失败: %w", name, err)
@@ -369,12 +392,12 @@ func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *Ste
 		record(InstallStep{Name: name, Command: cmd, Output: truncate(out, 300), OK: err == nil, Error: errString(err)})
 	}
 
-	// 4) 开启 libvirtd TCP 监听
+	// 4) 开启远程 TCP 监听（按模式：EL8 走 libvirtd.conf+--listen；EL9/EL10 走 virtproxyd-tcp.socket）
 	{
-		name := fmt.Sprintf("配置 libvirtd TCP 监听（端口 %d）", tcpPort)
-		emitter.step(name, "EnableTCP")
-		_, err := EnableTCP(c, tcpPort)
-		st := InstallStep{Name: name, Command: "EnableTCP", OK: err == nil}
+		name := fmt.Sprintf("配置 libvirt 远程 TCP 监听（端口 %d · %s）", tcpPort, model.String())
+		emitter.step(name, "enableTCPForModel")
+		err := enableTCPForModel(c, model, tcpPort, emitter.line)
+		st := InstallStep{Name: name, Command: "enableTCPForModel", OK: err == nil}
 		if err != nil {
 			st.Error = err.Error()
 		}

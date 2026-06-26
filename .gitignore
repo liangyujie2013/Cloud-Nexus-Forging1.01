@@ -40,3 +40,4 @@ cnf-source/dist/
 # local runtime env (machine-specific, do not commit)
 cnf-source/.cnf-env
 cnf-source/cnf.env
+.local-backups/
