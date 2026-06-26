@@ -18,6 +18,7 @@ import (
 	"github.com/cnf/cnfv1/internal/config"
 	"github.com/cnf/cnfv1/internal/gpu"
 	"github.com/cnf/cnfv1/internal/ha"
+	"github.com/cnf/cnfv1/internal/onboard"
 	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/cnf/cnfv1/internal/service"
 	"github.com/cnf/cnfv1/internal/storage"
@@ -144,7 +145,9 @@ func main() {
 		Cache:     redisCache,
 
 		DefaultStoragePool: localPool,
+		OfflineRepo:        onboard.NewOfflineRepo(cfg.OfflinePkgPath),
 	}
+	log.Printf("离线安装包仓库就绪: %s", cfg.OfflinePkgPath)
 	v1.RegisterAPIRoutes(app, h)
 
 	addr := cfg.ListenAddr

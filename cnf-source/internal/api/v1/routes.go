@@ -67,7 +67,11 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/hosts", h.createHost, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/precheck", h.precheckHost, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/onboard", h.onboardHost, h.Mw.RequirePermission("host.create"))
+	api.Post("/hosts/onboard-stream", h.onboardHostStream, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/:id/enable-tcp", h.enableHostTCP, h.Mw.RequirePermission("host.update"))
+
+	// ---- 离线安装包仓库（自动部署 libvirt/KVM 时源不可用的兜底） ----
+	api.Get("/offline-packages", h.listOfflinePackages, h.Mw.RequirePermission("host.read"))
 	api.Post("/hosts/:id/maintenance", h.setHostMaintenance, h.Mw.RequirePermission("host.update"))
 	api.Delete("/hosts/:id", h.deleteHost, h.Mw.RequirePermission("host.delete"))
 

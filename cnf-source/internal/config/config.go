@@ -50,6 +50,11 @@ type Config struct {
 	// 默认本地存储池根目录（qcow2 系统盘存放路径）。
 	// 真实创建 VM 时，未显式指定存储池则使用此目录下的 LocalDriver。
 	StorageLocalPath string
+
+	// 离线安装包仓库根目录。平台预置 libvirt/KVM 相关 RPM 包于此，
+	// 当目标宿主机 yum/dnf 源不可用时，推送这些包到目标主机本地安装。
+	// 子目录约定：<root>/<os>/  （如 el8 / el9 / el10），内放 .rpm 文件。
+	OfflinePkgPath string
 }
 
 // Load 从环境变量加载配置（带默认值），并做基本校验。
@@ -79,6 +84,8 @@ func Load() (*Config, error) {
 		MigrationsDir: envOr("CNF_MIGRATIONS_DIR", "migrations/mysql"),
 
 		StorageLocalPath: envOr("CNF_STORAGE_LOCAL_PATH", "/var/lib/cnf/images"),
+
+		OfflinePkgPath: envOr("CNF_OFFLINE_PKG_PATH", "/var/lib/cnf/offline-packages"),
 	}
 
 	if err := c.validate(); err != nil {

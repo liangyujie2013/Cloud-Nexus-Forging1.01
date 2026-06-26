@@ -198,6 +198,113 @@ async function onboardHostSSH(payload) {
   return { ok: true, host, precheck: b.precheck, install: b.install, message: b.message }
 }
 
+// 流式纳管：调用 POST /hosts/onboard-stream（SSE），实时回传每步真实执行日志。
+// 用 fetch + ReadableStream 解析 SSE（可携带 Bearer 头，优于 EventSource）。
+//
+// 回调 handlers：
+//   onStep(step)   —— 某步骤开始 { name, command }
+//   onLine(line)   —— 一行实时输出（字符串）
+//   onDone(step)   —— 某步骤结束 { name, ok, output, error }
+// 返回 Promise<{ ok, host, precheck, install, message, error }>（result 事件内容）。
+async function onboardHostStreamSSH(payload, handlers) {
+  handlers = handlers || {}
+  const dup = state.hosts.find((h) => h.ip === payload.ip_address)
+  if (dup) return { ok: false, error: 'IP 地址 ' + payload.ip_address + ' 已被主机 ' + dup.name + ' 使用' }
+
+  const headers = { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' }
+  try {
+    const tok = localStorage.getItem('cnf_token')
+    if (tok) headers['Authorization'] = 'Bearer ' + tok
+  } catch (e) {}
+
+  let resp
+  try {
+    resp = await fetch(window.API_BASE + '/hosts/onboard-stream', {
+      method: 'POST', headers, body: JSON.stringify(payload),
+    })
+  } catch (err) {
+    return { ok: false, error: '网络请求失败：' + (err && err.message || err) }
+  }
+  if (!resp.ok && resp.headers.get('content-type') && resp.headers.get('content-type').includes('json')) {
+    const j = await resp.json().catch(() => ({}))
+    return { ok: false, error: j.error || j.message || ('纳管失败 HTTP ' + resp.status) }
+  }
+  if (!resp.body) {
+    return { ok: false, error: '当前浏览器不支持流式响应，请升级浏览器' }
+  }
+
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buf = ''
+  let finalResult = null
+
+  const dispatch = (event, data) => {
+    let obj = {}
+    try { obj = JSON.parse(data) } catch (e) { obj = { raw: data } }
+    if (event === 'step' && handlers.onStep) handlers.onStep(obj)
+    else if (event === 'line' && handlers.onLine) handlers.onLine(obj.line != null ? obj.line : (obj.raw || ''))
+    else if (event === 'done' && handlers.onDone) handlers.onDone(obj)
+    else if (event === 'result') finalResult = obj
+    else if (event === 'error') finalResult = { ok: false, error: obj.error || '未知错误' }
+  }
+
+  // 解析 SSE：以空行分隔的帧，每帧含 event: / data: 行。
+  const parseFrames = () => {
+    let idx
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      let ev = 'message', dataLines = []
+      frame.split('\n').forEach((ln) => {
+        if (ln.startsWith('event:')) ev = ln.slice(6).trim()
+        else if (ln.startsWith('data:')) dataLines.push(ln.slice(5).trim())
+      })
+      if (dataLines.length) dispatch(ev, dataLines.join('\n'))
+    }
+  }
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      parseFrames()
+    }
+    buf += decoder.decode()
+    parseFrames()
+  } catch (err) {
+    return { ok: false, error: '读取流失败：' + (err && err.message || err) }
+  }
+
+  if (!finalResult) return { ok: false, error: '连接中断，未收到最终结果' }
+  // 成功落库则同步到本地 state.hosts。
+  if (finalResult.ok && finalResult.host && finalResult.host.id) {
+    const host = finalResult.host
+    const idx = state.hosts.findIndex((h) => h.id === host.id)
+    if (idx >= 0) Object.assign(state.hosts[idx], host)
+    else state.hosts.push(host)
+  }
+  return finalResult
+}
+
+// 获取平台离线安装包仓库内容（GET /offline-packages）。
+// 返回 { ok, data:[{name,os_tag,size_kb}], groups:{el8:n}, enabled, root }。
+async function getOfflinePackages() {
+  const headers = {}
+  try {
+    const tok = localStorage.getItem('cnf_token')
+    if (tok) headers['Authorization'] = 'Bearer ' + tok
+  } catch (e) {}
+  try {
+    const r = await fetch(window.API_BASE + '/offline-packages', { headers })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, error: j.error || ('HTTP ' + r.status) }
+    return { ok: true, data: j.data || [], groups: j.groups || {}, enabled: !!j.enabled, root: j.root || '' }
+  } catch (err) {
+    return { ok: false, error: '网络请求失败：' + (err && err.message || err) }
+  }
+}
+
 // 获取迁移目标：只能是「同集群内的其他在线非维护主机」
 function getMigrationTargets(vmId) {
   const vm = state.vms.find((v) => v.id === vmId)
@@ -350,7 +457,7 @@ window.cnfTopology = {
   state,
   fetchAll,
   datacenterStats, clusterStats, hostStats, topologyTree,
-  addHostToCluster, precheckHostSSH, onboardHostSSH, getMigrationTargets, migrateVm,
+  addHostToCluster, precheckHostSSH, onboardHostSSH, onboardHostStreamSSH, getOfflinePackages, getMigrationTargets, migrateVm,
   createDatacenter, updateDatacenter, createCluster, updateCluster,
   deleteDatacenter, deleteCluster, removeHost,
   navigateTo,

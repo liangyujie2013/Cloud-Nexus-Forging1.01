@@ -8,9 +8,14 @@
 package onboard
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
+	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -95,6 +100,97 @@ func (c *SSHClient) Run(cmd string) (string, error) {
 func (c *SSHClient) RunQuiet(cmd string) string {
 	out, _ := c.Run(cmd)
 	return out
+}
+
+// RunStream 执行命令并实时回调每一行输出（stdout 与 stderr 合并，逐行推送），
+// 用于 SSE 流式安装日志——前端可在命令执行过程中即时看到真实输出。
+//
+// onLine 在每读到一行时被调用（不含换行符）；命令结束后返回完整输出与错误。
+// 即便命令失败，已读到的输出仍会通过 onLine 推送并在返回的 output 中累计。
+func (c *SSHClient) RunStream(cmd string, onLine func(line string)) (string, error) {
+	sess, err := c.cli.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	stderr, err := sess.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	pump := func(r io.Reader) {
+		defer wg.Done()
+		sc := bufio.NewScanner(r)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := sc.Text()
+			mu.Lock()
+			buf.WriteString(line)
+			buf.WriteByte('\n')
+			mu.Unlock()
+			if onLine != nil {
+				onLine(line)
+			}
+		}
+	}
+
+	if err := sess.Start(cmd); err != nil {
+		return "", err
+	}
+	wg.Add(2)
+	go pump(stdout)
+	go pump(stderr)
+	wg.Wait()
+	runErr := sess.Wait()
+
+	out := trimTrailingNewline(buf.String())
+	if runErr != nil {
+		return out, fmt.Errorf("命令失败 %q: %v", cmd, runErr)
+	}
+	return out, nil
+}
+
+// PushFile 将内存中的字节内容写入目标主机指定路径（通过 base64 管道传输，
+// 无需额外 sftp 依赖）。用于「离线安装」场景：把平台内置的 RPM 包推送到
+// 目标主机后本地安装，规避目标主机 yum/dnf 源不可用的问题。
+//
+// remotePath 必须为绝对路径；调用方应保证目录已存在（或先 mkdir）。
+func (c *SSHClient) PushFile(content []byte, remotePath string) error {
+	sess, err := c.cli.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	enc := base64.StdEncoding.EncodeToString(content)
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		return err
+	}
+	var errBuf bytes.Buffer
+	sess.Stderr = &errBuf
+	// 用 base64 -d 解码写入；single-quote 路径避免空格/特殊字符问题。
+	cmd := "base64 -d > '" + strings.ReplaceAll(remotePath, "'", `'\''`) + "'"
+	if err := sess.Start(cmd); err != nil {
+		return err
+	}
+	if _, werr := io.WriteString(stdin, enc); werr != nil {
+		return werr
+	}
+	stdin.Close()
+	if err := sess.Wait(); err != nil {
+		return fmt.Errorf("写入远端文件 %s 失败: %v (%s)", remotePath, err, errBuf.String())
+	}
+	return nil
 }
 
 // Close 关闭连接。

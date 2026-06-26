@@ -7,6 +7,7 @@ import (
 	"github.com/cnf/cnfv1/internal/cache"
 	"github.com/cnf/cnfv1/internal/gpu"
 	"github.com/cnf/cnfv1/internal/model"
+	"github.com/cnf/cnfv1/internal/onboard"
 	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/cnf/cnfv1/internal/service"
 	"github.com/cnf/cnfv1/internal/storage"
@@ -19,7 +20,7 @@ import (
 // 由 main.go 装配后通过 RegisterRoutes 注入。
 type Handlers struct {
 	Repo      service.Repository
-	MySQL     *mysql.Repository    // MySQL 仓储（层级/存储/网络等扩展 CRUD）
+	MySQL     *mysql.Repository // MySQL 仓储（层级/存储/网络等扩展 CRUD）
 	Conn      *virt.ConnManager
 	VM        *service.VMService
 	Migration *service.MigrationService
@@ -36,6 +37,10 @@ type Handlers struct {
 	// DefaultStoragePool 默认存储池（创建 VM 系统盘时使用）。
 	// 由装配层（main）按 CNF_STORAGE_LOCAL_PATH 初始化 LocalDriver 注入。
 	DefaultStoragePool storage.Driver
+
+	// OfflineRepo 离线安装包仓库（自动部署 libvirt/KVM 时，目标主机源不可用则
+	// 推送平台预置 RPM 本地安装）。由 main 按 CNF_OFFLINE_PKG_PATH 注入。
+	OfflineRepo *onboard.OfflineRepo
 }
 
 // ---- 工具 ----

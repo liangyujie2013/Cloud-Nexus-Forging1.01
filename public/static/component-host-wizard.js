@@ -49,6 +49,19 @@ const HostWizard = {
 
     const onDatacenterChange = () => { form.cluster_id = null }
 
+    // ---- 平台离线安装包仓库状态（源不可用时的兜底）----
+    const offline = reactive({ loaded: false, enabled: false, data: [], groups: {}, root: '' })
+    const loadOffline = async () => {
+      const res = await store.getOfflinePackages()
+      offline.loaded = true
+      if (res && res.ok) {
+        offline.enabled = res.enabled
+        offline.data = res.data || []
+        offline.groups = res.groups || {}
+        offline.root = res.root || ''
+      }
+    }
+
     // ---- 预检项目（真实 SSH 探测结果驱动）----
     const precheck = reactive([
       { key: 'net', name: t('hw_check_net'), status: 'pending', result: t('hw_check_wait') },
@@ -134,41 +147,83 @@ const HostWizard = {
       return okOrAuto(lib) && okOrAuto(tcp)
     })
 
-    // ---- 纳管部署（真实 POST /hosts/onboard）----
-    const deployProgress = ref(0)
+    // ---- 纳管部署（真实流式 POST /hosts/onboard-stream，SSE 实时日志）----
     const deployStatus = ref('') // '' | 'success' | 'exception'
     const deployMessage = ref('')
     const deploying = ref(false)
     const deployDone = ref(false)
-    const installSteps = ref([])   // 后端返回的真实安装步骤
+    // installSteps：实时步骤列表。每个 = { name, command, ok(null=进行中), error, lines:[] }
+    const installSteps = ref([])
+    const currentStepIdx = ref(-1)
+    const logBox = ref(null) // 终端日志容器（用于自动滚到底）
+
+    const scrollLogToEnd = () => {
+      // 等 DOM 更新后滚动到底，保证用户始终看到最新输出。
+      Vue.nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
+    }
+
     const runDeploy = async () => {
       if (deployDone.value) { emit('done'); emit('close'); return }
       deploying.value = true
       deployStatus.value = ''
       installSteps.value = []
-      deployProgress.value = 10
+      currentStepIdx.value = -1
       deployMessage.value = form.auto_install ? t('hw_dep_installing') : t('hw_dep_onboarding')
 
-      const res = await store.onboardHostSSH({
-        cluster_id: form.cluster_id,
-        name: form.hostname.trim(),
-        ip_address: form.ip_address.trim(),
-        ssh_port: form.ssh_port,
-        ssh_user: form.ssh_user.trim(),
-        password: form.ssh_password,
-        libvirt_port: 16509,
-        auto_install: form.auto_install,
-      })
+      const res = await store.onboardHostStreamSSH(
+        {
+          cluster_id: form.cluster_id,
+          name: form.hostname.trim(),
+          ip_address: form.ip_address.trim(),
+          ssh_port: form.ssh_port,
+          ssh_user: form.ssh_user.trim(),
+          password: form.ssh_password,
+          libvirt_port: 16509,
+          auto_install: form.auto_install,
+        },
+        {
+          // 某步骤开始：追加一个 running 步骤
+          onStep: (s) => {
+            installSteps.value.push({ name: s.name || '执行中', command: s.command || '', ok: null, error: '', lines: [] })
+            currentStepIdx.value = installSteps.value.length - 1
+            scrollLogToEnd()
+          },
+          // 实时一行输出：追加到当前步骤的 lines
+          onLine: (line) => {
+            const idx = currentStepIdx.value
+            if (idx >= 0 && installSteps.value[idx]) {
+              installSteps.value[idx].lines.push(line)
+              // 限制每步行数，避免超长输出拖慢页面
+              if (installSteps.value[idx].lines.length > 500) installSteps.value[idx].lines.shift()
+            }
+            scrollLogToEnd()
+          },
+          // 步骤结束：更新 ok/error/输出
+          onDone: (step) => {
+            const idx = currentStepIdx.value
+            const target = (idx >= 0 && installSteps.value[idx] && installSteps.value[idx].name === step.name)
+              ? installSteps.value[idx]
+              : installSteps.value.find((x) => x.name === step.name && x.ok === null)
+            if (target) {
+              target.ok = !!step.ok
+              target.error = step.error || ''
+              if (step.output && !target.lines.length) target.lines = String(step.output).split('\n')
+            } else {
+              installSteps.value.push({ name: step.name, command: step.command || '', ok: !!step.ok, error: step.error || '', lines: step.output ? String(step.output).split('\n') : [] })
+            }
+            scrollLogToEnd()
+          },
+        }
+      )
       deploying.value = false
-      deployProgress.value = 100
-
-      // 展示真实安装步骤（无论成败）
-      if (res.install && Array.isArray(res.install.steps)) installSteps.value = res.install.steps
 
       if (!res.ok) {
         deployStatus.value = 'exception'
         deployMessage.value = res.error || t('hw_dep_failed')
-        if (res.install && Array.isArray(res.install.steps)) installSteps.value = res.install.steps
+        // 后端 result/error 也可能带 install.steps（非流式回退），补充展示
+        if (res.install && Array.isArray(res.install.steps) && !installSteps.value.length) {
+          installSteps.value = res.install.steps.map((s) => ({ name: s.name, command: s.command, ok: s.ok, error: s.error, lines: s.output ? String(s.output).split('\n') : [] }))
+        }
         toast(deployMessage.value, 'error')
         return
       }
@@ -178,6 +233,15 @@ const HostWizard = {
       deployMessage.value = res.message || t('hw_dep_success').replace('{host}', form.hostname).replace('{cluster}', clName)
       toast(deployMessage.value, 'success')
     }
+
+    // 进度百分比：按已完成步骤 / 总步骤估算（仅展示用）。
+    const deployProgress = computed(() => {
+      if (deployDone.value) return 100
+      if (!installSteps.value.length) return deploying.value ? 5 : 0
+      const done = installSteps.value.filter((s) => s.ok !== null).length
+      const pct = Math.round((done / Math.max(installSteps.value.length, 1)) * 90) + 5
+      return Math.min(pct, 95)
+    })
 
     // ---- 校验 ----
     const validateStep1 = () => {
@@ -202,7 +266,10 @@ const HostWizard = {
     }
 
     const next = async () => {
-      if (step.value === 0) { if (!validateStep1()) return }
+      if (step.value === 0) {
+        if (!validateStep1()) return
+        if (!offline.loaded) loadOffline() // 进入步骤2前预拉离线包状态
+      }
       if (step.value === 1) { if (!validateStep2()) return }
       if (step.value === 2) {
         // 进入预检步骤前若未跑过，自动触发
@@ -222,7 +289,8 @@ const HostWizard = {
       step, steps, form, errors,
       datacenters, availableClusters, selectedCluster, onDatacenterChange,
       precheck, prechecking, runPrecheck, precheckPassed, precheckError, precheckRan, hardwareInfo,
-      deployProgress, deployStatus, deployMessage, deploying, deployDone, runDeploy, installSteps,
+      deployProgress, deployStatus, deployMessage, deploying, deployDone, runDeploy, installSteps, currentStepIdx, logBox,
+      offline, loadOffline,
       next, prev, nextLabel, t,
     }
   },
@@ -306,6 +374,14 @@ const HostWizard = {
               <div class="hw-toggle-desc">{{ t('hw_auto_install_desc') }}</div>
             </div>
           </div>
+          <!-- 离线安装包就绪状态：源不可用时平台自动推送本地 RPM 安装 -->
+          <div v-if="form.auto_install && offline.loaded" class="hw-offline-hint">
+            <i class="fas" :class="offline.data.length ? 'fa-box-open' : 'fa-box'"></i>
+            <span v-if="offline.data.length">
+              {{ t('hw_offline_ready') }}：{{ Object.keys(offline.groups).join(' / ') }}（{{ offline.data.length }} {{ t('hw_offline_pkgs') }}）— {{ t('hw_offline_fallback') }}
+            </span>
+            <span v-else>{{ t('hw_offline_empty') }}</span>
+          </div>
         </template>
 
         <!-- 步骤3：环境预检（真实 SSH 探测）-->
@@ -336,7 +412,7 @@ const HostWizard = {
           </div>
         </template>
 
-        <!-- 步骤4：纳管部署（真实安装 + 落库 + qemu+tcp 验证）-->
+        <!-- 步骤4：纳管部署（真实安装 + 落库 + qemu+tcp 验证；SSE 实时日志）-->
         <template v-else>
           <div class="deploy-box">
             <div class="usage-bar deploy-bar">
@@ -350,16 +426,27 @@ const HostWizard = {
               <span>{{ deployMessage || (form.auto_install ? t('hw_dep_ready_auto') : t('hw_dep_ready')) }}</span>
             </div>
           </div>
-          <!-- 真实安装步骤日志 -->
+          <!-- 真实安装步骤日志（实时流式，含每行 stdout/stderr）-->
           <div v-if="installSteps.length" class="install-log">
-            <div class="install-log-title"><i class="fas fa-terminal"></i> {{ t('hw_install_log') }}</div>
-            <div v-for="(s,i) in installSteps" :key="i" class="install-step" :class="{ok:s.ok, err:!s.ok}">
-              <i class="fas" :class="s.ok ? 'fa-circle-check' : 'fa-circle-xmark'"></i>
-              <div class="install-step-body">
-                <div class="install-step-name">{{ s.name }}</div>
-                <div v-if="s.error" class="install-step-err">{{ s.error }}</div>
+            <div class="install-log-title">
+              <i class="fas fa-terminal"></i> {{ t('hw_install_log') }}
+              <span class="install-log-live" v-if="deploying"><i class="fas fa-circle"></i> {{ t('hw_log_live') }}</span>
+            </div>
+            <div class="install-log-body" ref="logBox">
+              <div v-for="(s,i) in installSteps" :key="i" class="install-step" :class="{ok:s.ok===true, err:s.ok===false, running:s.ok===null}">
+                <div class="install-step-head">
+                  <i class="fas" :class="s.ok===true ? 'fa-circle-check' : s.ok===false ? 'fa-circle-xmark' : 'fa-circle-notch fa-spin'"></i>
+                  <span class="install-step-name">{{ s.name }}</span>
+                  <code v-if="s.command" class="install-step-cmd">{{ s.command }}</code>
+                </div>
+                <!-- 实时命令输出（终端风格） -->
+                <pre v-if="s.lines && s.lines.length" class="install-step-out">{{ s.lines.join('\\n') }}</pre>
+                <div v-if="s.error" class="install-step-err"><i class="fas fa-triangle-exclamation"></i> {{ s.error }}</div>
               </div>
             </div>
+          </div>
+          <div v-else-if="!deploying && !deployDone" class="muted" style="margin-top:10px;font-size:12px;text-align:center">
+            {{ form.auto_install ? t('hw_dep_ready_auto') : t('hw_dep_ready') }}
           </div>
         </template>
       </div>
