@@ -1703,6 +1703,114 @@ app.get('/favicon.ico', (c) => {
 // ============================================================================
 //  前端 SPA：Vue 3 Global build + 模块化视图脚本（按加载顺序）
 // ============================================================================
+// =============================================================================
+//  登录页 /login —— 真实落地登录入口（独立页面，不依赖 Vue，自包含）。
+//  提交 → POST {API_BASE}/auth/login → 存 JWT 到 localStorage → 跳回 /。
+//  API_BASE 取 localStorage.cnf_real_api_base（默认 /api/v1，同源代理）。
+// =============================================================================
+app.get('/login', (c) => {
+  return c.html(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 · Cloud Nexus Forging</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg,#0a1628 0%,#0f2847 45%,#13315c 100%); color: #1d1d1f; }
+    .login-card { width: 380px; background: #fff; border-radius: 18px; padding: 40px 36px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.35); animation: rise .4s ease; }
+    @keyframes rise { from { opacity:0; transform: translateY(16px); } to { opacity:1; transform:none; } }
+    .brand { display:flex; align-items:center; gap:12px; margin-bottom: 28px; }
+    .brand-logo { width:44px; height:44px; border-radius:12px;
+      background: linear-gradient(135deg,#0a84ff,#0066cc); display:flex; align-items:center;
+      justify-content:center; color:#fff; font-size:22px; font-weight:700; }
+    .brand-txt h1 { font-size:19px; font-weight:700; letter-spacing:.5px; }
+    .brand-txt p { font-size:12px; color:#86868b; margin-top:2px; }
+    label { display:block; font-size:13px; font-weight:600; color:#1d1d1f; margin:18px 0 7px; }
+    input { width:100%; height:44px; border:1.5px solid #d2d2d7; border-radius:10px; padding:0 14px;
+      font-size:15px; outline:none; transition:border-color .15s; }
+    input:focus { border-color:#0a84ff; }
+    .field-api { margin-top:6px; }
+    .field-api input { height:38px; font-size:13px; color:#6e6e73; }
+    .btn { width:100%; height:46px; margin-top:26px; border:none; border-radius:10px;
+      background:#0a84ff; color:#fff; font-size:16px; font-weight:600; cursor:pointer;
+      transition:background .15s,transform .05s; }
+    .btn:hover { background:#0070e0; }
+    .btn:active { transform:scale(.99); }
+    .btn:disabled { background:#a9d4ff; cursor:not-allowed; }
+    .msg { margin-top:16px; min-height:20px; font-size:13px; text-align:center; }
+    .msg.err { color:#ff3b30; }
+    .msg.ok { color:#34c759; }
+    .hint { margin-top:18px; font-size:12px; color:#86868b; text-align:center; line-height:1.6; }
+    .toggle-api { font-size:12px; color:#0a84ff; cursor:pointer; user-select:none; margin-top:14px; display:inline-block; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="brand">
+      <div class="brand-logo">C</div>
+      <div class="brand-txt"><h1>Cloud Nexus Forging</h1><p>企业级分布式虚拟化管理平台 v1.0.1</p></div>
+    </div>
+    <form id="f">
+      <label for="u">用户名</label>
+      <input id="u" type="text" autocomplete="username" value="admin" autofocus>
+      <label for="p">密码</label>
+      <input id="p" type="password" autocomplete="current-password" value="admin123">
+      <span class="toggle-api" id="toggleApi">⚙ 高级：后端地址</span>
+      <div class="field-api" id="apiWrap" style="display:none">
+        <input id="api" type="text" placeholder="/api/v1">
+      </div>
+      <button class="btn" id="btn" type="submit">登 录</button>
+      <div class="msg" id="msg"></div>
+    </form>
+    <div class="hint">默认账号：admin / admin123<br>同源部署后端地址填 /api/v1</div>
+  </div>
+  <script>
+    var DEFAULT_BASE = '/api/v1';
+    var apiBase = localStorage.getItem('cnf_real_api_base') || DEFAULT_BASE;
+    document.getElementById('api').value = apiBase;
+    document.getElementById('toggleApi').onclick = function(){
+      var w = document.getElementById('apiWrap');
+      w.style.display = w.style.display === 'none' ? 'block' : 'none';
+    };
+    document.getElementById('f').onsubmit = async function(e){
+      e.preventDefault();
+      var btn = document.getElementById('btn'), msg = document.getElementById('msg');
+      var u = document.getElementById('u').value.trim();
+      var p = document.getElementById('p').value;
+      var base = (document.getElementById('api').value.trim() || DEFAULT_BASE).replace(/\\/$/,'');
+      msg.className = 'msg'; msg.textContent = '';
+      btn.disabled = true; btn.textContent = '登录中…';
+      try {
+        var res = await fetch(base + '/auth/login', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ username:u, password:p })
+        });
+        var data = await res.json().catch(function(){return {};});
+        if (!res.ok || !data.token) {
+          throw new Error((data && (data.message || data.error)) || ('HTTP ' + res.status));
+        }
+        // 持久化：登录态 + 真实后端模式 + 地址
+        localStorage.setItem('cnf_token', data.token);
+        if (data.user) localStorage.setItem('cnf_user', JSON.stringify(data.user));
+        localStorage.setItem('cnf_backend_mode', 'real');
+        localStorage.setItem('cnf_real_api_base', base);
+        msg.className = 'msg ok'; msg.textContent = '登录成功，正在进入…';
+        setTimeout(function(){ window.location.href = '/'; }, 400);
+      } catch (err) {
+        msg.className = 'msg err'; msg.textContent = '登录失败：' + (err.message || err);
+        btn.disabled = false; btn.textContent = '登 录';
+      }
+    };
+  </script>
+</body>
+</html>`)
+})
+
 app.get('/', (c) => {
   return c.html(`<!DOCTYPE html>
 <html lang="zh-CN">

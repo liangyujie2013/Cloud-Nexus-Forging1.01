@@ -100,17 +100,34 @@ const DashboardView = {
     })
 
     const startStream = () => {
-      es = new EventSource(window.API_BASE + '/monitoring/metrics/stream')
+      // 真实后端 SSE 路径为 /metrics/stream；demo Mock 为 /monitoring/metrics/stream。
+      // EventSource 无法携带 Authorization 头，真实后端要求 JWT 时会握手失败——
+      // 这里捕获 onerror 并关闭，避免控制台噪音与潜在阻塞；监控数据缺失不影响其余面板。
+      const isReal = window.cnfIsReal && window.cnfIsReal()
+      const streamPath = isReal ? '/metrics/stream' : '/monitoring/metrics/stream'
+      try {
+        es = new EventSource(window.API_BASE + streamPath)
+      } catch (e) {
+        es = null
+        return
+      }
       es.onmessage = (e) => {
-        const d = JSON.parse(e.data)
-        metrics.value = d
-        history.push(d.cluster.cpu_usage)
-        if (history.length > 30) history.shift()
-        if (chart) {
-          chart.data.labels = history.map((_, i) => i)
-          chart.data.datasets[0].data = [...history]
-          chart.update('none')
-        }
+        try {
+          const d = JSON.parse(e.data)
+          if (!d || !d.cluster) return
+          metrics.value = d
+          history.push(d.cluster.cpu_usage)
+          if (history.length > 30) history.shift()
+          if (chart) {
+            chart.data.labels = history.map((_, i) => i)
+            chart.data.datasets[0].data = [...history]
+            chart.update('none')
+          }
+        } catch (err) { /* 单帧解析失败忽略 */ }
+      }
+      es.onerror = () => {
+        // 实时流不可用（端点缺失 / 鉴权 / 网络）：静默关闭，保留快照与静态数据。
+        if (es) { es.close(); es = null }
       }
     }
 
@@ -128,19 +145,22 @@ const DashboardView = {
       }
     }
 
+    // 小工具：api() 失败时返回 {error}，这里统一兜底，避免把错误对象塞进数据态导致渲染异常。
+    const okOr = (res, fallback) => (res && !res.error ? res : fallback)
     onMounted(async () => {
-      summary.value = await api('/summary')
-      // 先取一次快照，首屏即有数据（容量条/集群负载不再为空）
+      // summary：真实后端暂未实现 /summary，失败则保持空对象（界面据此降级，不报错）。
+      summary.value = okOr(await api('/summary'), {})
+      // 先取一次快照，首屏即有数据（容量条/集群负载不再为空）。
+      // 真实后端暂无 /monitoring/metrics 快照端点 → 失败时沿用预置默认值即可。
       const snap = await api('/monitoring/metrics')
-      if (snap && snap.cluster) {
+      if (snap && !snap.error && snap.cluster) {
         metrics.value = snap
-        // 用快照 CPU 值播种折线历史，使图表一开始就有曲线而非空白
         for (let i = 0; i < 12; i++) history.push(Math.max(2, Math.round(snap.cluster.cpu_usage + (Math.random() - 0.5) * 10)))
       }
-      clusters.value = await api('/clusters')
-      tasks.value = await api('/tasks')
-      rules.value = await api('/alert-rules')
-      gpuInventory.value = await api('/gpus')  // P1：GPU 归属清单
+      clusters.value = okOr(await api('/clusters'), [])
+      tasks.value = okOr(await api('/tasks'), [])
+      rules.value = okOr(await api('/alert-rules'), [])
+      gpuInventory.value = okOr(await api('/gpus'), [])  // P1：GPU 归属清单
       startStream()
       if (props.tab !== 'alerts') buildChart()
     })

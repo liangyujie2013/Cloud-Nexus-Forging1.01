@@ -52,13 +52,22 @@ const MonitoringView = {
     // ---- SSE realtime ----
     const startStream = () => {
       if (es) return
-      es = new EventSource(window.API_BASE + '/monitoring/metrics/stream')
+      // 真实后端 SSE 路径 /metrics/stream；demo 为 /monitoring/metrics/stream。
+      const isReal = window.cnfIsReal && window.cnfIsReal()
+      const streamPath = isReal ? '/metrics/stream' : '/monitoring/metrics/stream'
+      try {
+        es = new EventSource(window.API_BASE + streamPath)
+      } catch (e) { es = null; return }
       es.onmessage = (e) => {
-        const d = JSON.parse(e.data)
-        const gm = {}; d.gpus.forEach((g) => (gm[g.id] = g)); live.value = gm
-        const hm = {}; d.hosts.forEach((h) => (hm[h.id] = h)); liveHosts.value = hm
+        try {
+          const d = JSON.parse(e.data)
+          if (!d) return
+          const gm = {}; (d.gpus || []).forEach((g) => (gm[g.id] = g)); live.value = gm
+          const hm = {}; (d.hosts || []).forEach((h) => (hm[h.id] = h)); liveHosts.value = hm
+        } catch (err) { /* 单帧解析失败忽略 */ }
       }
-      es.onerror = () => {}
+      // 实时流不可用：静默关闭，保留静态快照数据（不抛错、不阻塞页面）。
+      es.onerror = () => { if (es) { es.close(); es = null } }
     }
     const stopStream = () => { if (es) { es.close(); es = null } }
 
