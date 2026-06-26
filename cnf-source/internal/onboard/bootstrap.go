@@ -132,13 +132,54 @@ func detectPkgMgr(c *SSHClient) string {
 	return ""
 }
 
+// virtComponent 描述一个虚拟化计算组件及其在目标主机上的「已安装」探测命令。
+type virtComponent struct {
+	Pkg   string // dnf 包名
+	Probe string // 探测命令：输出 "yes" 表示已安装
+	Desc  string // 中文角色描述（用于日志展示）
+}
+
+// coreComponents 平台纳管所需的核心虚拟化计算组件清单（按 RHEL 8/9/10 通用）。
+// 每个组件都带一条只读探测命令，用于「检测目标主机已装了什么、缺什么」。
+func coreComponents() []virtComponent {
+	return []virtComponent{
+		{Pkg: "qemu-kvm", Probe: "command -v qemu-kvm >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1 || rpm -q qemu-kvm >/dev/null 2>&1", Desc: "QEMU/KVM 虚拟化引擎"},
+		{Pkg: "libvirt", Probe: "command -v libvirtd >/dev/null 2>&1 || rpm -q libvirt >/dev/null 2>&1", Desc: "libvirt 虚拟化管理守护"},
+		{Pkg: "libvirt-client", Probe: "command -v virsh >/dev/null 2>&1 || rpm -q libvirt-client >/dev/null 2>&1", Desc: "virsh 客户端"},
+		{Pkg: "libvirt-daemon-driver-qemu", Probe: "rpm -q libvirt-daemon-driver-qemu >/dev/null 2>&1", Desc: "libvirt QEMU 驱动"},
+		{Pkg: "virt-install", Probe: "command -v virt-install >/dev/null 2>&1 || rpm -q virt-install >/dev/null 2>&1", Desc: "虚拟机安装工具"},
+	}
+}
+
+// detectMissingComponents 逐个探测核心组件，返回「缺失」的包名列表。
+// 已安装的组件直接跳过，不会重复安装（满足「装了就不装、缺什么补什么」）。
+func detectMissingComponents(c *SSHClient, emitter *StepEmitter) (missing []string, summary string) {
+	var present, absent []string
+	for _, comp := range coreComponents() {
+		ok := c.RunQuiet(comp.Probe+" && echo yes") == "yes"
+		if ok {
+			present = append(present, comp.Pkg)
+			emitter.line(fmt.Sprintf("  ✓ 已安装：%-30s %s", comp.Pkg, comp.Desc))
+		} else {
+			absent = append(absent, comp.Pkg)
+			missing = append(missing, comp.Pkg)
+			emitter.line(fmt.Sprintf("  ✗ 缺失  ：%-30s %s", comp.Pkg, comp.Desc))
+		}
+	}
+	summary = fmt.Sprintf("已安装 %d 项，缺失 %d 项", len(present), len(absent))
+	return missing, summary
+}
+
 // InstallOptions 控制自动安装行为。
 type InstallOptions struct {
 	TCPPort int
-	// OfflineRepo 非 nil 时启用「离线安装回退」：当在线 dnf 安装失败（源不可用），
-	// 自动把平台预置的 RPM 包推送到目标主机本地安装。
+	// OfflineRepo 平台离线包仓库。这是平台集成的核心能力：
+	// 纳管时先检测目标主机缺哪些虚拟化组件，凡平台预置了适配该 OS 版本的离线依赖包，
+	// 即直接推送到目标主机本地安装（--disablerepo='*'，完全不依赖目标主机的 yum/dnf 在线源）；
+	// 仅当平台尚未预置该 OS 版本的离线包时，才回退使用目标主机自带在线源。
 	OfflineRepo *OfflineRepo
-	// PreferOffline 为 true 时直接走离线安装（不先尝试在线源），适合已知目标主机无外网。
+	// PreferOffline 已废弃：现在只要平台预置了离线包就默认离线优先，无需此开关。
+	// 保留字段仅为向后兼容，置任何值都不再改变行为。
 	PreferOffline bool
 }
 
@@ -172,12 +213,14 @@ func InstallVirtualization(c *SSHClient, tcpPort int) (*InstallResult, error) {
 	return InstallVirtualizationStream(c, InstallOptions{TCPPort: tcpPort}, nil)
 }
 
-// InstallVirtualizationStream 自动安装的核心实现，支持流式日志回调与离线包回退。
+// InstallVirtualizationStream 自动安装的核心实现，支持流式日志回调；离线包优先。
 //
 // 支持：RHEL 8/9/10 及衍生版（Rocky / AlmaLinux / CentOS Stream），使用 dnf。
-// 流程：探测包管理器 → 安装 qemu-kvm/libvirt/驱动/virt-install（在线，失败可回退离线）→
+// 流程：探测包管理器 → 检测已装/缺失虚拟化组件（装了就不装）→ 补齐缺失组件
 //
-//	enable --now libvirtd → 开启 TCP 16509 → 防火墙放行 → 复检。
+//	（平台离线包优先：缺什么由平台推送对应离线 RPM 本地安装，不依赖目标机在线源；
+//	 平台未预置该 OS 离线包时才回退目标机自带源）→ enable --now libvirtd →
+//	 开启 TCP 16509 → 防火墙放行 → 复检。
 //
 // 每步通过 emitter 实时回传命令、逐行输出与结果，前端可在白色方块里看到真实执行状态。
 func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *StepEmitter) (*InstallResult, error) {
@@ -215,62 +258,80 @@ func InstallVirtualizationStream(c *SSHClient, opts InstallOptions, emitter *Ste
 		}
 	}
 
-	pkgs := "qemu-kvm libvirt libvirt-daemon-driver-qemu libvirt-client virt-install"
+	// 1) 检测目标主机已安装的虚拟化组件，得出「缺什么」。
+	//    已安装的组件直接跳过；只补齐缺失部分。
+	detectName := fmt.Sprintf("检测虚拟化计算组件（%s）", orDash(res.OS))
+	emitter.step(detectName, "rpm -q / command -v 逐项探测")
+	missing, summary := detectMissingComponents(c, emitter)
+	record(InstallStep{Name: detectName, Command: "detect-components", Output: summary, OK: true})
 
-	// 1) 安装虚拟化软件包：在线优先，失败时（若配置了离线仓库）回退离线推送安装。
-	hasOffline := opts.OfflineRepo != nil && opts.OfflineRepo.HasPackagesFor(osTag)
-	installOK := false
-	var installErr error
-
-	tryOffline := func() bool {
-		if opts.OfflineRepo == nil {
-			return false
-		}
-		name := fmt.Sprintf("离线安装：推送平台 RPM 包并本地安装（%s）", orDash(osTag))
-		emitter.step(name, "dnf install --disablerepo='*' /tmp/cnf-offline-rpms/*.rpm")
-		out, oerr := opts.OfflineRepo.PushAndInstall(c, osTag, emitter.line)
-		st := InstallStep{Name: name, Command: "offline-install", Output: truncate(out, 4000), OK: oerr == nil}
-		if oerr != nil {
-			st.Error = oerr.Error()
-		}
-		record(st)
-		return oerr == nil
-	}
-
-	if opts.PreferOffline && hasOffline {
-		// 已知无外网：直接离线安装。
-		installOK = tryOffline()
-		if !installOK {
-			res.Message = "离线安装失败"
-			pc, _ := Precheck(c, tcpPort)
-			res.Precheck = pc
-			return res, fmt.Errorf("离线安装 libvirt + KVM 失败")
-		}
+	// 1.0) 若核心组件齐全，跳过安装直接进入服务配置阶段（装了就不装）。
+	if len(missing) == 0 {
+		emitter.line("✓ 核心虚拟化组件已齐全，跳过安装，直接进入服务配置阶段")
+		record(InstallStep{Name: "安装虚拟化计算组件", Command: "skip", Output: "组件已齐全，无需安装", OK: true})
 	} else {
-		// 在线安装（流式输出）。
-		onlineName := "安装虚拟化软件包（qemu-kvm/libvirt/virt-install）"
-		onlineCmd := pm + " install -y " + pkgs
-		emitter.step(onlineName, onlineCmd)
-		out, err := c.RunStream(sudoWrap(c, onlineCmd), emitter.line)
-		st := InstallStep{Name: onlineName, Command: onlineCmd, Output: truncate(out, 4000), OK: err == nil}
-		if err != nil {
-			st.Error = err.Error()
-		}
-		record(st)
-		installOK = err == nil
-		installErr = err
+		// 2) 补齐缺失组件：平台离线包优先。
+		//    平台预置了适配该 OS 版本的离线依赖包 → 直接推送本地安装（不依赖目标机在线源）；
+		//    平台未预置 → 回退目标主机自带的 dnf/yum 在线源。
+		hasOffline := opts.OfflineRepo != nil && opts.OfflineRepo.HasPackagesFor(osTag)
+		installOK := false
+		var installErr error
 
-		// 在线失败 → 离线回退。
-		if !installOK && hasOffline {
-			emitter.line("⚠️ 在线源安装失败，尝试使用平台离线安装包回退...")
-			installOK = tryOffline()
+		// 离线推送安装：把平台预置的 RPM（该 osTag + common）推到目标机本地安装。
+		tryOffline := func() bool {
+			if opts.OfflineRepo == nil {
+				return false
+			}
+			name := fmt.Sprintf("平台推送离线依赖包并本地安装（%s · 缺 %d 项）", orDash(osTag), len(missing))
+			emitter.step(name, "push RPMs → dnf install --disablerepo='*'")
+			emitter.line(fmt.Sprintf("缺失组件：%s", strings.Join(missing, " ")))
+			out, oerr := opts.OfflineRepo.PushAndInstall(c, osTag, emitter.line)
+			st := InstallStep{Name: name, Command: "offline-install", Output: truncate(out, 4000), OK: oerr == nil}
+			if oerr != nil {
+				st.Error = oerr.Error()
+			}
+			record(st)
+			return oerr == nil
 		}
+
+		// 在线安装：仅安装缺失的包（dnf 自动跳过已装项）。
+		tryOnline := func() bool {
+			onlineName := fmt.Sprintf("目标主机在线源安装缺失组件（缺 %d 项）", len(missing))
+			onlineCmd := pm + " install -y " + strings.Join(missing, " ")
+			emitter.step(onlineName, onlineCmd)
+			out, err := c.RunStream(sudoWrap(c, onlineCmd), emitter.line)
+			st := InstallStep{Name: onlineName, Command: onlineCmd, Output: truncate(out, 4000), OK: err == nil}
+			if err != nil {
+				st.Error = err.Error()
+				installErr = err
+			}
+			record(st)
+			return err == nil
+		}
+
+		if hasOffline {
+			// 平台已预置适配该 OS 的离线包 → 离线优先（平台集成能力，不依赖目标机源）。
+			emitter.line(fmt.Sprintf("✓ 平台已预置适配 %s 的离线依赖包，将直接推送本地安装（无需目标主机访问在线源）", orDash(osTag)))
+			installOK = tryOffline()
+			// 离线失败 → 再尝试目标主机自带在线源兜底。
+			if !installOK {
+				emitter.line("⚠️ 离线推送安装失败，尝试目标主机自带在线源兜底...")
+				installOK = tryOnline()
+			}
+		} else {
+			// 平台未预置该 OS 离线包 → 用目标主机自带在线源（请提前在平台准备离线包以摆脱此依赖）。
+			if opts.OfflineRepo != nil {
+				emitter.line(fmt.Sprintf("ℹ️ 平台尚未预置适配 %s 的离线依赖包，本次使用目标主机自带在线源安装；建议在平台「离线安装包」预置 %s 包以摆脱在线源依赖", orDash(osTag), orDash(osTag)))
+			}
+			installOK = tryOnline()
+		}
+
 		if !installOK {
-			res.Message = "自动安装失败：在线源不可用"
-			if hasOffline {
-				res.Message += "，离线回退也失败"
-			} else if opts.OfflineRepo != nil {
-				res.Message += fmt.Sprintf("，且平台未预置适配 %s 的离线包", orDash(osTag))
+			res.Message = "补齐缺失虚拟化组件失败"
+			if opts.OfflineRepo != nil && !hasOffline {
+				res.Message += fmt.Sprintf("（平台未预置适配 %s 的离线包，且目标主机在线源不可用）", orDash(osTag))
+			} else if hasOffline {
+				res.Message += "（离线推送与在线源兜底均失败）"
 			}
 			pc, _ := Precheck(c, tcpPort)
 			res.Precheck = pc

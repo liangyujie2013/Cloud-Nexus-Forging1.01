@@ -3,10 +3,11 @@
 //  企业级 4 步流程（★ 全程真实 SSH，无任何模拟）：
 //    步骤1 选择集群：先选数据中心 → 再选目标集群（体现层级约束）+ 集群信息提示
 //    步骤2 连接信息：主机名 / 管理IP / SSH 端口 / SSH 用户 / SSH 密码
-//                    + 「自动安装 libvirt 和 KVM（若未安装）」开关
-//    步骤3 环境预检：真实调用 POST /hosts/precheck —— SSH 探测 libvirt/KVM/TCP + 采集硬件
-//    步骤4 纳管部署：真实调用 POST /hosts/onboard —— （可选）自动安装 → 采集硬件 → 落库 →
-//                    qemu+tcp 验证 → 置 connected。展示真实安装步骤与错误。
+//                    + 「自动安装虚拟化计算组件（libvirt / KVM）」开关
+//    步骤3 环境预检：真实调用 POST /hosts/precheck —— SSH 探测虚拟化组件/KVM/TCP + 采集硬件
+//    步骤4 纳管部署：真实调用 POST /hosts/onboard-stream —— 检测组件→缺失部分由平台
+//                    推送离线依赖包本地安装（装了就跳过）→ 采集硬件 → 落库 →
+//                    qemu+tcp 验证 → 置 connected。SSE 展示真实执行步骤与错误。
 //  Apple HIG：毛玻璃 modal / 12px 圆角 / 流畅过渡。无任何第三方 UI 框架。
 //  通过自定义事件 cnf:open-host-wizard 打开（可携带 presetClusterId）。
 // =============================================================================

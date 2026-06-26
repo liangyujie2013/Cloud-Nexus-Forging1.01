@@ -127,6 +127,9 @@ func (r *OfflineRepo) HasPackagesFor(osTag string) bool {
 // PushAndInstall 把适配 osTag 的所有本地 RPM 推送到目标主机临时目录，
 // 然后用 dnf 从本地文件安装（--disablerepo='*' 完全绕开在线源）。
 //
+// 这是「全量」推送：把仓库里该 osTag（含 common）的所有 RPM 都推过去，
+// dnf 自动解析依赖、跳过已安装项。适合平台离线包就是「一整套依赖闭包」的场景。
+//
 // onLine 用于流式回传每行进度（推送进度 + dnf 输出）。
 // 返回安装命令的完整输出与错误。
 func (r *OfflineRepo) PushAndInstall(c *SSHClient, osTag string, onLine func(string)) (string, error) {
@@ -136,6 +139,16 @@ func (r *OfflineRepo) PushAndInstall(c *SSHClient, osTag string, onLine func(str
 	}
 	if len(paths) == 0 {
 		return "", fmt.Errorf("平台离线仓库中没有适配 %s 的 RPM 包，请先在「离线安装包」中上传", osTag)
+	}
+	return r.pushAndInstallPaths(c, paths, onLine)
+}
+
+// pushAndInstallPaths 把给定的本地 RPM 路径列表推送到目标主机并本地安装。
+// dnf 以「整个本地目录」为输入，自动解析这批 RPM 之间的依赖闭包，并跳过
+// 目标主机上已安装的包（缺什么装什么，不会重复安装）。
+func (r *OfflineRepo) pushAndInstallPaths(c *SSHClient, paths []string, onLine func(string)) (string, error) {
+	if len(paths) == 0 {
+		return "", fmt.Errorf("没有可推送的 RPM 包")
 	}
 
 	remoteDir := "/tmp/cnf-offline-rpms"
@@ -161,8 +174,9 @@ func (r *OfflineRepo) PushAndInstall(c *SSHClient, osTag string, onLine func(str
 		}
 	}
 
-	emit(fmt.Sprintf("[安装] 从本地 %d 个 RPM 安装（已禁用在线源）...", len(paths)))
-	// --disablerepo='*' 彻底绕过在线源；dnf 会自动解析这批本地 RPM 的依赖关系。
+	emit(fmt.Sprintf("[安装] 从平台离线包本地安装 %d 个 RPM（已禁用在线源，缺什么装什么）...", len(paths)))
+	// --disablerepo='*' 彻底绕过在线源；dnf 会自动解析这批本地 RPM 的依赖关系，
+	// 已安装的包会被自动跳过（幂等）。
 	installCmd := fmt.Sprintf("dnf install -y --disablerepo='*' %s/*.rpm", remoteDir)
 	out, ierr := c.RunStream(sudoWrap(c, installCmd), onLine)
 	// 清理临时目录（失败不致命）

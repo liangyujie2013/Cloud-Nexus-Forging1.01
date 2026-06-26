@@ -36,3 +36,7 @@ lerna-debug.log*
 cnf-source/bin/
 cnf-source/dist/
 *.tar.gz
+
+# local runtime env (machine-specific, do not commit)
+cnf-source/.cnf-env
+cnf-source/cnf.env
