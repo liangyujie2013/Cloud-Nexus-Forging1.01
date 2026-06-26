@@ -46,9 +46,7 @@ ON DUPLICATE KEY UPDATE
     role         = VALUES(role);
 
 -- ----------------------------------------------------------------------------
--- 默认数据中心
+-- 说明：不再预置任何「默认数据中心 / 集群 / 主机」等业务数据。
+-- 生产落地要求全真实数据：数据中心、集群、宿主机均由用户在 UI 中真实创建/纳管。
+-- 本迁移仅初始化登录必需的内置角色与管理员账号（admin / admin123）。
 -- ----------------------------------------------------------------------------
-INSERT INTO datacenters (uuid, name, location, description, timezone, tags, metadata)
-VALUES (UUID(), 'Default-DC', '默认机房', '系统初始化创建的默认数据中心',
-        'Asia/Shanghai', JSON_ARRAY(), JSON_OBJECT())
-ON DUPLICATE KEY UPDATE description = VALUES(description);

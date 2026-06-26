@@ -150,6 +150,54 @@ async function addHostToCluster(data) {
   return { ok: true, host: res, cluster }
 }
 
+// 原始 POST：不经 api() 的 {data} 自动解包，保留后端响应的全部同级字段
+// （onboard/precheck 会同时返回 data + precheck + install + message）。
+async function rawPost(path, body) {
+  const headers = { 'Content-Type': 'application/json' }
+  try {
+    const tok = localStorage.getItem('cnf_token')
+    if (tok) headers['Authorization'] = 'Bearer ' + tok
+  } catch (e) {}
+  try {
+    const r = await fetch(window.API_BASE + path, { method: 'POST', headers, body: JSON.stringify(body) })
+    const json = await r.json().catch(() => ({}))
+    return { _status: r.status, _ok: r.ok, body: json }
+  } catch (err) {
+    return { _status: 0, _ok: false, body: { error: '网络请求失败：' + (err && err.message || err) } }
+  }
+}
+
+// 真实 SSH 预检：调用后端 POST /hosts/precheck（只读探测，不修改目标主机也不落库）。
+// 返回 { ok, precheck, hardware } 或 { ok:false, error }。
+async function precheckHostSSH(payload) {
+  const r = await rawPost('/hosts/precheck', payload)
+  const b = r.body || {}
+  if (!r._ok || b.error || b.code) {
+    return { ok: false, error: b.error || b.message || ('预检失败 HTTP ' + r._status) }
+  }
+  return { ok: true, precheck: b.precheck, hardware: b.hardware }
+}
+
+// 真实 SSH 纳管：调用后端 POST /hosts/onboard（采集硬件→落库→qemu+tcp 验证）。
+// auto_install=true 时后端会在缺组件时自动安装 libvirt+KVM 并配置 TCP。
+// 返回 { ok, host, precheck, install, message } 或 { ok:false, error, install }。
+async function onboardHostSSH(payload) {
+  const dup = state.hosts.find((h) => h.ip === payload.ip_address)
+  if (dup) return { ok: false, error: 'IP 地址 ' + payload.ip_address + ' 已被主机 ' + dup.name + ' 使用' }
+  const r = await rawPost('/hosts/onboard', payload)
+  const b = r.body || {}
+  if (!r._ok || b.error || b.code) {
+    return { ok: false, error: b.error || b.message || ('纳管失败 HTTP ' + r._status), install: b.install, precheck: b.precheck }
+  }
+  const host = b.data || b
+  if (host && host.id) {
+    const idx = state.hosts.findIndex((h) => h.id === host.id)
+    if (idx >= 0) Object.assign(state.hosts[idx], host)
+    else state.hosts.push(host)
+  }
+  return { ok: true, host, precheck: b.precheck, install: b.install, message: b.message }
+}
+
 // 获取迁移目标：只能是「同集群内的其他在线非维护主机」
 function getMigrationTargets(vmId) {
   const vm = state.vms.find((v) => v.id === vmId)
@@ -302,7 +350,7 @@ window.cnfTopology = {
   state,
   fetchAll,
   datacenterStats, clusterStats, hostStats, topologyTree,
-  addHostToCluster, getMigrationTargets, migrateVm,
+  addHostToCluster, precheckHostSSH, onboardHostSSH, getMigrationTargets, migrateVm,
   createDatacenter, updateDatacenter, createCluster, updateCluster,
   deleteDatacenter, deleteCluster, removeHost,
   navigateTo,

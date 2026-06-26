@@ -16,14 +16,17 @@ import (
 
 // onboardRequest 纳管请求体。
 type onboardRequest struct {
-	ClusterID  int    `json:"cluster_id"`
-	Name       string `json:"name"`
-	IPAddress  string `json:"ip_address"`
-	SSHPort    int    `json:"ssh_port"`
-	SSHUser    string `json:"ssh_user"`
-	Password   string `json:"password"`
-	PrivateKey string `json:"private_key"`
-	LibvirtPort int   `json:"libvirt_port"`
+	ClusterID   int    `json:"cluster_id"`
+	Name        string `json:"name"`
+	IPAddress   string `json:"ip_address"`
+	SSHPort     int    `json:"ssh_port"`
+	SSHUser     string `json:"ssh_user"`
+	Password    string `json:"password"`
+	PrivateKey  string `json:"private_key"`
+	LibvirtPort int    `json:"libvirt_port"`
+	// AutoInstall 为 true 时：若目标主机未安装 libvirt/KVM 或未开启 TCP，
+	// 则通过 SSH 自动安装 qemu-kvm/libvirt 并配置 TCP 16509 后再纳管。
+	AutoInstall bool `json:"auto_install"`
 }
 
 func (r *onboardRequest) sshConfig() onboard.SSHConfig {
@@ -83,10 +86,29 @@ func (h *Handlers) onboardHost(c fiber.Ctx) error {
 	if err != nil {
 		return serverError(c, err)
 	}
+
+	// 1.1) 自动安装：用户启用 auto_install 且目标主机缺少 libvirt 或未开启 TCP 时，
+	//      通过 SSH 自动安装 qemu-kvm/libvirt 并配置 TCP，然后用复检结果替换 pre。
+	var install *onboard.InstallResult
+	if req.AutoInstall && (!pre.LibvirtInstalled || !pre.TCPListening) {
+		install, err = onboard.InstallVirtualization(cli, req.LibvirtPort)
+		if err != nil {
+			// 安装失败：明确返回安装步骤与错误，绝不静默成功（要求：返回清晰错误）。
+			return c.Status(fiber.StatusPreconditionFailed).JSON(fiber.Map{
+				"error":   "自动安装 libvirt + KVM 失败: " + err.Error(),
+				"install": install,
+			})
+		}
+		if install.Precheck != nil {
+			pre = install.Precheck
+		}
+	}
+
 	if !pre.LibvirtInstalled || !pre.KVMSupported {
 		return c.Status(fiber.StatusPreconditionFailed).JSON(fiber.Map{
 			"error":    pre.Message,
 			"precheck": pre,
+			"install":  install,
 		})
 	}
 
@@ -157,6 +179,7 @@ func (h *Handlers) onboardHost(c fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"data":     saved,
 		"precheck": pre,
+		"install":  install,
 		"message":  connMsg,
 	})
 }
