@@ -124,6 +124,77 @@ func (r *OfflineRepo) HasPackagesFor(osTag string) bool {
 	return len(paths) > 0
 }
 
+var knownArchSuffixes = []string{".x86_64", ".noarch", ".aarch64", ".i686", ".src"}
+
+// rpmNameFromFile 从 RPM 文件名解析出「包名」（NEVRA 中的 N）。
+//
+// RPM 文件名格式：<name>-<version>-<release>.<arch>.rpm，其中 name 可能含连字符
+// （如 libvirt-daemon-driver-qemu）。解析规则：先去掉 .rpm 与 .<arch>，得到
+// name-version-release；version-release 是最后两个「以连字符分隔且版本段以数字开头」
+// 的字段，剩余前缀即为包名。
+//
+// 例：
+//
+//	libvirt-daemon-driver-qemu-11.10.0-12.3.el10_2.x86_64.rpm → libvirt-daemon-driver-qemu
+//	iotop-c-1.26-4.el10.x86_64.rpm                            → iotop-c
+//	htop-3.3.0-5.el10_0.x86_64.rpm                            → htop
+func rpmNameFromFile(file string) string {
+	s := filepath.Base(file)
+	s = strings.TrimSuffix(s, ".rpm")
+	// 去掉架构后缀
+	for _, a := range knownArchSuffixes {
+		if strings.HasSuffix(s, a) {
+			s = strings.TrimSuffix(s, a)
+			break
+		}
+	}
+	// 现在 s = name-version-release。从右往左切两段（release、version）。
+	// release：最后一个连字符之后；version：倒数第二个连字符之后。
+	lastDash := strings.LastIndex(s, "-")
+	if lastDash <= 0 {
+		return s
+	}
+	prefix := s[:lastDash] // name-version
+	secondDash := strings.LastIndex(prefix, "-")
+	if secondDash <= 0 {
+		return prefix
+	}
+	// 校验 version 段以数字开头（NEVRA 的 version 必须以数字起始），否则保守返回整体
+	verSeg := prefix[secondDash+1:]
+	if len(verSeg) == 0 || verSeg[0] < '0' || verSeg[0] > '9' {
+		return prefix
+	}
+	return prefix[:secondDash]
+}
+
+// availablePackageNames 返回该 osTag(+common) 离线目录里实际存在的「包名」集合。
+func (r *OfflineRepo) availablePackageNames(osTag string) map[string]bool {
+	names := map[string]bool{}
+	paths, _ := r.packagesFor(osTag)
+	for _, p := range paths {
+		if n := rpmNameFromFile(p); n != "" {
+			names[n] = true
+		}
+	}
+	return names
+}
+
+// filterAvailable 仅保留 want 中「离线仓库里确实存在的包名」。
+//
+// 关键：dnf install 遇到不存在的包名（如 el10 没有 libvirt-daemon-kvm）会整笔事务
+// 报 "Unable to find a match" 失败；而 el10 的 dnf 4.20 又不支持 --skip-unavailable。
+// 因此在构造安装命令前先按「仓库实际包名」过滤，跳过的名字回传给调用方记录日志。
+func filterAvailable(want []string, available map[string]bool) (keep []string, skipped []string) {
+	for _, w := range want {
+		if available[w] {
+			keep = append(keep, w)
+		} else {
+			skipped = append(skipped, w)
+		}
+	}
+	return keep, skipped
+}
+
 // systemBasePrefixes 系统级基础包前缀。这些包属于「系统健康修复」（RepairSystemABI）
 // 的范畴，仅在目标机出现「部分升级 ABI 断裂」（如 EL10 systemd↔openssl 错配）时，
 // 用 `dnf upgrade` 对齐已装版本。**组件安装阶段不应推送它们**：
@@ -170,13 +241,18 @@ func isSystemBasePkg(name string) bool {
 // 清单 = 虚拟化核心 + 常用运维/监控工具（htop 等，满足 Request P）。
 // 缺失探测到的包会与本清单合并去重；目标机已装的包 dnf 会自动跳过（幂等）。
 var offlineWantPackages = []string{
-	// 虚拟化核心
+	// 虚拟化核心（仅列出 el8/el9/el10 通用且确定存在的顶层包名）。
+	// 注意：不要列出 "libvirt-daemon-kvm" —— 该包在 Rocky/RHEL 10 上不存在，
+	// dnf install 遇到不存在的名字会整笔事务报 "Unable to find a match" 而失败。
+	// 各发行版差异的子包（libvirt-daemon-driver-* 等）由 bootstrap 层按「实际缺失」
+	// 探测后通过 wantExtra 传入；本清单只保留三发行版都存在的稳妥名字。
 	"qemu-kvm", "qemu-img",
 	"libvirt", "libvirt-client", "virt-install",
 	"libvirt-daemon", "libvirt-daemon-driver-qemu",
 	"libvirt-daemon-config-network",
-	"libvirt-daemon-kvm",
-	// 常用运维/监控工具（用户部署后纳管主机即自带）
+	// 常用运维/监控工具（用户部署后纳管主机即自带）。
+	// iotop 在 el10 上实际包名为 iotop-c，这里仍写 iotop —— 配合 --skip-unavailable，
+	// 不存在的名字会被跳过而不影响整体事务（el10 的 iotop-c 由依赖闭包带入）。
 	"htop", "tmux", "vim-enhanced", "wget", "tar", "bzip2", "unzip",
 	"net-tools", "bind-utils", "nmap-ncat", "lsof",
 	"sysstat", "iotop", "bash-completion", "chrony", "rsync",
@@ -202,7 +278,19 @@ func (r *OfflineRepo) PushAndInstall(c *SSHClient, osTag string, wantExtra []str
 	}
 	// 合并「内置顶层清单」+「缺失探测包」并去重，作为 dnf install 的目标。
 	want := dedupStrings(append(append([]string{}, offlineWantPackages...), wantExtra...))
-	return r.pushAndInstallRepo(c, osTag, all, want, onLine)
+	// 关键：按「仓库实际存在的包名」过滤，跳过当前发行版没有的名字（如 el10 无
+	// libvirt-daemon-kvm、iotop 名为 iotop-c），否则 dnf install 会整笔事务报
+	// "Unable to find a match" 失败（el10 的 dnf 4.20 不支持 --skip-unavailable）。
+	available := r.availablePackageNames(osTag)
+	keep, skipped := filterAvailable(want, available)
+	if len(skipped) > 0 && onLine != nil {
+		onLine(fmt.Sprintf("ℹ️ 以下顶层包不在 %s 离线仓库中，自动跳过（其能力多由依赖闭包带入）：%s",
+			osTag, strings.Join(skipped, " ")))
+	}
+	if len(keep) == 0 {
+		return "", fmt.Errorf("过滤后没有可安装的顶层包（仓库与清单不匹配）")
+	}
+	return r.pushAndInstallRepo(c, osTag, all, keep, onLine)
 }
 
 // dedupStrings 去重并保持稳定顺序。

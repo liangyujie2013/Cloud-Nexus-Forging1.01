@@ -97,3 +97,22 @@ func TestOfflineRepoListGrouping(t *testing.T) {
 		t.Errorf("OSTag 期望 el10，实际 %q", pkgs[0].OSTag)
 	}
 }
+
+func TestRPMNameFromFile(t *testing.T) {
+	cases := map[string]string{
+		"libvirt-daemon-driver-qemu-11.10.0-12.3.el10_2.x86_64.rpm": "libvirt-daemon-driver-qemu",
+		"iotop-c-1.26-4.el10.x86_64.rpm":                            "iotop-c",
+		"htop-3.3.0-5.el10_0.x86_64.rpm":                            "htop",
+		"qemu-kvm-10.1.0-16.el10_2.1.x86_64.rpm":                    "qemu-kvm",
+		"net-tools-2.0-0.73.20160912git.el10.x86_64.rpm":           "net-tools",
+		"bind-utils-9.18.33-15.el10_2.2.x86_64.rpm":                "bind-utils",
+		"vim-enhanced-9.1.083-9.el10_2.4.x86_64.rpm":               "vim-enhanced",
+		"python3-libxml2-2.12.5-10.el10_2.1.x86_64.rpm":            "python3-libxml2",
+		"bash-completion-2.11-13.el10.noarch.rpm":                  "bash-completion",
+	}
+	for f, want := range cases {
+		if got := rpmNameFromFile(f); got != want {
+			t.Errorf("rpmNameFromFile(%q) = %q, want %q", f, got, want)
+		}
+	}
+}
