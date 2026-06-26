@@ -2,12 +2,15 @@ package v1
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 
+	"github.com/cnf/cnfv1/internal/auth"
 	"github.com/cnf/cnfv1/internal/model"
 	"github.com/cnf/cnfv1/internal/onboard"
+	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -55,10 +58,31 @@ func (h *Handlers) onboardHostStream(c fiber.Ctx) error {
 	c.Set("Connection", "keep-alive")
 	c.Set("X-Accel-Buffering", "no") // 关闭反向代理缓冲，确保逐帧下发
 
-	ctx := c.Context()
+	// 关键修复（之前 41% 报「读取流失败: network error」的真因）：
+	//   Fiber v3 进入 SendStreamWriter 后，流式回调运行在请求生命周期之外，
+	//   此时再访问请求上下文 c（c.Context() / c.IP() / auth.CurrentUserID(c) 等）会
+	//   触发已回收 RequestCtx 的 nil 指针解引用 → panic，导致流在发出最终 result 帧
+	//   之前就被异常关闭，前端 reader.read() 抛错显示 network error。
+	//   解决：在进入流之前，把所有需要的请求态（用户、IP）一次性取出，并用脱离请求
+	//   生命周期的 context.Background() 做流内的 DB 操作；流内绝不再碰 c。
+	dbCtx := context.Background()
+	var auditUID *int
+	if uid, ok := auth.CurrentUserID(c); ok && uid > 0 {
+		u := uid
+		auditUID = &u
+	}
+	auditUsername := auth.CurrentUsername(c)
+	clientIP := c.IP()
 
 	return c.SendStreamWriter(func(w *bufio.Writer) {
 		sse := &sseWriter{w: w}
+
+		// 兜底：流内任何 panic 都转成 result(error) 帧后再退出，绝不让连接「无声中断」。
+		defer func() {
+			if r := recover(); r != nil {
+				sse.send("result", fiber.Map{"ok": false, "error": fmt.Sprintf("纳管过程内部异常: %v", r)})
+			}
+		}()
 
 		// 1) SSH 连接
 		sse.send("step", fiber.Map{"name": "SSH 连接目标主机", "command": fmt.Sprintf("ssh %s@%s:%d", req.SSHUser, req.IPAddress, req.SSHPort)})
@@ -145,13 +169,13 @@ func (h *Handlers) onboardHostStream(c fiber.Ctx) error {
 			VFIOEnabled:       hw.IOMMUEnabled,
 			Status:            model.HostProvisioning,
 		}
-		id, err := h.Repo.UpsertHost(ctx, host)
+		id, err := h.Repo.UpsertHost(dbCtx, host)
 		if err != nil {
 			sse.send("result", fiber.Map{"ok": false, "error": "写入主机记录失败: " + err.Error(), "install": install})
 			return
 		}
 		inv := map[string]any{"gpus": hw.GPUs, "disks": hw.Disks, "nics": hw.NICs, "kernel": hw.KernelVersion}
-		_ = h.MySQL.SaveHostHardware(ctx, id, inv, hw.OSVersion)
+		_ = h.MySQL.SaveHostHardware(dbCtx, id, inv, hw.OSVersion)
 		sse.send("done", onboard.InstallStep{Name: "写入主机记录", OK: true, Output: fmt.Sprintf("host id=%d", id)})
 
 		// 6) qemu+tcp 验证
@@ -170,14 +194,25 @@ func (h *Handlers) onboardHostStream(c fiber.Ctx) error {
 		} else {
 			sse.send("done", onboard.InstallStep{Name: "以 qemu+tcp 验证可达", OK: false, Error: "TCP 未监听，跳过"})
 		}
-		_ = h.MySQL.UpdateHostStatus(ctx, id, connStatus)
+		_ = h.MySQL.UpdateHostStatus(dbCtx, id, connStatus)
 
-		h.audit(c, "host.create", "host", id, map[string]any{
-			"name": name, "ip_address": req.IPAddress, "method": "ssh-onboard-stream",
-			"status": string(connStatus),
-		})
+		// 用流前预先捕获的请求态写审计（绝不在流内碰 c，避免 RequestCtx 回收后的 nil panic）。
+		if h.MySQL != nil {
+			_ = h.MySQL.WriteAudit(dbCtx, mysql.AuditEntry{
+				UserID:     auditUID,
+				Username:   auditUsername,
+				Action:     "host.create",
+				Resource:   "host",
+				ResourceID: id,
+				Detail: map[string]any{
+					"name": name, "ip_address": req.IPAddress, "method": "ssh-onboard-stream",
+					"status": string(connStatus),
+				},
+				IPAddress: clientIP,
+			})
+		}
 
-		saved, _ := h.Repo.GetHost(ctx, id)
+		saved, _ := h.Repo.GetHost(dbCtx, id)
 		sse.send("result", fiber.Map{
 			"ok":       true,
 			"host":     saved,
