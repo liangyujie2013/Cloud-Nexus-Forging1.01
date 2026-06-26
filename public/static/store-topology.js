@@ -241,11 +241,30 @@ async function updateDatacenter(id, data) {
   if (idx >= 0) Object.assign(state.datacenters[idx], res)
   return { ok: true, datacenter: res }
 }
+// 规范化集群表单 → 后端契约：
+//   - ntp_servers：后端是 []string；表单里是「逗号分隔字符串」，这里拆成数组，
+//     否则后端 JSON 反序列化失败返回「请求体非法」(BAD_REQUEST)。
+//   - overcommit_cpu / max_clock_offset_ms：确保为数值类型。
+function normalizeClusterPayload(data) {
+  const p = Object.assign({}, data)
+  if (typeof p.ntp_servers === 'string') {
+    p.ntp_servers = p.ntp_servers
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  } else if (!Array.isArray(p.ntp_servers)) {
+    p.ntp_servers = []
+  }
+  if (p.datacenter_id != null) p.datacenter_id = Number(p.datacenter_id)
+  if (p.overcommit_cpu != null) p.overcommit_cpu = Number(p.overcommit_cpu)
+  if (p.max_clock_offset_ms != null) p.max_clock_offset_ms = Number(p.max_clock_offset_ms)
+  return p
+}
 // 创建集群（须归属数据中心）
 async function createCluster(data) {
   const res = await api('/clusters', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
+    body: JSON.stringify(normalizeClusterPayload(data)),
   })
   if (res && res.error) return { ok: false, code: res.code, error: res.error }
   state.clusters.push(res)
@@ -255,7 +274,7 @@ async function createCluster(data) {
 async function updateCluster(id, data) {
   const res = await api('/clusters/' + id, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
+    body: JSON.stringify(normalizeClusterPayload(data)),
   })
   if (res && res.error) return { ok: false, code: res.code, error: res.error }
   const idx = state.clusters.findIndex((c) => c.id === id)
