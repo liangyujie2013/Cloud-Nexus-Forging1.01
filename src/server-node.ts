@@ -7,12 +7,60 @@
 // =============================================================================
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
-import app from './index'
+import { Hono } from 'hono'
+import demoApp from './index'
 
 const PORT = Number(process.env.PORT) || 3000
 
-// 静态资源：/static/* -> public/static/*
+// =============================================================================
+//  外层 app：先挂「真实后端反向代理」（可选），再回落到 demo Mock app。
+//
+//  设置 CNF_PROXY_TARGET=http://127.0.0.1:8090 后，本 dev server 会把
+//  /api/v1/* 透传到真实 Go 后端，实现「同源访问」——浏览器只需访问 :3000，
+//  REAL 模式 API base 填 /api/v1 即可，无跨域、无第二次公网往返（更快更稳）。
+//
+//  关键：代理路由必须在 demoApp 之前注册并匹配，否则会被 demo 的 /api/v1
+//  路由先命中（Hono 先注册先匹配）。故这里用独立的外层 Hono 实例。
+//  未设置 CNF_PROXY_TARGET 时维持原 demo Mock 行为不变。
+// =============================================================================
+const PROXY_TARGET = process.env.CNF_PROXY_TARGET
+const app = new Hono()
+
+// 静态资源：/static/* -> public/static/*（放最前，优先于代理与 demo）
 app.use('/static/*', serveStatic({ root: './public' }))
+
+if (PROXY_TARGET) {
+  const target = PROXY_TARGET.replace(/\/$/, '')
+  app.all('/api/v1/*', async (c) => {
+    const url = new URL(c.req.url)
+    const upstream = target + url.pathname + url.search
+    const headers = new Headers(c.req.raw.headers)
+    headers.delete('host')
+    const init: RequestInit = { method: c.req.method, headers }
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+      init.body = await c.req.raw.arrayBuffer()
+    }
+    try {
+      const resp = await fetch(upstream, init)
+      const body = await resp.arrayBuffer()
+      const respHeaders = new Headers(resp.headers)
+      respHeaders.delete('content-encoding')
+      respHeaders.delete('content-length')
+      return new Response(body, { status: resp.status, headers: respHeaders })
+    } catch (err: any) {
+      return c.json(
+        { code: 'PROXY_ERROR', message: '代理到真实后端失败: ' + (err?.message || err), details: { upstream } },
+        502,
+      )
+    }
+  })
+  console.log(`🔀 /api/v1/* 反向代理 -> ${target}（同源真实后端）`)
+} else {
+  console.log('ℹ️  未设置 CNF_PROXY_TARGET，/api/v1 走内置 demo Mock')
+}
+
+// 其余所有请求（含页面 HTML、未代理时的 demo /api/v1）回落到原 demo app。
+app.all('*', (c) => demoApp.fetch(c.req.raw, (c as any).env))
 
 serve({ fetch: app.fetch, port: PORT, hostname: '0.0.0.0' }, (info) => {
   console.log(`✅ CNF dev server (node) running at http://0.0.0.0:${info.port}/`)
