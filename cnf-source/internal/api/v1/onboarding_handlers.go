@@ -169,18 +169,30 @@ func (h *Handlers) onboardHost(c fiber.Ctx) error {
 	}
 	_ = h.MySQL.UpdateHostStatus(c.Context(), id, connStatus)
 
+	// 5.5) 加密保存 SSH 凭据（AES-256-GCM），供后续主机运维（网络/状态/防火墙等）复用。
+	//      与流式纳管路径保持一致，避免「非流式纳管的主机无凭据 → 运维功能报 NO_CREDENTIAL」。
+	credSaved := false
+	if h.Secret != nil && h.MySQL != nil {
+		if serr := h.saveHostCredential(c.Context(), id, &req); serr != nil {
+			connMsg += "（注意：SSH 凭据加密保存失败，主机运维功能可能不可用：" + serr.Error() + "）"
+		} else {
+			credSaved = true
+		}
+	}
+
 	// 审计：host.create（无代理纳管路径）。
 	h.audit(c, "host.create", "host", id, map[string]any{
 		"name": name, "ip_address": req.IPAddress, "method": "ssh-onboard",
-		"status": string(connStatus),
+		"status": string(connStatus), "credential_saved": credSaved,
 	})
 
 	saved, _ := h.Repo.GetHost(c.Context(), id)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"data":     saved,
-		"precheck": pre,
-		"install":  install,
-		"message":  connMsg,
+		"data":            saved,
+		"precheck":        pre,
+		"install":         install,
+		"message":         connMsg,
+		"credential_saved": credSaved,
 	})
 }
 

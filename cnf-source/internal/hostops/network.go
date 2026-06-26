@@ -144,6 +144,11 @@ func ApplyNICConfig(c *onboard.SSHClient, ch NICChange) ([]string, error) {
 		return nil, fmt.Errorf("目标主机未运行 NetworkManager，暂不支持自动改网（建议先启用 NetworkManager）")
 	}
 
+	// 设备必须真实存在——否则直接报错，绝不在目标机上创建「幽灵连接」污染配置。
+	if dev := strings.TrimSpace(c.RunQuiet(fmt.Sprintf(`ip -o link show %q 2>/dev/null | head -1`, ch.Device))); dev == "" {
+		return nil, fmt.Errorf("目标主机不存在网卡 %q（请先用「读取网卡」确认设备名）", ch.Device)
+	}
+
 	// 找到设备对应的连接名；没有则尝试用设备名同名连接。
 	conn := strings.TrimSpace(c.RunQuiet(fmt.Sprintf(
 		`nmcli -t -f GENERAL.CONNECTION device show %q 2>/dev/null | head -1 | cut -d: -f2`, ch.Device)))
