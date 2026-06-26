@@ -13,6 +13,11 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
+// dialTimeout 控制建立到宿主机 libvirtd 的最长等待时间。
+// libvirt 默认的 qemu+tcp 连接对不可达主机会阻塞很久，这里用带超时的
+// 异步连接包裹，保证 API 不会被探测卡死，而是快速返回明确错误（要求4/5）。
+var dialTimeout = 8 * time.Second
+
 // ConnManager 管理到多台宿主机的 libvirt 连接（线程安全连接池）。
 type ConnManager struct {
 	mu    sync.RWMutex
@@ -65,12 +70,41 @@ func (cm *ConnManager) Get(hostIP string) (*libvirt.Connect, error) {
 		delete(cm.conns, uri)
 	}
 
-	conn, err := libvirt.NewConnect(uri)
+	conn, err := connectWithTimeout(uri, dialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("连接 libvirt %s 失败: %w", uri, err)
 	}
 	cm.conns[uri] = &pooledConn{conn: conn, uri: uri, lastUsed: time.Now()}
 	return conn, nil
+}
+
+// connectWithTimeout 在后台 goroutine 内执行 libvirt.NewConnect，
+// 超过 timeout 仍未返回则视为不可达，返回明确超时错误。
+// 注意：底层 cgo 调用无法被强制中断，超时后的连接结果会在后台被丢弃/关闭，
+// 不会阻塞调用方；这是为了让 API 快速给出 probe_failed 而非长时间挂起。
+func connectWithTimeout(uri string, timeout time.Duration) (*libvirt.Connect, error) {
+	type result struct {
+		conn *libvirt.Connect
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		conn, err := libvirt.NewConnect(uri)
+		ch <- result{conn: conn, err: err}
+	}()
+	select {
+	case r := <-ch:
+		return r.conn, r.err
+	case <-time.After(timeout):
+		// 后台 goroutine 仍在阻塞连接；待其返回后关闭，避免连接泄漏。
+		go func() {
+			r := <-ch
+			if r.conn != nil {
+				_, _ = r.conn.Close()
+			}
+		}()
+		return nil, fmt.Errorf("连接超时(%s)：qemu+tcp 不可达或 libvirtd 未开启 TCP(16509)", timeout)
+	}
 }
 
 // Close 关闭指定宿主机连接。

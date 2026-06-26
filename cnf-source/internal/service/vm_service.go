@@ -45,6 +45,15 @@ func (s *VMService) Create(ctx context.Context, req *CreateVMRequest) (*model.VM
 		return nil, fmt.Errorf("宿主机不存在: %w", err)
 	}
 
+	// 1.1 校验依赖就绪：storage pool 与 libvirt 连接管理器必须已装配，
+	// 否则返回明确错误而非 nil panic（要求4：真实不可用就返回明确错误）。
+	if req.StoragePool == nil {
+		return nil, fmt.Errorf("存储池未就绪：目标宿主机/集群未配置默认存储池，无法创建系统盘（请先纳管宿主机并配置存储池）")
+	}
+	if s.conn == nil {
+		return nil, fmt.Errorf("libvirt 连接管理器未初始化，无法创建虚拟机")
+	}
+
 	// 2. 校验 CPU 拓扑
 	if vm.CPUConfig().VCPUs() == 0 {
 		return nil, fmt.Errorf("非法 CPU 拓扑")
