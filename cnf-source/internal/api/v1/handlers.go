@@ -9,6 +9,7 @@ import (
 	"github.com/cnf/cnfv1/internal/model"
 	"github.com/cnf/cnfv1/internal/onboard"
 	"github.com/cnf/cnfv1/internal/repo/mysql"
+	"github.com/cnf/cnfv1/internal/secret"
 	"github.com/cnf/cnfv1/internal/service"
 	"github.com/cnf/cnfv1/internal/storage"
 	"github.com/cnf/cnfv1/internal/virt"
@@ -41,6 +42,10 @@ type Handlers struct {
 	// OfflineRepo 离线安装包仓库（自动部署 libvirt/KVM 时，目标主机源不可用则
 	// 推送平台预置 RPM 本地安装）。由 main 按 CNF_OFFLINE_PKG_PATH 注入。
 	OfflineRepo *onboard.OfflineRepo
+
+	// Secret 落库敏感信息（主机 SSH 口令/私钥）的 AES-256-GCM 加解密器。
+	// 由 main 按 CNF_SECRET_KEY（缺省从 JWTSecret 派生）注入。
+	Secret *secret.Cipher
 }
 
 // ---- 工具 ----

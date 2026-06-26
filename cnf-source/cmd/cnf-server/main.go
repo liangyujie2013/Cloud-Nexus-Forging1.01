@@ -19,6 +19,7 @@ import (
 	"github.com/cnf/cnfv1/internal/gpu"
 	"github.com/cnf/cnfv1/internal/ha"
 	"github.com/cnf/cnfv1/internal/onboard"
+	"github.com/cnf/cnfv1/internal/secret"
 	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/cnf/cnfv1/internal/service"
 	"github.com/cnf/cnfv1/internal/storage"
@@ -63,6 +64,17 @@ func main() {
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTExpireHours)
 	authStore := auth.NewStore(repository.DB())
 	mw := auth.NewMiddleware(tokens, authStore)
+
+	// 落库敏感信息加密器：优先 CNF_SECRET_KEY，缺省从 JWTSecret 派生（开发可用）。
+	secretKeyMaterial := cfg.SecretKey
+	if secretKeyMaterial == "" {
+		secretKeyMaterial = "cnf-secret::" + cfg.JWTSecret
+		log.Printf("⚠️ 未配置 CNF_SECRET_KEY，已从 JWT 密钥派生主机凭据加密密钥；生产环境请显式配置高熵 CNF_SECRET_KEY")
+	}
+	secretCipher, err := secret.New(secretKeyMaterial)
+	if err != nil {
+		log.Fatalf("初始化敏感信息加密器失败: %v", err)
+	}
 
 	// ---- 4. libvirt 连接管理器（按宿主机 IP 维护连接池） ----
 	conn := virt.NewConnManager()
@@ -146,6 +158,7 @@ func main() {
 
 		DefaultStoragePool: localPool,
 		OfflineRepo:        onboard.NewOfflineRepo(cfg.OfflinePkgPath),
+		Secret:             secretCipher,
 	}
 	log.Printf("离线安装包仓库就绪: %s", cfg.OfflinePkgPath)
 	v1.RegisterAPIRoutes(app, h)

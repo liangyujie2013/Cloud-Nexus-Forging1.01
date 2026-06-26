@@ -176,6 +176,17 @@ func (h *Handlers) onboardHostStream(c fiber.Ctx) error {
 		}
 		inv := map[string]any{"gpus": hw.GPUs, "disks": hw.Disks, "nics": hw.NICs, "kernel": hw.KernelVersion}
 		_ = h.MySQL.SaveHostHardware(dbCtx, id, inv, hw.OSVersion)
+
+		// 5.1) 加密保存 SSH 凭据，供后续运维功能（防火墙/SELinux/改密码/改端口/实时监控）复用。
+		//      绝不存明文；密钥来自平台 CNF_SECRET_KEY（不入库）。保存失败不阻断纳管，仅告警。
+		if h.Secret != nil && h.MySQL != nil {
+			if serr := h.saveHostCredential(dbCtx, id, &req); serr != nil {
+				sse.send("line", fiber.Map{"line": "⚠️ SSH 凭据加密保存失败（不影响本次纳管，但后续主机运维功能将需要重新提供凭据）：" + serr.Error()})
+			} else {
+				sse.send("line", fiber.Map{"line": "✓ SSH 凭据已加密保存（AES-256-GCM），后续主机运维功能可直接复用"})
+			}
+		}
+
 		sse.send("done", onboard.InstallStep{Name: "写入主机记录", OK: true, Output: fmt.Sprintf("host id=%d", id)})
 
 		// 6) qemu+tcp 验证

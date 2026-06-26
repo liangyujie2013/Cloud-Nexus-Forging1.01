@@ -34,6 +34,11 @@ type Config struct {
 	JWTSecret      string
 	JWTExpireHours int
 
+	// SecretKey 用于对称加密落库的敏感信息（主机 SSH 口令/私钥等）。
+	// 取 CNF_SECRET_KEY；未配置时从 JWTSecret 派生（SHA-256），保证开发环境可跑，
+	// 生产强烈建议显式配置一个高熵随机串（启动会给出警告）。
+	SecretKey string
+
 	// 高可用
 	HAEnabled     bool
 	NodeID        string        // 集群内本节点唯一标识；未设置时回退主机名
@@ -72,6 +77,7 @@ func Load() (*Config, error) {
 
 		JWTSecret:      envOr("CNF_JWT_SECRET", "change-me-in-production"),
 		JWTExpireHours: envInt("CNF_JWT_EXPIRE_HOURS", 24),
+		SecretKey:      envOr("CNF_SECRET_KEY", ""),
 
 		HAEnabled:     envBool("CNF_HA_ENABLED", false),
 		NodeID:        envOr("CNF_NODE_ID", defaultNodeID()),
