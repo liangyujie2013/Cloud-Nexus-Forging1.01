@@ -133,9 +133,12 @@ async function addHostToCluster(data) {
     toast('目标集群不存在', 'error')
     return { ok: false, error: 'CLUSTER_NOT_FOUND' }
   }
+  // 字段映射：后端 POST /hosts 要求 name（必填），前端向导用 hostname。
+  // 这里补 name 字段，避免真实后端返回 VALIDATION_FAILED(name 必填)。
+  const payload = Object.assign({}, data, { name: data.name || data.hostname })
   const res = await api('/hosts', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
+    body: JSON.stringify(payload),
   })
   if (res && res.error) {
     toast(res.error, 'error')
