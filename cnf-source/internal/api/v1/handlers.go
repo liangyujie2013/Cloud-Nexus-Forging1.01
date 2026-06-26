@@ -65,7 +65,7 @@ func (h *Handlers) listVMs(c fiber.Ctx) error {
 	clusterID, _ := strconv.Atoi(c.Query("cluster_id"))
 	vms, err := h.Repo.ListVMs(c.Context(), clusterID)
 	if err != nil {
-		return serverError(c, err)
+		return errInternal(c, err)
 	}
 	return c.JSON(fiber.Map{"data": vms})
 }
@@ -74,11 +74,11 @@ func (h *Handlers) listVMs(c fiber.Ctx) error {
 func (h *Handlers) getVM(c fiber.Ctx) error {
 	id, err := paramInt(c, "id")
 	if err != nil {
-		return badRequest(c, "非法 VM ID")
+		return errBadRequest(c, "非法 VM ID")
 	}
 	vm, err := h.Repo.GetVM(c.Context(), id)
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		return errNotFound(c, CodeVMNotFound, "虚拟机不存在")
 	}
 	return c.JSON(fiber.Map{"data": vm})
 }
@@ -89,16 +89,35 @@ type createVMRequest struct {
 	DiskSizeGB   int64    `json:"disk_size_gb"`
 	TemplatePath string   `json:"template_path"`
 	LinkedClone  bool     `json:"linked_clone"`
+	DryRun       bool     `json:"dry_run"` // 仅预览 domain XML，不创建真实 VM
 }
 
 // createVM POST /vms
+//
+// dry_run=true（查询串或请求体）时仅生成并校验 domain XML，不分配磁盘、
+// 不 define 到 libvirt、不落库，用于预览（区分 real 与 dry-run）。
 func (h *Handlers) createVM(c fiber.Ctx) error {
 	var req createVMRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return badRequest(c, "请求体解析失败: "+err.Error())
+		return errBadRequest(c, "请求体解析失败: "+err.Error())
 	}
+
+	// dry-run 预览：仅生成 XML，不触碰 libvirt / DB。
+	if req.DryRun || c.Query("dry_run") == "true" {
+		xml, err := virt.NewDomainXMLBuilder(&req.VM).Build()
+		if err != nil {
+			return errValidation(c, "生成 domain XML 失败", map[string]any{"cause": err.Error()})
+		}
+		return c.JSON(fiber.Map{
+			"dry_run": true,
+			"mode":    "dry-run",
+			"xml":     xml,
+			"message": "dry-run 预览：未创建真实虚拟机",
+		})
+	}
+
 	if req.DiskSizeGB <= 0 {
-		return badRequest(c, "disk_size_gb 必须 > 0")
+		return errValidation(c, "disk_size_gb 必须 > 0", map[string]any{"field": "disk_size_gb"})
 	}
 
 	svcReq := &service.CreateVMRequest{
@@ -111,20 +130,23 @@ func (h *Handlers) createVM(c fiber.Ctx) error {
 
 	vm, err := h.VM.Create(c.Context(), svcReq)
 	if err != nil {
-		return serverError(c, err)
+		return errInternal(c, err)
 	}
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"data": vm})
+	h.audit(c, "vm.create", "vm", vm.ID, map[string]any{"name": vm.Name, "mode": "real"})
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"data": vm, "mode": "real"})
 }
 
 // startVM POST /vms/:id/start
 func (h *Handlers) startVM(c fiber.Ctx) error {
 	id, err := paramInt(c, "id")
 	if err != nil {
-		return badRequest(c, "非法 VM ID")
+		return errBadRequest(c, "非法 VM ID")
 	}
 	if err := h.VM.Start(c.Context(), id); err != nil {
-		return serverError(c, err)
+		h.audit(c, "vm.start", "vm", id, map[string]any{"result": "failed", "error": err.Error()})
+		return errInternal(c, err)
 	}
+	h.audit(c, "vm.start", "vm", id, map[string]any{"result": "ok"})
 	return c.JSON(fiber.Map{"status": "running"})
 }
 
@@ -132,12 +154,14 @@ func (h *Handlers) startVM(c fiber.Ctx) error {
 func (h *Handlers) stopVM(c fiber.Ctx) error {
 	id, err := paramInt(c, "id")
 	if err != nil {
-		return badRequest(c, "非法 VM ID")
+		return errBadRequest(c, "非法 VM ID")
 	}
 	graceful := c.Query("force") != "true"
 	if err := h.VM.Stop(c.Context(), id, graceful); err != nil {
-		return serverError(c, err)
+		h.audit(c, "vm.stop", "vm", id, map[string]any{"result": "failed", "error": err.Error()})
+		return errInternal(c, err)
 	}
+	h.audit(c, "vm.stop", "vm", id, map[string]any{"result": "ok", "graceful": graceful})
 	return c.JSON(fiber.Map{"status": "stopped"})
 }
 
@@ -145,12 +169,14 @@ func (h *Handlers) stopVM(c fiber.Ctx) error {
 func (h *Handlers) deleteVM(c fiber.Ctx) error {
 	id, err := paramInt(c, "id")
 	if err != nil {
-		return badRequest(c, "非法 VM ID")
+		return errBadRequest(c, "非法 VM ID")
 	}
 	deleteDisks := c.Query("delete_disks") == "true"
 	if err := h.VM.Delete(c.Context(), id, deleteDisks, nil); err != nil {
-		return serverError(c, err)
+		h.audit(c, "vm.delete", "vm", id, map[string]any{"result": "failed", "error": err.Error()})
+		return errInternal(c, err)
 	}
+	h.audit(c, "vm.delete", "vm", id, map[string]any{"result": "ok", "delete_disks": deleteDisks})
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
 
@@ -158,11 +184,11 @@ func (h *Handlers) deleteVM(c fiber.Ctx) error {
 func (h *Handlers) vmXML(c fiber.Ctx) error {
 	id, err := paramInt(c, "id")
 	if err != nil {
-		return badRequest(c, "非法 VM ID")
+		return errBadRequest(c, "非法 VM ID")
 	}
 	vm, err := h.Repo.GetVM(c.Context(), id)
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		return errNotFound(c, CodeVMNotFound, "虚拟机不存在")
 	}
 	// 优先返回从宿主机实时拉取的 XML；失败则用 builder 生成预览。
 	if vm.HostID != nil {
@@ -175,7 +201,7 @@ func (h *Handlers) vmXML(c fiber.Ctx) error {
 	}
 	xml, err := virt.NewDomainXMLBuilder(vm).Build()
 	if err != nil {
-		return serverError(c, err)
+		return errInternal(c, err)
 	}
 	c.Set("Content-Type", "application/xml")
 	return c.SendString(xml)

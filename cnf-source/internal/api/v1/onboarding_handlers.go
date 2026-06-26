@@ -147,6 +147,12 @@ func (h *Handlers) onboardHost(c fiber.Ctx) error {
 	}
 	_ = h.MySQL.UpdateHostStatus(c.Context(), id, connStatus)
 
+	// 审计：host.create（无代理纳管路径）。
+	h.audit(c, "host.create", "host", id, map[string]any{
+		"name": name, "ip_address": req.IPAddress, "method": "ssh-onboard",
+		"status": string(connStatus),
+	})
+
 	saved, _ := h.Repo.GetHost(c.Context(), id)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"data":     saved,

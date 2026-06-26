@@ -41,4 +41,7 @@ type Repository interface {
 	// Task
 	CreateTask(ctx context.Context, t *model.Task) (int, error)
 	UpdateTask(ctx context.Context, t *model.Task) error
+	GetTask(ctx context.Context, id int) (*model.Task, error)
+	GetTaskByUUID(ctx context.Context, u string) (*model.Task, error)
+	ListTasks(ctx context.Context, status string, limit int) ([]model.Task, error)
 }

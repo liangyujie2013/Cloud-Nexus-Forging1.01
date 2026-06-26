@@ -1,10 +1,9 @@
 package v1
 
 import (
-	"errors"
-
 	"github.com/cnf/cnfv1/internal/auth"
 	"github.com/cnf/cnfv1/internal/model"
+	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -21,25 +20,26 @@ type loginRequest struct {
 func (h *Handlers) login(c fiber.Ctx) error {
 	var req loginRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return badRequest(c, "请求体非法")
+		return errBadRequest(c, "请求体非法")
 	}
 	if req.Username == "" || req.Password == "" {
-		return badRequest(c, "用户名与密码不能为空")
+		return errValidation(c, "用户名与密码不能为空", map[string]any{"fields": []string{"username", "password"}})
 	}
 	u, err := h.Auth.Authenticate(c.Context(), req.Username, req.Password)
 	if err != nil {
-		switch {
-		case errors.Is(err, auth.ErrBadCredentials):
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "用户名或密码错误"})
-		case errors.Is(err, auth.ErrUserDisabled):
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "账户已禁用"})
-		default:
-			return serverError(c, err)
-		}
+		return errFromAuth(c, err)
 	}
 	token, exp, err := h.Tokens.Generate(u.ID, u.Username, u.Role)
 	if err != nil {
-		return serverError(c, err)
+		return errInternal(c, err)
+	}
+	// 审计：登录成功（高危操作）。直接用 MySQL.WriteAudit（此时 Locals 尚无身份）。
+	if h.MySQL != nil {
+		uid := u.ID
+		_ = h.MySQL.WriteAudit(c.Context(), mysql.AuditEntry{
+			UserID: &uid, Username: u.Username, Action: "login",
+			Resource: "auth", Detail: map[string]any{"result": "ok"}, IPAddress: c.IP(),
+		})
 	}
 	return c.JSON(fiber.Map{
 		"token":      token,
@@ -57,11 +57,11 @@ func (h *Handlers) login(c fiber.Ctx) error {
 func (h *Handlers) me(c fiber.Ctx) error {
 	uid, ok := auth.CurrentUserID(c)
 	if !ok {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "未登录"})
+		return writeErr(c, fiber.StatusUnauthorized, CodeUnauthorized, "未登录", nil)
 	}
 	u, err := h.Auth.GetUser(c.Context(), uid)
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "用户不存在"})
+		return errNotFound(c, CodeNotFound, "用户不存在")
 	}
 	var perms []string
 	if u.Role != "" {

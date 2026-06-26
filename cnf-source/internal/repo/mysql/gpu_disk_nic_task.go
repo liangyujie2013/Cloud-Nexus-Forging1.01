@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/cnf/cnfv1/internal/model"
 )
@@ -185,4 +186,80 @@ func (r *Repository) UpdateTask(ctx context.Context, t *model.Task) error {
 		t.Status, t.Progress, nullStr(t.ErrorMessage), mustJSON(t.Result, false),
 		t.StartedAt, t.FinishedAt, t.ID)
 	return err
+}
+
+const taskColumns = `id, uuid, type, COALESCE(target_type,''), target_id, status, progress,
+	user_id, payload, result, COALESCE(error_message,''), started_at, finished_at, created_at`
+
+// scanTask 从行扫描出 Task（JSON 列与可空列安全处理）。
+func scanTask(s scanner) (*model.Task, error) {
+	var (
+		t          model.Task
+		uuidStr    string
+		targetID   sql.NullInt64
+		userID     sql.NullInt64
+		payload    []byte
+		result     []byte
+	)
+	if err := s.Scan(
+		&t.ID, &uuidStr, &t.Type, &t.TargetType, &targetID, &t.Status, &t.Progress,
+		&userID, &payload, &result, &t.ErrorMessage, &t.StartedAt, &t.FinishedAt, &t.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	t.UUID = uuidParse(uuidStr)
+	t.TargetID = int(targetID.Int64)
+	t.UserID = intPtr(userID)
+	_ = scanJSON(payload, &t.Payload)
+	_ = scanJSON(result, &t.Result)
+	return &t, nil
+}
+
+// GetTask 按自增 id 查询任务。
+func (r *Repository) GetTask(ctx context.Context, id int) (*model.Task, error) {
+	t, err := scanTask(r.db.QueryRowContext(ctx,
+		`SELECT `+taskColumns+` FROM tasks WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return t, err
+}
+
+// GetTaskByUUID 按 UUID 查询任务（前端轮询/取消使用）。
+func (r *Repository) GetTaskByUUID(ctx context.Context, u string) (*model.Task, error) {
+	t, err := scanTask(r.db.QueryRowContext(ctx,
+		`SELECT `+taskColumns+` FROM tasks WHERE uuid=?`, u))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return t, err
+}
+
+// ListTasks 列出任务（可按 status 过滤），按创建时间倒序，最多 limit 条。
+func (r *Repository) ListTasks(ctx context.Context, status string, limit int) ([]model.Task, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q := `SELECT ` + taskColumns + ` FROM tasks`
+	args := []any{}
+	if status != "" {
+		q += ` WHERE status=?`
+		args = append(args, status)
+	}
+	q += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Task{}
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
 }

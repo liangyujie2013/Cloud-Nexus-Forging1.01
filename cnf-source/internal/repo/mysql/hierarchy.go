@@ -370,6 +370,21 @@ func (r *Repository) UpdateHostStatus(ctx context.Context, id int, status model.
 	return err
 }
 
+// UpdateHostCapabilities 回填 libvirt 探测到的 CPU 拓扑 / NUMA / 内存 / 版本。
+// 仅更新探测得到的字段，不触碰 cluster_id / name 等归属信息。
+func (r *Repository) UpdateHostCapabilities(ctx context.Context, id int, h *model.Host) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE hosts SET
+			cpu_model=?, cpu_sockets=?, cpu_cores_per_socket=?, cpu_threads_per_core=?,
+			numa_nodes=?, numa_topology=?, memory_total_mb=?,
+			libvirt_version=?, qemu_version=?, hostname=COALESCE(NULLIF(?,''), hostname)
+		 WHERE id=?`,
+		nullStr(h.CPUModel), h.CPUSockets, h.CPUCoresPerSocket, h.CPUThreadsPerCore,
+		h.NUMANodes, mustJSON(h.NUMATopology, true), h.MemoryTotalMB,
+		nullStr(h.LibvirtVersion), nullStr(h.QEMUVersion), h.Hostname, id)
+	return err
+}
+
 // SaveHostHardware 保存无代理纳管时 SSH 采集到的真实硬件清单与 OS 版本。
 func (r *Repository) SaveHostHardware(ctx context.Context, id int, inventory map[string]any, osVersion string) error {
 	res, err := r.db.ExecContext(ctx,

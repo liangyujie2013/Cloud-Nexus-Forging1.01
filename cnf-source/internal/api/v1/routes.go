@@ -64,6 +64,7 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Get("/hosts", h.listHosts, h.Mw.RequirePermission("host.read"))
 	api.Get("/hosts/:id", h.getHost, h.Mw.RequirePermission("host.read"))
 	api.Get("/hosts/:id/hardware", h.getHostHardware, h.Mw.RequirePermission("host.read"))
+	api.Post("/hosts", h.createHost, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/precheck", h.precheckHost, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/onboard", h.onboardHost, h.Mw.RequirePermission("host.create"))
 	api.Post("/hosts/:id/enable-tcp", h.enableHostTCP, h.Mw.RequirePermission("host.update"))
@@ -116,6 +117,8 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/alert-rules/:id/enabled", h.setAlertRuleEnabled, h.Mw.RequirePermission("monitor.update"))
 	api.Delete("/alert-rules/:id", h.deleteAlertRule, h.Mw.RequirePermission("monitor.update"))
 
-	// ---- 任务（RBAC: vm.*，复用 power 权限） ----
+	// ---- 任务（RBAC: vm.read 查询 / vm.power 取消） ----
+	api.Get("/tasks", h.listTasks, h.Mw.RequirePermission("vm.read"))
+	api.Get("/tasks/:id", h.getTask, h.Mw.RequirePermission("vm.read"))
 	api.Post("/tasks/:uuid/cancel", h.cancelTask, h.Mw.RequirePermission("vm.power"))
 }

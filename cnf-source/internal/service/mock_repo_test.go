@@ -130,6 +130,37 @@ func (m *mockRepo) UpdateTask(ctx context.Context, t *model.Task) error {
 	m.tasks[t.ID] = &cp
 	return nil
 }
+func (m *mockRepo) GetTask(ctx context.Context, id int) (*model.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t, ok := m.tasks[id]; ok {
+		cp := *t
+		return &cp, nil
+	}
+	return nil, fmt.Errorf("task not found")
+}
+func (m *mockRepo) GetTaskByUUID(ctx context.Context, u string) (*model.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tasks {
+		if t.UUID.String() == u {
+			cp := *t
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("task not found")
+}
+func (m *mockRepo) ListTasks(ctx context.Context, status string, limit int) ([]model.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Task{}
+	for _, t := range m.tasks {
+		if status == "" || string(t.Status) == status {
+			out = append(out, *t)
+		}
+	}
+	return out, nil
+}
 
 // getTask 测试辅助：读取任务最新快照。
 func (m *mockRepo) getTask(id int) *model.Task {
