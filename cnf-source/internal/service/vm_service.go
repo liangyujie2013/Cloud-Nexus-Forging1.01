@@ -45,6 +45,16 @@ func (s *VMService) Create(ctx context.Context, req *CreateVMRequest) (*model.VM
 		return nil, fmt.Errorf("宿主机不存在: %w", err)
 	}
 
+	// 1.0 继承宿主机的归属集群：vms.cluster_id 为 NOT NULL 且有外键约束，
+	//      前端建 VM 通常只选宿主机、不传 cluster_id，这里据宿主机归属补齐，
+	//      否则 cluster_id=0 会触发 FK 约束失败（Error 1452）。
+	if vm.ClusterID <= 0 {
+		if host.ClusterID <= 0 {
+			return nil, fmt.Errorf("目标宿主机未归属任何集群，无法创建虚拟机（请先把主机纳入集群）")
+		}
+		vm.ClusterID = host.ClusterID
+	}
+
 	// 1.1 校验依赖就绪：storage pool 与 libvirt 连接管理器必须已装配，
 	// 否则返回明确错误而非 nil panic（要求4：真实不可用就返回明确错误）。
 	if req.StoragePool == nil {
@@ -54,7 +64,37 @@ func (s *VMService) Create(ctx context.Context, req *CreateVMRequest) (*model.VM
 		return nil, fmt.Errorf("libvirt 连接管理器未初始化，无法创建虚拟机")
 	}
 
-	// 2. 校验 CPU 拓扑
+	// 2. CPU 拓扑兜底 + 校验
+	//    前端常只传扁平字段 vcpus=N（不拆 sockets/cores/threads），而 CPUConfig()
+	//    用 Sockets×CoresPerSocket×ThreadsPerCore 计算总数，全 0 时会判为「非法 CPU 拓扑」。
+	//    这里在三者缺省时，依据扁平 vcpus 推导一个合法拓扑（sockets=vcpus，cores=threads=1），
+	//    保证「填了 vcpus 就能建 VM」的直觉行为，真实落地不被底层字段卡住。
+	if vm.CPUSockets <= 0 && vm.CPUCoresPerSocket <= 0 && vm.CPUThreadsPerCore <= 0 {
+		n := vm.VCPUs
+		if n <= 0 {
+			n = 1 // 最低 1 vCPU，避免空配置
+		}
+		vm.CPUSockets = n
+		vm.CPUCoresPerSocket = 1
+		vm.CPUThreadsPerCore = 1
+		vm.VCPUs = n
+	} else {
+		// 显式给了拓扑：补齐缺省的维度为 1，并同步扁平 vcpus 总数。
+		if vm.CPUSockets <= 0 {
+			vm.CPUSockets = 1
+		}
+		if vm.CPUCoresPerSocket <= 0 {
+			vm.CPUCoresPerSocket = 1
+		}
+		if vm.CPUThreadsPerCore <= 0 {
+			vm.CPUThreadsPerCore = 1
+		}
+		vm.VCPUs = vm.CPUSockets * vm.CPUCoresPerSocket * vm.CPUThreadsPerCore
+	}
+	// CPU 型号兜底：未指定时用 host-model（兼容大多数真实宿主机）。
+	if vm.CPUModel == "" {
+		vm.CPUModel = "host-model"
+	}
 	if vm.CPUConfig().VCPUs() == 0 {
 		return nil, fmt.Errorf("非法 CPU 拓扑")
 	}

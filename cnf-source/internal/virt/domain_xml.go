@@ -5,11 +5,24 @@ package virt
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/cnf/cnfv1/internal/model"
 )
+
+// domainType 控制 <domain type='...'> 的取值。
+//
+//	生产（宿主机有 /dev/kvm 硬件虚拟化）：kvm（默认，性能最佳）。
+//	无 KVM 的环境（如 CI / 容器 / 无嵌套虚拟化的沙箱）：设 CNF_LIBVIRT_DOMAIN_TYPE=qemu
+//	走 TCG 软件模拟，便于端到端功能验证而无需真实 KVM。
+func domainType() string {
+	if t := os.Getenv("CNF_LIBVIRT_DOMAIN_TYPE"); t != "" {
+		return t
+	}
+	return "kvm"
+}
 
 // DomainXMLBuilder 增量构建 libvirt domain XML。
 // 也可直接使用 libvirt.org/go/libvirtxml 的结构体，这里手写以保证字段可控、可读。
@@ -41,7 +54,7 @@ func (b *DomainXMLBuilder) Build() (string, error) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(`<domain type='kvm'>` + "\n")
+	sb.WriteString(fmt.Sprintf("<domain type='%s'>\n", domainType()))
 	sb.WriteString(fmt.Sprintf("  <name>%s</name>\n", xmlEscape(vm.Name)))
 	if vm.LibvirtUUID != nil {
 		sb.WriteString(fmt.Sprintf("  <uuid>%s</uuid>\n", vm.LibvirtUUID.String()))
@@ -172,6 +185,15 @@ func (b *DomainXMLBuilder) writeCPU(sb *strings.Builder, cpu model.VMCPUConfig) 
 		mode = "host-model"
 	default:
 		mode = "custom"
+	}
+	// 无 KVM 的 TCG(qemu) 环境下，host-passthrough/host-model 不可用，
+	// 退化为不写具体 CPU 模型（仅拓扑），保证软件模拟也能 define 成功。
+	if domainType() == "qemu" && (mode == "host-passthrough" || mode == "host-model") {
+		sb.WriteString("  <cpu>\n")
+		sb.WriteString(fmt.Sprintf("    <topology sockets='%d' cores='%d' threads='%d'/>\n",
+			cpu.Sockets, cpu.CoresPerSocket, cpu.ThreadsPerCore))
+		sb.WriteString("  </cpu>\n")
+		return
 	}
 
 	if mode == "custom" {
