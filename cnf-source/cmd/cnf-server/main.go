@@ -20,6 +20,7 @@ import (
 	"github.com/cnf/cnfv1/internal/ha"
 	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/cnf/cnfv1/internal/service"
+	"github.com/cnf/cnfv1/internal/storage"
 	"github.com/cnf/cnfv1/internal/virt"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
@@ -68,6 +69,15 @@ func main() {
 
 	// ---- 5. GPU 管理器 ----
 	gpuMgr := gpu.NewManager()
+
+	// ---- 6. 默认存储池：本地 qcow2（CNF_STORAGE_LOCAL_PATH） ----
+	// 创建 VM 系统盘时使用。目录不可用仅告警，不阻断启动；真实创建时再报清晰错误。
+	localPool := &storage.LocalDriver{}
+	if err := localPool.Connect(ctx, map[string]any{"path": cfg.StorageLocalPath}); err != nil {
+		log.Printf("警告: 默认存储池初始化失败 (path=%s): %v — 真实创建 VM 将报错，请确认目录可写", cfg.StorageLocalPath, err)
+	} else {
+		log.Printf("默认存储池就绪: local qcow2 @ %s", cfg.StorageLocalPath)
+	}
 
 	// ---- 6. service 层 ----
 	vmSvc := service.NewVMService(repository, conn)
@@ -132,6 +142,8 @@ func main() {
 		Auth:      authStore,
 		Mw:        mw,
 		Cache:     redisCache,
+
+		DefaultStoragePool: localPool,
 	}
 	v1.RegisterAPIRoutes(app, h)
 

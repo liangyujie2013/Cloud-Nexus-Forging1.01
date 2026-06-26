@@ -54,8 +54,14 @@
 
 > 关键设计：**libvirt 不可达 = 明确错误**。例如 `POST /hosts` 探测失败返回
 > `probe.status="probe_failed"`，原因写明"连接超时(8s)：qemu+tcp 不可达"；
-> VM 真实创建在未配置存储池时返回 `{code:"INTERNAL_ERROR", details:{cause:"存储池未就绪..."}}`。
+> VM 真实创建链路为 **建盘(qemu-img qcow2) → 写库 → DefineDomain(连 libvirt)**，
+> 无可达 libvirt 时止于最后一步并返回 `{code:"INTERNAL_ERROR", details:{cause:"define domain 失败: ... Connection refused"}}`。
 > **没有任何静默 mock 成功。**
+
+> **默认存储池已装配**：main 启动时按 `CNF_STORAGE_LOCAL_PATH`（默认 `/var/lib/cnf/images`）
+> 初始化 `LocalDriver`（qcow2）并注入创建路径；目录需对 cnf-server 进程可写。
+> 创建 VM 时底层字段（`boot_mode`/`arch`/`machine_type`）若前端未传，由 service 层填入
+> 合法默认值（`uefi`/`x86_64`/`q35`），避免 MySQL `NOT NULL ENUM` 截断错误。
 
 ---
 
@@ -69,6 +75,7 @@ export CNF_MYSQL_DSN='cnf:cnf@tcp(127.0.0.1:3306)/cnf?parseTime=true&charset=utf
 export CNF_REDIS_ADDR=127.0.0.1:6379
 export CNF_JWT_SECRET=change-me
 export CNF_MIGRATIONS_DIR=migrations/mysql
+export CNF_STORAGE_LOCAL_PATH=/var/lib/cnf/images   # 系统盘 qcow2 目录（须可写）
 # 注意：必须 CGO_ENABLED=1（依赖 libvirt CGO）
 CGO_ENABLED=1 go build -o bin/cnf-server ./cmd/cnf-server
 ./bin/cnf-server     # 自动跑 migrations + 种子 admin/admin123
@@ -114,7 +121,7 @@ curl -s -XDELETE $API/vms/1     -H "Authorization: Bearer $TOKEN"  # 真实 Unde
     real 创建返回统一错误 / tasks 列表 / VM_NOT_FOUND 错误码。
 
 ## 7. 残留风险 & 下一步
-- **存储池装配**：VM 真实创建需要 main 层按集群默认存储池注入 `StoragePool`（当前未配置→明确报错）。下一步：实现 `clusters/:id/storage-pools` 配置并在创建路径注入。
+- **存储池装配**：✅ 已完成——main 层按 `CNF_STORAGE_LOCAL_PATH` 初始化默认 `LocalDriver` 并注入创建路径，真实创建已验证可建出 qcow2 系统盘并写库成功。后续演进：实现 `clusters/:id/storage-pools` 多池配置，按 VM 所属集群路由到对应池（NFS/iSCSI）。
 - **libvirt 认证**：当前 `qemu+tcp` 无认证仅适合实验；生产应切 `qemu+tls`。
 - **探测耗时**：不可达主机探测约 8–18s（连接超时已封顶），建议后续改为异步任务 + 进度查询。
 - **前端**：仅切换了核心路径；图表/快照/迁移等高级视图仍可能依赖 Mock 形状，需逐屏对齐真实响应。

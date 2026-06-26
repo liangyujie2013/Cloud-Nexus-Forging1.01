@@ -9,6 +9,7 @@ import (
 	"github.com/cnf/cnfv1/internal/model"
 	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/cnf/cnfv1/internal/service"
+	"github.com/cnf/cnfv1/internal/storage"
 	"github.com/cnf/cnfv1/internal/virt"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -31,6 +32,10 @@ type Handlers struct {
 	Auth   *auth.Store
 	Mw     *auth.Middleware
 	Cache  *cache.Client
+
+	// DefaultStoragePool 默认存储池（创建 VM 系统盘时使用）。
+	// 由装配层（main）按 CNF_STORAGE_LOCAL_PATH 初始化 LocalDriver 注入。
+	DefaultStoragePool storage.Driver
 }
 
 // ---- 工具 ----
@@ -125,7 +130,9 @@ func (h *Handlers) createVM(c fiber.Ctx) error {
 		DiskSizeGB:   req.DiskSizeGB,
 		TemplatePath: req.TemplatePath,
 		LinkedClone:  req.LinkedClone,
-		// StoragePool 由装配层（main）根据 VM 所属集群的默认存储池注入。
+		// 注入默认存储池：当前按 CNF_STORAGE_LOCAL_PATH 初始化的 LocalDriver。
+		// 后续可扩展为按 VM 所属集群的默认存储池路由。
+		StoragePool: h.DefaultStoragePool,
 	}
 
 	vm, err := h.VM.Create(c.Context(), svcReq)

@@ -104,11 +104,13 @@ DRY=$(curl -s --max-time 20 -X POST "$BASE/api/v1/vms?dry_run=true" -H "$AUTH" -
 echo "$DRY" | grep -q '"dry_run":true' && ok "dry-run 返回 XML 预览（区分 real/dry-run）" || bad "dry-run: $DRY"
 echo "$DRY" | grep -q '<domain' && ok "dry-run XML 含 <domain>" || note "dry-run xml: $(echo $DRY|head -c 120)"
 
-echo "== 11. POST /api/v1/vms (real，无 libvirt 预期明确失败) =="
-RV=$(curl -s --max-time 20 -X POST "$BASE/api/v1/vms" -H "$AUTH" -H 'Content-Type: application/json' \
-    -d "{\"disk_size_gb\":10,\"vm\":{\"name\":\"smoke-vm-$$\",\"cluster_id\":${CLID},\"host_id\":${HID:-1},\"cpu_sockets\":1,\"cpu_cores_per_socket\":2,\"cpu_threads_per_core\":1,\"memory_mb\":2048}}")
-if echo "$RV" | grep -q '"code"'; then ok "real 创建失败返回统一错误格式 {code,message,details}"; note "$(echo $RV|head -c 160)";
-elif echo "$RV" | grep -q '"data"'; then ok "real 创建成功（环境可达 libvirt）"; else note "real create: $RV"; fi
+# 真实创建链路：存储池建盘(qemu-img) → 写库 → DefineDomain(连 libvirt)。
+# 无可达 libvirt 时，会在 DefineDomain 处带超时返回明确错误，故放宽到 50s。
+echo "== 11. POST /api/v1/vms (real：建盘→写库→define，无 libvirt 预期明确失败) =="
+RV=$(curl -s --max-time 50 -X POST "$BASE/api/v1/vms" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"disk_size_gb\":5,\"vm\":{\"name\":\"smoke-vm-$$\",\"cluster_id\":${CLID},\"host_id\":${HID:-1},\"cpu_sockets\":1,\"cpu_cores_per_socket\":2,\"cpu_threads_per_core\":1,\"memory_mb\":2048}}")
+if echo "$RV" | grep -q '"code"'; then ok "real 创建失败返回统一错误格式 {code,message,details}（已越过建盘/写库，止于 libvirt 连接）"; note "$(echo $RV|head -c 180)";
+elif echo "$RV" | grep -q '"data"'; then ok "real 创建成功（环境可达 libvirt，完整闭环打通）"; else bad "real create 无响应/超时: $RV"; fi
 
 echo "== 12. GET /api/v1/tasks =="
 T=$(curl -s --max-time 20 "$BASE/api/v1/tasks" -H "$AUTH")

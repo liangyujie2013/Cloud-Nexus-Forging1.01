@@ -63,6 +63,19 @@ func (s *VMService) Create(ctx context.Context, req *CreateVMRequest) (*model.VM
 		return nil, fmt.Errorf("绑核 CPU 数(%d) 少于 vCPU 数(%d)", len(vm.CPUPinnedCPUs), vm.CPUConfig().VCPUs())
 	}
 
+	// 2.1 枚举/必填字段默认值兜底：前端可能不传这些底层字段，
+	// 而 MySQL 列为 NOT NULL ENUM，空串会触发 Error 1265 (Data truncated)。
+	// 在此填入合法默认值，保证真实创建链路不因缺省字段写库失败。
+	if vm.BootMode == "" {
+		vm.BootMode = model.BootUEFI
+	}
+	if vm.Arch == "" {
+		vm.Arch = "x86_64"
+	}
+	if vm.MachineType == "" {
+		vm.MachineType = "q35"
+	}
+
 	// 3. 生成 libvirt UUID
 	lu := uuid.New()
 	vm.LibvirtUUID = &lu

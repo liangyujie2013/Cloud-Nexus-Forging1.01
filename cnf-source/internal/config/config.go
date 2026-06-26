@@ -46,6 +46,10 @@ type Config struct {
 
 	// 数据库迁移目录
 	MigrationsDir string
+
+	// 默认本地存储池根目录（qcow2 系统盘存放路径）。
+	// 真实创建 VM 时，未显式指定存储池则使用此目录下的 LocalDriver。
+	StorageLocalPath string
 }
 
 // Load 从环境变量加载配置（带默认值），并做基本校验。
@@ -73,6 +77,8 @@ func Load() (*Config, error) {
 		LibvirtPort:      envInt("CNF_LIBVIRT_PORT", 16509),
 
 		MigrationsDir: envOr("CNF_MIGRATIONS_DIR", "migrations/mysql"),
+
+		StorageLocalPath: envOr("CNF_STORAGE_LOCAL_PATH", "/var/lib/cnf/images"),
 	}
 
 	if err := c.validate(); err != nil {
