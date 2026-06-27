@@ -21,21 +21,51 @@ const AccessControlView = {
     const auditLogs = ref([])
     const selRole = ref(null)
 
+    // 审计日志：真实后端字段 created_at/username/action/resource/ip_address/detail。
+    // 规范化为模板字段；result 优先取 detail.result，否则按 action 含 fail/error 推断。
+    const normalizeAudit = (raw) => (Array.isArray(raw) ? raw : []).map((l) => {
+      const d = l.detail || {}
+      let result = d.result || 'success'
+      if (!d.result && /fail|error|deny|denied/i.test(l.action || '')) result = 'failed'
+      const detailStr = Object.keys(d).filter((k) => k !== 'result').map((k) => k + '=' + JSON.stringify(d[k])).join(' ')
+      return {
+        id: l.id,
+        ts: l.created_at ? String(l.created_at).replace('T', ' ').slice(0, 19) : '',
+        user: l.username || '—',
+        action: l.action,
+        resource: l.resource_id ? (l.resource + '#' + l.resource_id) : (l.resource || '—'),
+        source_ip: l.ip_address || '—',
+        result,
+        detail: detailStr || '—',
+      }
+    })
+
     const load = async () => {
-      users.value = await api('/users')
-      if (!userRoles.value.length) userRoles.value = await api('/user-roles')
+      const u = await api('/users'); users.value = Array.isArray(u) ? u : []
+      // 角色（真实 /roles，字段为 permissions[]）。规范化出 privileges 别名供模板复用。
       if (!roles.value.length) {
-        roles.value = await api('/roles')
+        const r = await api('/roles')
+        roles.value = (Array.isArray(r) ? r : []).map((role) => ({ ...role, privileges: role.permissions || role.privileges || [] }))
+        userRoles.value = roles.value
+        // 全量权限项 = 各角色权限并集（真实派生，不再依赖 mock /privileges）。
+        const set = new Set()
+        roles.value.forEach((role) => (role.privileges || []).forEach((p) => p !== '*' && set.add(p)))
+        privileges.value = Array.from(set).sort()
         if (roles.value.length) selRole.value = roles.value[0]
       }
-      if (!privileges.value.length) privileges.value = await api('/privileges')
-      if (!assignments.value.length) assignments.value = await api('/permission-assignments')
-      if (!auditLogs.value.length) auditLogs.value = await api('/audit-logs')
+      // 权限分配：由真实用户→角色关系派生（每个用户绑定一个角色，作用域=全局）。
+      assignments.value = users.value.map((u) => ({
+        id: u.id, user: u.username, role_key: u.role || (u.role_id === 1 ? 'admin' : ''),
+        scope: 'perm_scope_global', scope_obj: '—', propagate: true,
+      }))
+      if (props.tab === 'audit') {
+        auditLogs.value = normalizeAudit(await api('/audit-logs?limit=200'))
+      }
     }
     onMounted(load)
     watch(() => props.tab, load)
 
-    const hasPriv = (role, p) => role && role.privileges.includes(p)
+    const hasPriv = (role, p) => role && role.privileges && (role.privileges.includes('*') || role.privileges.includes(p))
     const roleName = (key) => t(key)
     const roleNamesOf = (keys) => keys.map((k) => t(k)).join('、')
     const resultBadge = (r) => ({
@@ -303,10 +333,11 @@ const AccessControlView = {
             <tbody>
               <tr v-for="a in assignments" :key="a.id">
                 <td><i class="fas fa-user muted"></i> <span class="mono" style="font-size:13px">{{ a.user }}</span></td>
-                <td><span class="apple-badge apple-badge--running"><span class="dot"></span>{{ roleName(a.role_key) }}</span></td>
+                <td><span class="apple-badge apple-badge--running"><span class="dot"></span>{{ a.role_key }}</span></td>
                 <td><strong>{{ t(a.scope) }}</strong><span class="muted" v-if="a.scope_obj!=='—'"> · {{ a.scope_obj }}</span></td>
                 <td><i :class="a.propagate?'fas fa-check':'fas fa-minus'" :style="{color:a.propagate?'var(--color-green)':'var(--text-tertiary)'}"></i></td>
               </tr>
+              <tr v-if="!assignments.length"><td colspan="4" style="text-align:center;padding:24px;color:var(--text-tertiary)">{{ t('acc_audit_empty') }}</td></tr>
             </tbody>
           </table>
         </div>
@@ -328,6 +359,7 @@ const AccessControlView = {
                 <td><span class="apple-badge" :class="resultBadge(log.result).cls"><span class="dot"></span>{{ resultBadge(log.result).label }}</span></td>
                 <td class="muted" style="font-size:13px">{{ log.detail }}</td>
               </tr>
+              <tr v-if="!auditLogs.length"><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary)"><i class="fas fa-clipboard-list" style="font-size:28px;opacity:.4;display:block;margin-bottom:10px"></i>{{ t('acc_audit_empty') }}</td></tr>
             </tbody>
           </table>
         </div>

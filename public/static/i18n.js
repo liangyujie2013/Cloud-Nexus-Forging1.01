@@ -531,6 +531,7 @@ const dict = {
     acc_email: '邮箱', acc_roles: '角色', acc_source: '来源', acc_source_local: '本地', acc_source_ldap: 'LDAP',
     acc_last_login: '最近登录',
     acc_audit_title: '操作审计', acc_audit_time: '时间', acc_audit_user: '操作者', acc_audit_action: '操作',
+    acc_audit_empty: '暂无审计记录（平台操作会自动记录到此）', perm_scope_global: '全局',
     acc_audit_resource: '对象', acc_audit_ip: '来源 IP', acc_audit_result: '结果', acc_audit_detail: '详情',
     acc_result_success: '成功', acc_result_failed: '失败', acc_result_denied: '拒绝',
 
@@ -1141,6 +1142,7 @@ const dict = {
     acc_email: 'Email', acc_roles: 'Roles', acc_source: 'Source', acc_source_local: 'Local', acc_source_ldap: 'LDAP',
     acc_last_login: 'Last Login',
     acc_audit_title: 'Audit Log', acc_audit_time: 'Time', acc_audit_user: 'User', acc_audit_action: 'Action',
+    acc_audit_empty: 'No audit records yet (platform operations are logged here automatically)', perm_scope_global: 'Global',
     acc_audit_resource: 'Resource', acc_audit_ip: 'Source IP', acc_audit_result: 'Result', acc_audit_detail: 'Detail',
     acc_result_success: 'Success', acc_result_failed: 'Failed', acc_result_denied: 'Denied',
 
