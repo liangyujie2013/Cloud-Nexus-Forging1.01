@@ -151,6 +151,87 @@ const HostsView = {
       netDlg.errors = {}
       netDlg.steps = []
     }
+
+    // ============================================================
+    //  第1点 · 主机防火墙（firewalld）管理 —— 单机抽屉 + 多机批量
+    //  全部走真实后端：GET /hosts/:id/firewall、POST /hosts/:id/firewall、
+    //  POST /hosts/firewall/batch。绝不伪造，逐步回显真实执行步骤。
+    // ============================================================
+    const fwDlg = reactive({
+      open: false, loading: false, busy: false, host: null,
+      state: null, loadError: '',
+      newPort: '', newProto: 'tcp', errors: {}, steps: [],
+    })
+    const openFirewall = async (h) => {
+      fwDlg.host = h; fwDlg.state = null; fwDlg.loadError = ''
+      fwDlg.newPort = ''; fwDlg.newProto = 'tcp'; fwDlg.errors = {}; fwDlg.steps = []
+      fwDlg.open = true; fwDlg.loading = true
+      try {
+        const res = await api('/hosts/' + h.id + '/firewall')
+        if (!res || res.error || res.reachable === false) {
+          fwDlg.loadError = (res && res.error) || t('fw_load_fail')
+        } else { fwDlg.state = res }
+      } catch (e) { fwDlg.loadError = t('fw_load_fail') } finally { fwDlg.loading = false }
+    }
+    const reloadFirewall = async () => {
+      if (!fwDlg.host) return
+      const res = await api('/hosts/' + fwDlg.host.id + '/firewall')
+      if (res && !res.error && res.reachable !== false) fwDlg.state = res
+    }
+    // 单机操作：enable/disable/open_platform/add_ports/remove_ports
+    const fwAction = async (action, ports) => {
+      if (!fwDlg.host) return
+      fwDlg.busy = true; fwDlg.steps = []; fwDlg.errors = {}
+      try {
+        const body = { action }
+        if (ports && ports.length) body.ports = ports
+        const res = await api('/hosts/' + fwDlg.host.id + '/firewall', { method: 'POST', body: JSON.stringify(body) })
+        if (res && res.error) {
+          fwDlg.steps = res.steps || []
+          fwDlg.errors = { action: res.error }
+          toast(res.error, 'error'); return
+        }
+        fwDlg.steps = (res && res.steps) || []
+        toast(t('fw_op_done'), 'success')
+        await reloadFirewall()
+        await store.fetchAll()
+      } catch (e) { toast(t('op_failed'), 'error') } finally { fwDlg.busy = false }
+    }
+    const fwToggle = () => fwAction(fwDlg.state && fwDlg.state.running ? 'disable' : 'enable')
+    const fwOpenPlatform = () => fwAction('open_platform')
+    const fwAddPort = () => {
+      const p = (fwDlg.newPort || '').trim()
+      if (!/^\d{1,5}(-\d{1,5})?$/.test(p)) { fwDlg.errors = { newPort: t('fw_port_invalid') }; return }
+      fwAction('add_ports', [p + '/' + fwDlg.newProto]).then(() => { fwDlg.newPort = '' })
+    }
+    const fwRemovePort = (spec) => fwAction('remove_ports', [spec])
+
+    // ---- 多机批量防火墙 ----
+    const fwBatch = reactive({ open: false, busy: false, action: 'open_platform', selected: {}, newPort: '', newProto: 'tcp', results: [] })
+    const openFwBatch = () => {
+      fwBatch.selected = {}; fwBatch.results = []; fwBatch.action = 'open_platform'
+      fwBatch.newPort = ''; fwBatch.newProto = 'tcp'; fwBatch.open = true
+    }
+    const fwBatchCount = computed(() => Object.keys(fwBatch.selected).filter((k) => fwBatch.selected[k]).length)
+    const submitFwBatch = async () => {
+      const ids = Object.keys(fwBatch.selected).filter((k) => fwBatch.selected[k]).map(Number)
+      if (!ids.length) { toast(t('fw_batch_pick'), 'warning'); return }
+      const body = { host_ids: ids, action: fwBatch.action }
+      if (fwBatch.action === 'add_ports' || fwBatch.action === 'remove_ports') {
+        const p = (fwBatch.newPort || '').trim()
+        if (!/^\d{1,5}(-\d{1,5})?$/.test(p)) { toast(t('fw_port_invalid'), 'error'); return }
+        body.ports = [p + '/' + fwBatch.newProto]
+      }
+      fwBatch.busy = true; fwBatch.results = []
+      try {
+        const res = await api('/hosts/firewall/batch', { method: 'POST', body: JSON.stringify(body) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        fwBatch.results = (res && res.results) || []
+        const ok = fwBatch.results.filter((r) => r.ok).length
+        toast(t('fw_batch_done', { ok, total: fwBatch.results.length }), ok === fwBatch.results.length ? 'success' : 'warning')
+        await store.fetchAll()
+      } catch (e) { toast(t('op_failed'), 'error') } finally { fwBatch.busy = false }
+    }
     const openNetEdit = async (h) => {
       netDlg.host = h
       netDlg.nics = []; netDlg.selected = null; netDlg.info = null
@@ -538,6 +619,8 @@ const HostsView = {
       hostCtx, onHostCtxAction,
       metricsLoading, refreshMetrics, hMetric, pctText, pctWidth, uptimeText,
       clusterGroups, netDlg, openNetEdit, submitNet, pickNic, batchDlg, openBatch, submitBatch,
+      fwDlg, openFirewall, fwToggle, fwOpenPlatform, fwAddPort, fwRemovePort, reloadFirewall,
+      fwBatch, openFwBatch, fwBatchCount, submitFwBatch,
       bytesRate, utilColor, C, t, fmt,
     }
   },
@@ -610,6 +693,7 @@ const HostsView = {
       </div>
       <div class="toolbar">
         <button class="apple-btn apple-btn--primary" @click="addHost"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
+        <button class="apple-btn apple-btn--secondary" @click="openFwBatch"><i class="fas fa-shield-halved"></i> {{ t('fw_batch_btn') }}</button>
         <div class="toolbar-search"><i class="fas fa-magnifying-glass"></i><input v-model="search" :placeholder="t('host_search_ph')"></div>
         <div class="spacer"></div>
         <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="metricsLoading" @click="refreshMetrics" :title="t('hv_refresh')">
@@ -635,6 +719,7 @@ const HostsView = {
               <td class="mono muted" style="font-size:12px">{{ hMetric(h)&&hMetric(h).reachable!==false ? uptimeText(hMetric(h).uptime_sec) : '—' }}</td>
               <td style="text-align:right;white-space:nowrap">
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openDetail(h.id)" :title="t('hv_open_detail')"><i class="fas fa-circle-info"></i></button>
+                <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openFirewall(h)" :title="t('fw_manage')"><i class="fas fa-shield-halved"></i> {{ t('fw_short') }}</button>
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click="toggleMaintenance(h)">
                   <i v-if="maintBusy===h.id" class="fas fa-spinner fa-spin"></i>
                   <i v-else :class="h.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
@@ -917,6 +1002,109 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" @click="batchDlg.open=false">{{ t('op_cancel') }}</button>
           <button class="apple-btn apple-btn--primary" :disabled="batchDlg.busy" @click="submitBatch"><i v-if="batchDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== 第1点 · 单机防火墙管理抽屉 ====================== -->
+    <div v-if="fwDlg.open" class="modal-mask" @click.self="fwDlg.open=false">
+      <div class="modal-dialog">
+        <div class="modal-head"><i class="fas fa-shield-halved" :style="{color:C.green}"></i> {{ t('fw_title') }} <span class="muted" style="font-weight:400">· {{ fwDlg.host && fwDlg.host.name }} ({{ fwDlg.host && fwDlg.host.ip }})</span></div>
+        <div class="modal-body">
+          <div v-if="fwDlg.loading" class="muted" style="padding:20px;text-align:center"><i class="fas fa-spinner fa-spin"></i> {{ t('fw_loading') }}</div>
+          <div v-else-if="fwDlg.loadError" class="form-err" style="padding:12px"><i class="fas fa-circle-exclamation"></i> {{ fwDlg.loadError }}</div>
+          <template v-else-if="fwDlg.state">
+            <div v-if="!fwDlg.state.installed" class="hosts-pick-hint" style="margin-bottom:12px"><i class="fas fa-triangle-exclamation"></i> {{ t('fw_not_installed') }}</div>
+            <template v-else>
+              <!-- 开关 + 平台就绪 -->
+              <div class="fw-row">
+                <div>
+                  <strong>{{ t('fw_status') }}：</strong>
+                  <span class="apple-badge" :class="fwDlg.state.running ? 'apple-badge--success' : 'apple-badge--secondary'"><span class="dot"></span>{{ fwDlg.state.running ? t('fw_on') : t('fw_off') }}</span>
+                  <span class="muted" style="margin-left:10px;font-size:12px">zone: {{ fwDlg.state.default_zone }}</span>
+                </div>
+                <button class="apple-btn apple-btn--sm" :class="fwDlg.state.running ? 'apple-btn--secondary' : 'apple-btn--primary'" :disabled="fwDlg.busy" @click="fwToggle">
+                  <i v-if="fwDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else :class="fwDlg.state.running?'fas fa-toggle-off':'fas fa-toggle-on'"></i>
+                  {{ fwDlg.state.running ? t('fw_turn_off') : t('fw_turn_on') }}
+                </button>
+              </div>
+              <!-- 平台端口就绪 -->
+              <div class="fw-row">
+                <div>
+                  <strong>{{ t('fw_platform') }}：</strong>
+                  <span class="apple-badge" :class="fwDlg.state.platform_ready ? 'apple-badge--success' : 'apple-badge--warning'"><span class="dot"></span>{{ fwDlg.state.platform_ready ? t('fw_ready') : t('fw_not_ready') }}</span>
+                  <span v-if="!fwDlg.state.platform_ready && fwDlg.state.missing_platform_ports" class="muted" style="margin-left:8px;font-size:12px">{{ t('fw_missing') }}: {{ fwDlg.state.missing_platform_ports.join(', ') }}</span>
+                </div>
+                <button class="apple-btn apple-btn--secondary apple-btn--sm" :disabled="fwDlg.busy || !fwDlg.state.running" @click="fwOpenPlatform"><i class="fas fa-unlock"></i> {{ t('fw_open_platform') }}</button>
+              </div>
+              <!-- 已放行端口 -->
+              <div style="margin-top:14px">
+                <strong>{{ t('fw_open_ports') }}</strong>
+                <div class="fw-ports">
+                  <span v-for="p in (fwDlg.state.open_ports||[])" :key="p" class="fw-chip">{{ p }}
+                    <i class="fas fa-xmark" :title="t('fw_remove')" @click="fwRemovePort(p)"></i></span>
+                  <span v-if="!(fwDlg.state.open_ports||[]).length" class="muted" style="font-size:12px">{{ t('fw_no_ports') }}</span>
+                </div>
+                <div v-if="(fwDlg.state.open_services||[]).length" class="muted" style="font-size:12px;margin-top:6px">{{ t('fw_services') }}: {{ fwDlg.state.open_services.join(', ') }}</div>
+              </div>
+              <!-- 自定义端口 -->
+              <div class="fw-add" style="margin-top:14px">
+                <strong>{{ t('fw_add_custom') }}</strong>
+                <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+                  <input v-model="fwDlg.newPort" :placeholder="t('fw_port_ph')" style="width:160px" :disabled="!fwDlg.state.running">
+                  <select v-model="fwDlg.newProto" :disabled="!fwDlg.state.running"><option value="tcp">tcp</option><option value="udp">udp</option></select>
+                  <button class="apple-btn apple-btn--primary apple-btn--sm" :disabled="fwDlg.busy || !fwDlg.state.running" @click="fwAddPort"><i class="fas fa-plus"></i> {{ t('fw_add') }}</button>
+                </div>
+                <div v-if="fwDlg.errors.newPort" class="form-err">{{ fwDlg.errors.newPort }}</div>
+              </div>
+              <div v-if="fwDlg.steps.length" class="fw-steps"><div class="muted" style="font-size:11px;margin-bottom:4px">{{ t('fw_exec_steps') }}</div><pre>{{ fwDlg.steps.join('\\n') }}</pre></div>
+            </template>
+          </template>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="reloadFirewall" :disabled="fwDlg.busy"><i class="fas fa-rotate"></i> {{ t('hv_refresh') }}</button>
+          <button class="apple-btn apple-btn--ghost" @click="fwDlg.open=false">{{ t('op_close') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== 第1点 · 多机批量防火墙 ====================== -->
+    <div v-if="fwBatch.open" class="modal-mask" @click.self="fwBatch.open=false">
+      <div class="modal-dialog">
+        <div class="modal-head"><i class="fas fa-shield-halved" :style="{color:C.indigo}"></i> {{ t('fw_batch_title') }}</div>
+        <div class="modal-body">
+          <div class="hosts-pick-hint" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> {{ t('fw_batch_hint') }}</div>
+          <div class="form-row"><label>{{ t('fw_batch_action') }}</label>
+            <select v-model="fwBatch.action">
+              <option value="open_platform">{{ t('fw_act_open_platform') }}</option>
+              <option value="enable">{{ t('fw_act_enable') }}</option>
+              <option value="disable">{{ t('fw_act_disable') }}</option>
+              <option value="add_ports">{{ t('fw_act_add') }}</option>
+              <option value="remove_ports">{{ t('fw_act_remove') }}</option>
+            </select>
+          </div>
+          <div v-if="fwBatch.action==='add_ports' || fwBatch.action==='remove_ports'" style="display:flex;gap:8px;align-items:center;margin:6px 0 10px">
+            <input v-model="fwBatch.newPort" :placeholder="t('fw_port_ph')" style="width:160px">
+            <select v-model="fwBatch.newProto"><option value="tcp">tcp</option><option value="udp">udp</option></select>
+          </div>
+          <label style="font-weight:600;font-size:13px">{{ t('fw_batch_hosts') }} ({{ fwBatchCount }})</label>
+          <div class="fw-host-pick">
+            <label v-for="h in filteredHosts" :key="h.id" class="fw-host-item">
+              <input type="checkbox" v-model="fwBatch.selected[h.id]"> <span>{{ h.name }}</span>
+              <span class="muted" style="font-size:11px">{{ h.ip }}</span>
+            </label>
+          </div>
+          <div v-if="fwBatch.results.length" class="fw-batch-results">
+            <div class="muted" style="font-size:11px;margin:8px 0 4px">{{ t('fw_batch_results') }}</div>
+            <div v-for="r in fwBatch.results" :key="r.host_id" class="fw-batch-line">
+              <i :class="r.ok ? 'fas fa-circle-check' : 'fas fa-circle-xmark'" :style="{color: r.ok ? C.green : C.red}"></i>
+              host {{ r.host_id }} <span v-if="r.error" class="muted">— {{ r.error }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="fwBatch.open=false">{{ t('op_close') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="fwBatch.busy || !fwBatchCount" @click="submitFwBatch"><i v-if="fwBatch.busy" class="fas fa-spinner fa-spin"></i> {{ t('fw_batch_run') }}</button>
         </div>
       </div>
     </div>

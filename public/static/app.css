@@ -922,6 +922,18 @@
 /* 维护模式：卡片整体降饱和 + 橙色边框，进入维护后有明显视觉变化 */
 .host-tile--maint { border: 1.5px solid #f59e0b; background: linear-gradient(0deg, rgba(245,158,11,.05), rgba(245,158,11,.05)); }
 .ht-maint-ribbon { position: absolute; top: 10px; right: -34px; transform: rotate(45deg); background: #f59e0b; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 40px; letter-spacing: .5px; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+/* 防火墙管理 UI */
+.fw-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--separator, #e5e5ea); gap: 12px; flex-wrap: wrap; }
+.fw-ports { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.fw-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(0,122,255,.08); color: #007AFF; border: 1px solid rgba(0,122,255,.22); border-radius: 14px; padding: 3px 10px; font-size: 12px; font-family: ui-monospace, monospace; }
+.fw-chip i { cursor: pointer; color: #FF3B30; opacity: .7; } .fw-chip i:hover { opacity: 1; }
+.fw-steps { margin-top: 12px; background: #1e1e1e; border-radius: 8px; padding: 10px; }
+.fw-steps pre { color: #9ece6a; font-size: 11px; margin: 0; white-space: pre-wrap; word-break: break-all; }
+.fw-host-pick { max-height: 220px; overflow-y: auto; border: 1px solid var(--separator, #e5e5ea); border-radius: 8px; padding: 6px; margin-top: 6px; }
+.fw-host-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.fw-host-item:hover { background: rgba(0,0,0,.03); }
+.fw-batch-results { margin-top: 10px; max-height: 160px; overflow-y: auto; }
+.fw-batch-line { font-size: 12px; padding: 3px 0; display: flex; align-items: center; gap: 6px; }
 .ht-head { display: flex; align-items: center; justify-content: space-between; }
 .ht-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .ht-meta { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); }
