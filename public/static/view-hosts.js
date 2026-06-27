@@ -278,6 +278,60 @@ const HostsView = {
         await store.fetchAll()
       } catch (e) { toast(t('op_failed'), 'error') } finally { seBatch.busy = false }
     }
+
+    // ============================================================
+    //  第3点 · SSH 端口修改 —— 单机抽屉 + 多机批量
+    //  风险极高：后端采用「双写并存 → 新端口验证通过 → 才移除旧端口 + 同步DB」策略，
+    //  验证失败时旧端口保留、DB 不动，主机永不失联。
+    // ============================================================
+    const spDlg = reactive({ open: false, busy: false, host: null, curPort: 22, port: 2222, result: null, ack: false })
+    const openSSHPort = async (h) => {
+      spDlg.host = h
+      spDlg.curPort = (h && (h.ssh_port || h.sshPort)) || 22
+      spDlg.result = null; spDlg.ack = false; spDlg.open = true
+      try {
+        const st = await api('/hosts/' + h.id + '/status')
+        if (st && st.reachable !== false && st.ssh_port) spDlg.curPort = st.ssh_port
+      } catch (e) { /* 保留默认 */ }
+      spDlg.port = (spDlg.curPort === 22 ? 2222 : 22)
+    }
+    const submitSSHPort = async () => {
+      if (!spDlg.host) return
+      const p = Number(spDlg.port)
+      if (!Number.isInteger(p) || p < 1 || p > 65535) { toast(t('sp_invalid'), 'warning'); return }
+      if (!spDlg.ack) { toast(t('sp_need_ack'), 'warning'); return }
+      spDlg.busy = true; spDlg.result = null
+      try {
+        const res = await api('/hosts/' + spDlg.host.id + '/ssh-port', { method: 'POST', body: JSON.stringify({ port: p }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        spDlg.result = res
+        toast((res && res.message) || t('sp_op_done'), (res && res.verified) ? 'success' : 'warning')
+        await store.fetchAll()
+        if (res && res.new_port) spDlg.curPort = res.new_port
+      } catch (e) { toast(t('op_failed'), 'error') } finally { spDlg.busy = false }
+    }
+
+    // ---- 多机批量 SSH 端口 ----
+    const spBatch = reactive({ open: false, busy: false, port: 2222, ack: false, selected: {}, results: [] })
+    const openSpBatch = () => { spBatch.selected = {}; spBatch.results = []; spBatch.port = 2222; spBatch.ack = false; spBatch.open = true }
+    const spBatchCount = computed(() => Object.keys(spBatch.selected).filter((k) => spBatch.selected[k]).length)
+    const submitSpBatch = async () => {
+      const ids = Object.keys(spBatch.selected).filter((k) => spBatch.selected[k]).map(Number)
+      if (!ids.length) { toast(t('sp_batch_pick'), 'warning'); return }
+      const p = Number(spBatch.port)
+      if (!Number.isInteger(p) || p < 1 || p > 65535) { toast(t('sp_invalid'), 'warning'); return }
+      if (!spBatch.ack) { toast(t('sp_need_ack'), 'warning'); return }
+      spBatch.busy = true; spBatch.results = []
+      try {
+        const res = await api('/hosts/ssh-port/batch', { method: 'POST', body: JSON.stringify({ host_ids: ids, port: p }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        spBatch.results = (res && res.results) || []
+        const ok = spBatch.results.filter((r) => r.ok && r.verified !== false).length
+        toast(t('sp_batch_done', { ok, total: spBatch.results.length }), ok === spBatch.results.length ? 'success' : 'warning')
+        await store.fetchAll()
+      } catch (e) { toast(t('op_failed'), 'error') } finally { spBatch.busy = false }
+    }
+
     const openNetEdit = async (h) => {
       netDlg.host = h
       netDlg.nics = []; netDlg.selected = null; netDlg.info = null
@@ -668,6 +722,7 @@ const HostsView = {
       fwDlg, openFirewall, fwToggle, fwOpenPlatform, fwAddPort, fwRemovePort, reloadFirewall,
       fwBatch, openFwBatch, fwBatchCount, submitFwBatch,
       seDlg, openSelinux, submitSelinux, seBatch, openSeBatch, seBatchCount, submitSeBatch,
+      spDlg, openSSHPort, submitSSHPort, spBatch, openSpBatch, spBatchCount, submitSpBatch,
       bytesRate, utilColor, C, t, fmt,
     }
   },
@@ -742,6 +797,7 @@ const HostsView = {
         <button class="apple-btn apple-btn--primary" @click="addHost"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
         <button class="apple-btn apple-btn--secondary" @click="openFwBatch"><i class="fas fa-shield-halved"></i> {{ t('fw_batch_btn') }}</button>
         <button class="apple-btn apple-btn--secondary" @click="openSeBatch"><i class="fas fa-user-shield"></i> {{ t('se_batch_btn') }}</button>
+        <button class="apple-btn apple-btn--secondary" @click="openSpBatch"><i class="fas fa-network-wired"></i> {{ t('sp_batch_btn') }}</button>
         <div class="toolbar-search"><i class="fas fa-magnifying-glass"></i><input v-model="search" :placeholder="t('host_search_ph')"></div>
         <div class="spacer"></div>
         <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="metricsLoading" @click="refreshMetrics" :title="t('hv_refresh')">
@@ -769,6 +825,7 @@ const HostsView = {
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openDetail(h.id)" :title="t('hv_open_detail')"><i class="fas fa-circle-info"></i></button>
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openFirewall(h)" :title="t('fw_manage')"><i class="fas fa-shield-halved"></i> {{ t('fw_short') }}</button>
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openSelinux(h)" :title="t('se_manage')"><i class="fas fa-user-shield"></i> {{ t('se_short') }}</button>
+                <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openSSHPort(h)" :title="t('sp_manage')"><i class="fas fa-network-wired"></i> {{ t('sp_short') }}</button>
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click="toggleMaintenance(h)">
                   <i v-if="maintBusy===h.id" class="fas fa-spinner fa-spin"></i>
                   <i v-else :class="h.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
@@ -1218,6 +1275,70 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" @click="seBatch.open=false">{{ t('op_close') }}</button>
           <button class="apple-btn apple-btn--primary" :disabled="seBatch.busy || !seBatchCount" @click="submitSeBatch"><i v-if="seBatch.busy" class="fas fa-spinner fa-spin"></i> {{ t('se_batch_run') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== 第3点 · 单机 SSH 端口修改 ====================== -->
+    <div v-if="spDlg.open" class="modal-mask" @click.self="spDlg.open=false">
+      <div class="modal-dialog modal-sm">
+        <div class="modal-head"><i class="fas fa-network-wired" :style="{color:C.purple}"></i> {{ t('sp_title') }} <span class="muted" style="font-weight:400">· {{ spDlg.host && spDlg.host.name }}</span></div>
+        <div class="modal-body">
+          <div class="form-err" style="padding:10px;margin-bottom:12px"><i class="fas fa-triangle-exclamation"></i> {{ t('sp_risk') }}</div>
+          <div class="fw-row"><div><strong>{{ t('sp_current') }}：</strong><span class="apple-badge apple-badge--secondary"><span class="dot"></span>{{ spDlg.curPort }}</span></div></div>
+          <div class="form-row" style="margin-top:14px"><label>{{ t('sp_new_port') }}</label>
+            <input type="number" min="1" max="65535" v-model.number="spDlg.port" placeholder="2222">
+          </div>
+          <div class="hosts-pick-hint" style="margin-top:8px"><i class="fas fa-shield-halved"></i> {{ t('sp_safe_note') }}</div>
+          <label class="fw-host-item" style="margin-top:10px;cursor:pointer">
+            <input type="checkbox" v-model="spDlg.ack"> <span>{{ t('sp_ack') }}</span>
+          </label>
+          <div v-if="spDlg.result" class="fw-steps">
+            <div class="muted" style="font-size:11px;margin-bottom:4px">{{ t('fw_exec_steps') }}</div>
+            <pre>{{ (spDlg.result.steps||[]).join('\\n') }}</pre>
+            <div v-if="spDlg.result.verified" class="apple-badge apple-badge--success" style="margin-top:6px"><i class="fas fa-circle-check"></i> {{ t('sp_verified') }}</div>
+            <div v-else class="form-err" style="margin-top:6px"><i class="fas fa-circle-xmark"></i> {{ t('sp_verify_fail') }}</div>
+            <div v-if="spDlg.result.warnings && spDlg.result.warnings.length" class="muted" style="margin-top:6px;font-size:11px">{{ spDlg.result.warnings.join('；') }}</div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="spDlg.open=false">{{ t('op_close') }}</button>
+          <button class="apple-btn apple-btn--danger" :disabled="spDlg.busy || !spDlg.ack" @click="submitSSHPort"><i v-if="spDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('sp_apply') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== 第3点 · 多机批量 SSH 端口 ====================== -->
+    <div v-if="spBatch.open" class="modal-mask" @click.self="spBatch.open=false">
+      <div class="modal-dialog">
+        <div class="modal-head"><i class="fas fa-network-wired" :style="{color:C.indigo}"></i> {{ t('sp_batch_title') }}</div>
+        <div class="modal-body">
+          <div class="form-err" style="padding:10px;margin-bottom:12px"><i class="fas fa-triangle-exclamation"></i> {{ t('sp_batch_risk') }}</div>
+          <div class="form-row"><label>{{ t('sp_new_port') }}</label>
+            <input type="number" min="1" max="65535" v-model.number="spBatch.port" placeholder="2222">
+          </div>
+          <label style="font-weight:600;font-size:13px">{{ t('fw_batch_hosts') }} ({{ spBatchCount }})</label>
+          <div class="fw-host-pick">
+            <label v-for="h in filteredHosts" :key="h.id" class="fw-host-item">
+              <input type="checkbox" v-model="spBatch.selected[h.id]"> <span>{{ h.name }}</span><span class="muted" style="font-size:11px">{{ h.ip }}</span>
+            </label>
+          </div>
+          <label class="fw-host-item" style="margin-top:10px;cursor:pointer">
+            <input type="checkbox" v-model="spBatch.ack"> <span>{{ t('sp_ack') }}</span>
+          </label>
+          <div v-if="spBatch.results.length" class="fw-batch-results">
+            <div class="muted" style="font-size:11px;margin:8px 0 4px">{{ t('fw_batch_results') }}</div>
+            <div v-for="r in spBatch.results" :key="r.host_id" class="fw-batch-line">
+              <i :class="(r.ok && r.verified!==false)?'fas fa-circle-check':'fas fa-circle-xmark'" :style="{color:(r.ok && r.verified!==false)?C.green:C.red}"></i>
+              host {{ r.host_id }}
+              <span v-if="r.ok && r.new_port" class="muted">→ {{ r.new_port }}</span>
+              <span v-if="r.error" class="muted">— {{ r.error }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="spBatch.open=false">{{ t('op_close') }}</button>
+          <button class="apple-btn apple-btn--danger" :disabled="spBatch.busy || !spBatchCount || !spBatch.ack" @click="submitSpBatch"><i v-if="spBatch.busy" class="fas fa-spinner fa-spin"></i> {{ t('sp_batch_run') }}</button>
         </div>
       </div>
     </div>
