@@ -1,5 +1,7 @@
 {
-  "name": "webapp",
+  "name": "cnf",
+  "version": "1.0.1",
+  "description": "Cloud Nexus Forging (CNF) — 企业级 KVM 虚拟化管理平台",
   "type": "module",
   "scripts": {
     "dev": "vite",
