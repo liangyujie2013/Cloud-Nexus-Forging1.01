@@ -83,20 +83,27 @@ const HostsView = {
       disconnected: { cls: 'apple-badge--stopped', key: 'host_st_offline' },
     }[s] || { cls: 'apple-badge--stopped', key: 'host_st_offline' })
 
-    // ---- open detail ----
+    // ---- open detail（全部真实数据：/status 实时状态 + /hardware libvirt 能力&清单 + /metrics）----
+    const liveStatus = ref(null)   // GET /hosts/:id/status 真实快照
     const openDetail = async (id) => {
       selectedId.value = id
       detailTab.value = 'overview'
       loading.value = true
-      const [hw, h] = await Promise.all([api('/hosts/' + id + '/hardware'), api('/hosts/' + id + '/ha-status')])
-      detail.value = hw; ha.value = h
+      detail.value = null; liveStatus.value = null
+      // 并发拉取真实硬件清单 + 实时状态；ha-status 端点不存在，已移除。
+      const [hw, st] = await Promise.all([
+        api('/hosts/' + id + '/hardware'),
+        api('/hosts/' + id + '/status'),
+      ])
+      detail.value = (hw && !hw.error) ? hw : null
+      liveStatus.value = (st && !st.error && st.reachable !== false) ? st : null
       loading.value = false
       // 详情视图覆盖在当前视图之上（showDetailView=true 即接管渲染），无需切换 nav tab。
       stopMetricsPolling()
     }
     const backToList = () => {
       destroyCharts(); stopMonitor()
-      selectedId.value = null; detail.value = null; ha.value = null
+      selectedId.value = null; detail.value = null; ha.value = null; liveStatus.value = null
       // 返回后恢复列表/管理视图的指标轮询
       if (props.tab === 'list' || props.tab === 'management') startMetricsPolling()
     }
@@ -503,22 +510,34 @@ const HostsView = {
       if (!hosts.value.length) await store.fetchAll()
       if (props.tab === 'list' || props.tab === 'management') startMetricsPolling()
     })
-    onBeforeUnmount(() => { destroyCharts(); stopMetricsPolling(); stopMonitor() })
+    onBeforeUnmount(() => { destroyCharts(); stopMetricsPolling(); stopMonitor(); if (detailMetTimer) clearInterval(detailMetTimer) })
 
-    // 单台主机详情：由列表/管理视图点击进入（selectedId+detail 就绪即展示，覆盖当前列表/管理视图）。
-    const showDetailView = computed(() => !!selectedId.value && !!detail.value)
+    // 单台主机详情：由列表/管理视图点击进入。只要拿到真实硬件或实时状态任一即展示。
+    const showDetailView = computed(() => !!selectedId.value && (!!detail.value || !!liveStatus.value) && !loading.value)
+    // 派生真实硬件视图数据（对齐后端 /hardware 实际结构：capabilities + hardware_inventory + probe）
+    const hwCaps = computed(() => (detail.value && detail.value.capabilities) || null)
+    const hwInv = computed(() => (detail.value && detail.value.hardware_inventory) || null)
+    const hwProbe = computed(() => (detail.value && detail.value.probe) || null)
+    // 实时指标（详情页 overview 用）：进入详情后单独轮询该主机 /metrics，保证 CPU/内存实时。
+    const detailMetric = ref(null)
+    let detailMetTimer = null
+    const refreshDetailMetric = async () => {
+      if (!selectedId.value) return
+      const m = await fetchOneMetric(selectedId.value)
+      detailMetric.value = m
+    }
+    watch(showDetailView, (v) => {
+      if (v) { refreshDetailMetric(); detailMetTimer = setInterval(refreshDetailMetric, 5000) }
+      else if (detailMetTimer) { clearInterval(detailMetTimer); detailMetTimer = null; detailMetric.value = null }
+    })
 
     return {
       props, hosts, filteredHosts, search, statusFilter, statusMeta, openDetail, backToList, addHost,
-      selectedId, detail, ha, detailTab, loading, showDetailView, detailHost, detailVMs,
+      selectedId, detail, liveStatus, hwCaps, hwInv, hwProbe, detailMetric, detailTab, loading, showDetailView, detailHost, detailVMs,
       toggleMaintenance, maintBusy, blockDlg, gotoMigrate,
       hostCtx, onHostCtxAction,
       metricsLoading, refreshMetrics, hMetric, pctText, pctWidth, uptimeText,
       clusterGroups, netDlg, openNetEdit, submitNet, pickNic, batchDlg, openBatch, submitBatch,
-      haCheckList, haStatusColor, haStatusText, overallColor, overallText, evIcon, evColor,
-      iommuBusy, pciBusy, gpuBusy, toggleIommu, togglePci, switchGpuMode, releaseGpu,
-      ptState, gpuModeText, iommuConfirm, hwNetEdit, startHwNetEdit, saveHwNet,
-      sriovDlg, openSriovEnable, saveSriov, disableSriov,
       bytesRate, utilColor, C, t, fmt,
     }
   },
@@ -658,319 +677,149 @@ const HostsView = {
       </div>
     </template>
 
-    <!-- ====================== DETAIL ====================== -->
+    <!-- ====================== DETAIL（全部真实数据：实时状态 + libvirt 硬件 + 实时监控）====================== -->
     <template v-else>
       <div class="toolbar">
         <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="backToList"><i class="fas fa-arrow-left"></i> {{ t('host_back') }}</button>
-        <div class="detail-title"><i class="fas fa-server" :style="{color:C.blue}"></i> {{ detail.hostname }} <span class="muted" style="font-weight:400">· {{ detail.ip_address }} · {{ detail.cluster_name }}</span></div>
+        <div class="detail-title"><i class="fas fa-server" :style="{color:C.blue}"></i>
+          {{ (liveStatus && liveStatus.hostname) || (detailHost && detailHost.name) }}
+          <span class="muted" style="font-weight:400">· {{ detailHost && detailHost.ip }} · {{ detailHost && detailHost.cluster_name }}</span>
+          <span v-if="detailHost && detailHost.status==='maintenance'" class="apple-badge apple-badge--warning" style="margin-left:10px"><span class="dot"></span>{{ t('host_st_maint') }}</span>
+        </div>
         <div class="spacer"></div>
-        <button class="apple-btn apple-btn--secondary apple-btn--sm" :disabled="maintBusy===selectedId" @click="toggleMaintenance(detailHost)">
-          <i :class="detailHost && detailHost.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
+        <button class="apple-btn" :class="detailHost && detailHost.status==='maintenance' ? 'apple-btn--primary' : 'apple-btn--secondary'" :disabled="maintBusy===selectedId" @click="toggleMaintenance(detailHost)">
+          <i v-if="maintBusy===selectedId" class="fas fa-spinner fa-spin"></i>
+          <i v-else :class="detailHost && detailHost.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
           {{ detailHost && detailHost.status==='maintenance' ? t('host_exit_maint') : t('host_enter_maint') }}
         </button>
       </div>
 
-      <!-- detail sub-tabs -->
+      <!-- detail sub-tabs（移除无真实数据源的 HA 页；监控接真实 /metrics）-->
       <div class="seg-tabs">
         <button :class="{active:detailTab==='overview'}" @click="detailTab='overview'"><i class="fas fa-gauge"></i> {{ t('host_tab_overview') }}</button>
         <button :class="{active:detailTab==='hardware'}" @click="detailTab='hardware'"><i class="fas fa-microchip"></i> {{ t('host_tab_hardware') }}</button>
-        <button :class="{active:detailTab==='ha'}" @click="detailTab='ha'"><i class="fas fa-shield-halved"></i> {{ t('host_tab_ha') }}</button>
         <button :class="{active:detailTab==='monitor'}" @click="detailTab='monitor'"><i class="fas fa-chart-line"></i> {{ t('host_tab_monitor') }}</button>
         <button :class="{active:detailTab==='vms'}" @click="detailTab='vms'"><i class="fas fa-desktop"></i> {{ t('host_tab_vms') }} ({{ detailVMs.length }})</button>
       </div>
 
-      <!-- OVERVIEW -->
-      <div v-if="detailTab==='overview'" class="grid grid-3" style="align-items:start">
-        <div class="apple-card" style="display:flex;flex-direction:column;align-items:center;gap:10px">
-          <div class="muted" style="font-size:13px;font-weight:600">CPU</div>
-          <ring-progress :value="detail.cpu_info.current_usage_percent" :color="utilColor(detail.cpu_info.current_usage_percent)" :size="118"/>
-          <div class="muted" style="font-size:12px;text-align:center">{{ detail.cpu_info.total_threads }} {{ t('host_threads') }} · {{ detail.cpu_info.sockets }} {{ t('host_sockets') }}</div>
+      <!-- OVERVIEW：实时状态 + CPU/内存环 + 操作系统/内核/服务真实信息 -->
+      <div v-if="detailTab==='overview'">
+        <div v-if="!liveStatus" class="apple-card" style="text-align:center;padding:24px">
+          <span class="muted"><i class="fas fa-plug-circle-xmark"></i> {{ t('hv_metric_unreachable') }}</span>
         </div>
-        <div class="apple-card" style="display:flex;flex-direction:column;align-items:center;gap:10px">
-          <div class="muted" style="font-size:13px;font-weight:600">{{ t('col_mem') }}</div>
-          <ring-progress :value="Math.round(detail.mem_used_gb/detail.mem_total_gb*100)" :color="utilColor(Math.round(detail.mem_used_gb/detail.mem_total_gb*100))" :size="118"/>
-          <div class="muted" style="font-size:12px">{{ detail.mem_used_gb }} / {{ detail.mem_total_gb }} GB</div>
-        </div>
-        <div class="apple-card">
-          <div class="info-row"><span>{{ t('host_machine') }}</span><strong>{{ detail.hostname }}</strong></div>
-          <div class="info-row"><span>IP</span><strong class="mono">{{ detail.ip_address }}</strong></div>
-          <div class="info-row"><span>{{ t('nav_infra_clusters') }}</span><strong>{{ detail.cluster_name }}</strong></div>
-          <div class="info-row"><span>{{ t('status') }}</span><strong :style="{color: detail.status==='online'?C.green:detail.status==='maintenance'?C.orange:C.red}">{{ t(statusMeta(detailHost.status).key) }}</strong></div>
-          <div class="info-row"><span>CPU</span><strong style="font-size:13px">{{ detail.cpu_info.model }}</strong></div>
-          <div class="info-row"><span>NUMA</span><strong>{{ detail.cpu_info.numa_nodes }}</strong></div>
-          <div class="info-row"><span>HA</span><strong :style="{color: ha?overallColor(ha.overall_status):''}">{{ ha ? overallText(ha.overall_status) + ' · ' + ha.health_score : '—' }}</strong></div>
-        </div>
+        <template v-else>
+          <div class="grid grid-3" style="align-items:start">
+            <div class="apple-card" style="display:flex;flex-direction:column;align-items:center;gap:10px">
+              <div class="muted" style="font-size:13px;font-weight:600">CPU</div>
+              <ring-progress :value="Math.round((detailMetric && detailMetric.cpu_usage_pct) || 0)" :color="utilColor((detailMetric && detailMetric.cpu_usage_pct) || 0)" :size="118"/>
+              <div class="muted" style="font-size:12px;text-align:center">{{ liveStatus.cpu_cores }} {{ t('host_threads') }} · {{ t('hv_col_load') }} {{ liveStatus.load1 }}</div>
+            </div>
+            <div class="apple-card" style="display:flex;flex-direction:column;align-items:center;gap:10px">
+              <div class="muted" style="font-size:13px;font-weight:600">{{ t('col_mem') }}</div>
+              <ring-progress :value="Math.round(liveStatus.mem_usage_pct)" :color="utilColor(liveStatus.mem_usage_pct)" :size="118"/>
+              <div class="muted" style="font-size:12px">{{ (liveStatus.mem_used_mb/1024).toFixed(1) }} / {{ (liveStatus.mem_total_mb/1024).toFixed(1) }} GB</div>
+            </div>
+            <div class="apple-card">
+              <div class="info-row"><span>{{ t('host_machine') }}</span><strong>{{ liveStatus.hostname }}</strong></div>
+              <div class="info-row"><span>IP</span><strong class="mono">{{ detailHost && detailHost.ip }}</strong></div>
+              <div class="info-row"><span>OS</span><strong style="font-size:13px">{{ liveStatus.os_pretty }}</strong></div>
+              <div class="info-row"><span>{{ t('hd_kernel') }}</span><strong class="mono" style="font-size:12px">{{ liveStatus.kernel }}</strong></div>
+              <div class="info-row"><span>{{ t('hv_col_uptime') }}</span><strong>{{ uptimeText(liveStatus.uptime_sec) }}</strong></div>
+              <div class="info-row"><span>{{ t('hv_col_disk') }}</span><strong>{{ Math.round(liveStatus.root_disk_pct) }}%</strong></div>
+            </div>
+          </div>
+          <!-- 真实服务/运维状态：libvirt / KVM / SELinux / 防火墙 / SSH 端口 -->
+          <div class="hw-section-title"><i class="fas fa-gears" :style="{color:C.indigo}"></i> {{ t('hd_services') }}</div>
+          <div class="apple-card hw-cpu-grid">
+            <div><span class="muted">libvirtd</span><strong :style="{color: liveStatus.libvirt_state==='active'?C.green:C.orange}">{{ liveStatus.libvirt_state }}</strong></div>
+            <div><span class="muted">KVM {{ t('hd_module') }}</span><strong :style="{color: liveStatus.kvm_loaded?C.green:C.red}">{{ liveStatus.kvm_loaded ? t('hd_loaded') : t('hd_not_loaded') }}</strong></div>
+            <div><span class="muted">SELinux</span><strong>{{ liveStatus.selinux }}</strong></div>
+            <div><span class="muted">firewalld</span><strong :style="{color: liveStatus.firewalld==='active'?C.green:C.gray}">{{ liveStatus.firewalld }}</strong></div>
+            <div><span class="muted">SSH {{ t('hd_port') }}</span><strong class="mono">{{ liveStatus.ssh_port }}</strong></div>
+            <div><span class="muted">{{ t('hd_boot_time') }}</span><strong class="mono" style="font-size:12px">{{ liveStatus.boot_time }}</strong></div>
+          </div>
+          <div v-if="liveStatus.warnings && liveStatus.warnings.length" class="hosts-pick-hint" style="margin-top:10px"><i class="fas fa-triangle-exclamation"></i> {{ liveStatus.warnings.join('；') }}</div>
+        </template>
       </div>
 
-      <!-- HARDWARE -->
+      <!-- HARDWARE：真实 libvirt capabilities + SSH 采集的硬件清单（无探测则明确标注）-->
       <div v-else-if="detailTab==='hardware'">
-        <!-- 管理网络（内联编辑，取代独立的「修改管理网络」弹窗入口）-->
-        <div class="hw-section-title"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('hw_mgmt_net') }}
-          <button v-if="!hwNetEdit.editing" class="apple-btn apple-btn--ghost apple-btn--sm" style="margin-left:auto" @click="startHwNetEdit"><i class="fas fa-pen"></i> {{ t('hw_mgmt_edit') }}</button>
+        <div v-if="hwProbe" class="hosts-pick-hint" :style="{marginBottom:'12px', background: hwProbe.status==='verified' ? 'rgba(52,199,89,.10)' : 'rgba(255,149,0,.10)'}">
+          <i class="fas" :class="hwProbe.status==='verified'?'fa-circle-check':'fa-triangle-exclamation'"></i>
+          {{ hwProbe.status==='verified' ? t('hd_probe_ok') : (t('hd_probe_fail') + (hwProbe.reason ? ('：'+hwProbe.reason) : '')) }}
         </div>
-        <div class="apple-card">
-          <div v-if="!hwNetEdit.editing" class="hw-net-view">
-            <div class="hnv-item"><span class="muted">{{ t('hmn_col_ip') }}</span><strong class="mono">{{ detail.mgmt_network.ip }}</strong></div>
-            <div class="hnv-item"><span class="muted">{{ t('hmn_col_netmask') }}</span><strong class="mono">{{ detail.mgmt_network.netmask }}</strong></div>
-            <div class="hnv-item"><span class="muted">{{ t('hmn_col_gateway') }}</span><strong class="mono">{{ detail.mgmt_network.gateway || '—' }}</strong></div>
-            <div class="hnv-item"><span class="muted">{{ t('hmn_col_vlan') }}</span><strong class="mono">VLAN {{ detail.mgmt_network.mgmt_vlan ?? '—' }}</strong></div>
-            <div class="hnv-item"><span class="muted">{{ t('hmn_col_nic') }}</span><strong class="mono">{{ detail.mgmt_network.mgmt_nic }}</strong></div>
-          </div>
-          <div v-else>
-            <div class="form-grid-2">
-              <div class="form-row"><label class="req">{{ t('hmn_col_ip') }}</label><input v-model="hwNetEdit.form.ip" :class="{invalid:hwNetEdit.errors.ip}" placeholder="192.168.1.100"><div v-if="hwNetEdit.errors.ip" class="form-err">{{ hwNetEdit.errors.ip }}</div></div>
-              <div class="form-row"><label class="req">{{ t('hmn_col_netmask') }}</label><input v-model="hwNetEdit.form.netmask" :class="{invalid:hwNetEdit.errors.netmask}" placeholder="255.255.255.0"><div v-if="hwNetEdit.errors.netmask" class="form-err">{{ hwNetEdit.errors.netmask }}</div></div>
-              <div class="form-row"><label>{{ t('hmn_col_gateway') }}</label><input v-model="hwNetEdit.form.gateway" :class="{invalid:hwNetEdit.errors.gateway}" placeholder="192.168.1.1"><div v-if="hwNetEdit.errors.gateway" class="form-err">{{ hwNetEdit.errors.gateway }}</div></div>
-              <div class="form-row"><label>{{ t('hmn_col_vlan') }}</label><input type="number" min="0" max="4094" v-model.number="hwNetEdit.form.mgmt_vlan" :class="{invalid:hwNetEdit.errors.mgmt_vlan}" placeholder="10"><div v-if="hwNetEdit.errors.mgmt_vlan" class="form-err">{{ hwNetEdit.errors.mgmt_vlan }}</div></div>
-              <div class="form-row"><label>{{ t('hmn_col_nic') }}</label><input v-model="hwNetEdit.form.mgmt_nic" placeholder="bond0"></div>
-            </div>
-            <div class="flex" style="gap:8px;margin-top:10px;justify-content:flex-end">
-              <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="hwNetEdit.editing=false">{{ t('op_cancel') }}</button>
-              <button class="apple-btn apple-btn--primary apple-btn--sm" :disabled="hwNetEdit.busy" @click="saveHwNet"><i v-if="hwNetEdit.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
-            </div>
+
+        <!-- 虚拟化能力（libvirt 实时探测）-->
+        <div v-if="hwCaps">
+          <div class="hw-section-title"><i class="fas fa-microchip" :style="{color:C.blue}"></i> {{ t('hd_virt_caps') }}</div>
+          <div class="apple-card hw-cpu-grid">
+            <div><span class="muted">{{ t('hw_model') }}</span><strong>{{ hwCaps.cpu_model }}</strong></div>
+            <div><span class="muted">{{ t('hw_sockets') }}</span><strong>{{ hwCaps.cpu_sockets }}</strong></div>
+            <div><span class="muted">{{ t('hw_cores_socket') }}</span><strong>{{ hwCaps.cpu_cores }}</strong></div>
+            <div><span class="muted">{{ t('hd_threads_core') }}</span><strong>{{ hwCaps.cpu_threads }}</strong></div>
+            <div><span class="muted">NUMA</span><strong>{{ hwCaps.numa_nodes }}</strong></div>
+            <div><span class="muted">{{ t('col_mem') }}</span><strong>{{ (hwCaps.memory_total_mb/1024).toFixed(1) }} GB</strong></div>
+            <div><span class="muted">libvirt</span><strong class="mono">{{ hwCaps.libvirt_version }}</strong></div>
+            <div><span class="muted">QEMU</span><strong class="mono">{{ hwCaps.qemu_version }}</strong></div>
           </div>
         </div>
 
-        <!-- IOMMU / VFIO 直通就绪（对标 vCenter「主机 → 配置 → 硬件 → PCI 设备」）-->
-        <div class="hw-section-title"><i class="fas fa-plug-circle-bolt" :style="{color:C.orange}"></i> {{ t('hw_iommu_title') }}</div>
-        <div class="apple-card iommu-panel" v-if="detail.iommu_summary">
-          <div class="iommu-status">
-            <div class="iommu-badge" :class="detail.iommu_summary.enabled?'on':'off'">
-              <i class="fas" :class="detail.iommu_summary.enabled?'fa-circle-check':'fa-circle-xmark'"></i>
-              {{ detail.iommu_summary.enabled ? t('hw_iommu_on') : t('hw_iommu_off') }}
-            </div>
-            <div class="iommu-meta">
-              <div class="muted">{{ t('hw_iommu_intro') }}</div>
-              <div class="iommu-kv">
-                <span><i class="fas fa-microchip"></i> {{ detail.cpu_info.vendor }}</span>
-                <span class="mono">{{ detail.iommu_summary.kernel_param }}</span>
-                <span class="hw-chip" v-for="m in detail.iommu_summary.vfio_modules" :key="m">{{ m }}</span>
-              </div>
-              <div class="muted" style="margin-top:6px;font-size:12px">
-                {{ t('hw_iommu_count', { cap: detail.iommu_summary.passthrough_capable_count, bound: detail.iommu_summary.bound_count }) }}
-              </div>
-            </div>
-            <button class="apple-btn" :class="detail.iommu_summary.enabled?'apple-btn--secondary':'apple-btn--primary'" :disabled="iommuBusy" @click="toggleIommu">
-              <i v-if="iommuBusy" class="fas fa-spinner fa-spin"></i>
-              <i v-else class="fas" :class="detail.iommu_summary.enabled?'fa-power-off':'fa-bolt'"></i>
-              {{ detail.iommu_summary.enabled ? t('hw_iommu_disable') : t('hw_iommu_enable') }}
-            </button>
+        <!-- 硬件清单（纳管时 SSH 采集：网卡 / 磁盘 / GPU）-->
+        <template v-if="hwInv">
+          <div class="hw-section-title"><i class="fas fa-network-wired" :style="{color:C.green}"></i> {{ t('hw_nics') }}</div>
+          <div class="apple-card" style="padding:0;overflow-x:auto">
+            <table class="apple-table">
+              <thead><tr><th>{{ t('hw_nic_name') }}</th><th>MAC</th><th>{{ t('hw_speed') }}</th></tr></thead>
+              <tbody>
+                <tr v-for="n in (hwInv.nics||[])" :key="n.name">
+                  <td><strong class="mono">{{ n.name }}</strong></td>
+                  <td class="mono" style="font-size:12px">{{ n.mac }}</td>
+                  <td class="mono">{{ n.speed_mb ? (n.speed_mb/1000)+' Gbps' : '—' }}</td>
+                </tr>
+                <tr v-if="!(hwInv.nics||[]).length"><td colspan="3" class="muted" style="text-align:center;padding:14px">{{ t('hd_no_data') }}</td></tr>
+              </tbody>
+            </table>
           </div>
-        </div>
 
-        <!-- GPU 管理（直通 / vGPU 切换 / 释放，对标 SmartX/ESXi 的 GPU 管理）-->
-        <div v-if="detail.gpus && detail.gpus.length">
-          <div class="hw-section-title"><i class="fas fa-microchip" :style="{color:'#76b900'}"></i> {{ t('hw_gpu_title') }}</div>
-          <div class="grid grid-2">
-            <div class="apple-card gpu-mgmt-card" v-for="g in detail.gpus" :key="g.id">
-              <div class="gmc-head">
-                <div class="gmc-name"><i class="fas fa-microchip" style="color:#76b900"></i> {{ g.model }}</div>
-                <span class="apple-badge" :class="g.status==='assigned'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ g.status==='assigned'?t('hw_gpu_assigned'):t('hw_gpu_free') }}</span>
-              </div>
-              <div class="gmc-meta">
-                <span class="mono">{{ g.pci }}</span> · {{ g.vram_gb }} GB · NUMA{{ g.numa }}
-                <span class="hw-chip" style="margin-left:6px">{{ gpuModeText(g.mode) }}</span>
-              </div>
-              <div class="gmc-meta" v-if="g.vm"><i class="fas fa-desktop"></i> {{ t('hw_gpu_owner') }}: <strong>{{ g.vm }}</strong> · {{ g.temp }}°C · {{ g.power }}W</div>
-              <div class="gmc-meta" v-else class="muted">{{ t('hw_gpu_idle_desc') }} · {{ g.temp }}°C</div>
-              <div class="gmc-ops">
-                <template v-if="g.status==='assigned'">
-                  <button class="apple-btn apple-btn--secondary apple-btn--sm" :disabled="gpuBusy===g.id" @click="releaseGpu(g)"><i class="fas fa-link-slash"></i> {{ t('hw_gpu_release') }}</button>
-                </template>
-                <template v-else>
-                  <button class="apple-btn apple-btn--ghost apple-btn--sm" :class="{active:g.mode==='passthrough'}" :disabled="gpuBusy===g.id||g.mode==='passthrough'" @click="switchGpuMode(g,'passthrough')"><i class="fas fa-arrow-right-arrow-left"></i> {{ t('hw_gpu_set_pt') }}</button>
-                  <button class="apple-btn apple-btn--ghost apple-btn--sm" :class="{active:g.mode==='vgpu'}" :disabled="gpuBusy===g.id||g.mode==='vgpu'" @click="switchGpuMode(g,'vgpu')"><i class="fas fa-grip"></i> {{ t('hw_gpu_set_vgpu') }}</button>
-                </template>
-              </div>
+          <div class="hw-section-title"><i class="fas fa-hard-drive" :style="{color:C.indigo}"></i> {{ t('hw_storage_dev') }}</div>
+          <div class="apple-card" style="padding:0;overflow-x:auto">
+            <table class="apple-table">
+              <thead><tr><th>{{ t('hw_dev_name') }}</th><th>{{ t('hw_type') }}</th><th>{{ t('hw_capacity') }}</th></tr></thead>
+              <tbody>
+                <tr v-for="d in (hwInv.disks||[])" :key="d.name">
+                  <td><strong class="mono">{{ d.name }}</strong></td>
+                  <td><span class="hw-chip">{{ d.rotational ? 'HDD' : 'SSD' }}</span></td>
+                  <td class="mono">{{ (d.size_bytes/1000/1000/1000).toFixed(0) }} GB</td>
+                </tr>
+                <tr v-if="!(hwInv.disks||[]).length"><td colspan="3" class="muted" style="text-align:center;padding:14px">{{ t('hd_no_data') }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div v-if="(hwInv.gpus||[]).length">
+            <div class="hw-section-title"><i class="fas fa-microchip" :style="{color:'#76b900'}"></i> GPU / {{ t('hw_pci_dev') }}</div>
+            <div class="apple-card" style="padding:0;overflow-x:auto">
+              <table class="apple-table">
+                <thead><tr><th>PCI</th><th>{{ t('hw_vendor_model') }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="g in hwInv.gpus" :key="g.pci_address">
+                    <td class="mono" style="font-size:12px">{{ g.pci_address }}</td>
+                    <td>{{ g.vendor }} {{ g.model }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
-        </div>
-
-        <!-- N5 · SR-IOV 物理网卡（PF）管理 -->
-        <div>
-          <div class="hw-section-title"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('sriov_title') }}
-            <button class="apple-btn apple-btn--primary apple-btn--sm" style="margin-left:auto" :disabled="!detail.iommu_summary || !detail.iommu_summary.enabled" :title="(!detail.iommu_summary||!detail.iommu_summary.enabled)?t('sriov_need_iommu'):''" @click="openSriovEnable"><i class="fas fa-plus"></i> {{ t('sriov_enable') }}</button>
-          </div>
-          <div v-if="detail.sriov_pfs && detail.sriov_pfs.length" class="grid grid-2">
-            <div class="apple-card sriov-card" v-for="pf in detail.sriov_pfs" :key="pf.pf">
-              <div class="gmc-head">
-                <div class="gmc-name"><i class="fas fa-ethernet" style="color:var(--color-teal,#30b0c7)"></i> {{ pf.pf }}</div>
-                <span class="apple-badge apple-badge--running"><span class="dot"></span>SR-IOV</span>
-              </div>
-              <div class="gmc-meta">{{ pf.nic_model }} · {{ pf.link_gbe }} GbE</div>
-              <div class="gmc-meta">{{ t('sriov_vf_usage') }}：<strong>{{ pf.used_vfs }}/{{ pf.total_vfs }}</strong> {{ t('vme_sriov_vf') }}</div>
-              <div class="sriov-vf-grid">
-                <span class="sriov-vf" v-for="v in pf.vfs" :key="v.vf" :class="{used:v.used}" :title="v.used ? (t('vme_sriov_vf')+' '+v.vf+' → '+(v.vm||'')) : (t('vme_sriov_vf')+' '+v.vf+' '+t('vme_free'))">{{ v.vf }}</span>
-              </div>
-              <div class="gmc-ops">
-                <button class="apple-btn apple-btn--secondary apple-btn--sm" @click="disableSriov(pf)"><i class="fas fa-power-off"></i> {{ t('sriov_disable') }}</button>
-              </div>
-            </div>
-          </div>
-          <div v-else class="apple-card" style="text-align:center;padding:24px"><span class="muted">{{ t('sriov_empty') }}</span></div>
-        </div>
-
-        <!-- CPU topology -->
-        <div class="hw-section-title"><i class="fas fa-microchip" :style="{color:C.blue}"></i> {{ t('hw_cpu_topo') }}</div>
-        <div class="apple-card hw-cpu-grid">
-          <div><span class="muted">{{ t('hw_model') }}</span><strong>{{ detail.cpu_info.model }}</strong></div>
-          <div><span class="muted">{{ t('hw_vendor') }}</span><strong>{{ detail.cpu_info.vendor }}</strong></div>
-          <div><span class="muted">{{ t('hw_sockets') }}</span><strong>{{ detail.cpu_info.sockets }}</strong></div>
-          <div><span class="muted">{{ t('hw_cores_socket') }}</span><strong>{{ detail.cpu_info.cores_per_socket }}</strong></div>
-          <div><span class="muted">{{ t('hw_threads_total') }}</span><strong>{{ detail.cpu_info.total_threads }}</strong></div>
-          <div><span class="muted">{{ t('hw_freq') }}</span><strong>{{ detail.cpu_info.base_freq_ghz }} – {{ detail.cpu_info.max_freq_ghz }} GHz</strong></div>
-          <div><span class="muted">L3 Cache</span><strong>{{ detail.cpu_info.cache_l3_mb }} MB</strong></div>
-          <div><span class="muted">NUMA</span><strong>{{ detail.cpu_info.numa_nodes }}</strong></div>
-          <div class="hw-feats"><span class="muted">{{ t('hw_virt_feat') }}</span><div><span class="hw-chip" v-for="f in detail.cpu_info.virtualization_features" :key="f">{{ f }}</span></div></div>
-        </div>
-
-        <!-- NICs -->
-        <div class="hw-section-title"><i class="fas fa-network-wired" :style="{color:C.green}"></i> {{ t('hw_nics') }}</div>
-        <div class="apple-card" style="padding:0;overflow-x:auto">
-          <table class="apple-table">
-            <thead><tr><th>{{ t('hw_nic_name') }}</th><th>{{ t('hw_type') }}</th><th>{{ t('hw_vendor_model') }}</th><th>MAC</th><th>{{ t('hw_speed') }}</th><th>{{ t('hw_link') }}</th><th>IP</th><th>{{ t('hw_traffic') }}</th></tr></thead>
-            <tbody>
-              <tr v-for="n in detail.network_interfaces" :key="n.name">
-                <td><strong class="mono">{{ n.name }}</strong><div class="muted" style="font-size:11px">{{ n.pci_address }} · {{ n.driver }}</div></td>
-                <td><span class="hw-chip">{{ n.type }}</span><div v-if="n.bond_members" class="muted" style="font-size:11px;margin-top:3px">{{ n.bond_members.join(' + ') }}</div></td>
-                <td>{{ n.vendor }} {{ n.model }}</td>
-                <td class="mono" style="font-size:12px">{{ n.mac_address }}</td>
-                <td class="mono">{{ n.speed_gbps }} Gbps</td>
-                <td><span class="apple-badge" :class="n.link_status==='up'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ n.link_status }}</span></td>
-                <td class="mono" style="font-size:12px">{{ n.ip_address || '—' }}</td>
-                <td><div style="font-size:12px"><span style="color:var(--color-green)">↓ {{ bytesRate(n.rx_bytes_per_sec) }}</span><br><span style="color:var(--color-orange)">↑ {{ bytesRate(n.tx_bytes_per_sec) }}</span></div></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Storage devices -->
-        <div class="hw-section-title"><i class="fas fa-hard-drive" :style="{color:C.indigo}"></i> {{ t('hw_storage_dev') }}</div>
-        <div class="apple-card" style="padding:0;overflow-x:auto">
-          <table class="apple-table">
-            <thead><tr><th>{{ t('hw_dev_name') }}</th><th>{{ t('hw_type') }}</th><th>{{ t('hw_vendor_model') }}</th><th>{{ t('hw_capacity') }}</th><th>{{ t('hw_interface') }}</th><th>{{ t('hw_rpm') }}</th><th>{{ t('hw_temp') }}</th><th>SMART</th><th>{{ t('hw_usage') }}</th><th>IOPS (R/W)</th></tr></thead>
-            <tbody>
-              <tr v-for="d in detail.storage_devices" :key="d.device_name">
-                <td><strong class="mono">{{ d.device_name }}</strong><div class="muted" style="font-size:11px">{{ d.serial_number }}</div></td>
-                <td><span class="hw-chip">{{ d.type }}</span></td>
-                <td>{{ d.vendor }} {{ d.model }}</td>
-                <td class="mono">{{ d.capacity_gb>=1000 ? (d.capacity_gb/1000).toFixed(2)+' TB' : d.capacity_gb+' GB' }}</td>
-                <td style="font-size:12px">{{ d.interface }}</td>
-                <td class="mono">{{ d.rpm ? d.rpm+' RPM' : '—' }}</td>
-                <td class="mono" :style="{color: d.temperature_celsius>50?'var(--color-orange)':'inherit'}">{{ d.temperature_celsius }}°C</td>
-                <td><span class="apple-badge" :class="d.smart_status==='healthy'?'apple-badge--running':d.smart_status==='warning'?'apple-badge--warning':'apple-badge--stopped'"><span class="dot"></span>{{ d.smart_status }}</span></td>
-                <td style="width:120px"><div class="flex between"><span class="mono" style="font-size:11px">{{ d.usage_percent }}%</span></div><div class="usage-bar"><div class="fill" :style="{width:d.usage_percent+'%',background:utilColor(d.usage_percent)}"></div></div></td>
-                <td class="mono" style="font-size:12px">{{ d.read_iops.toLocaleString() }} / {{ d.write_iops.toLocaleString() }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- PCI devices（含直通绑定操作）-->
-        <div class="hw-section-title"><i class="fas fa-plug" :style="{color:C.purple}"></i> {{ t('hw_pci_dev') }}</div>
-        <div class="apple-card" style="padding:0;overflow-x:auto">
-          <table class="apple-table">
-            <thead><tr><th>PCI</th><th>{{ t('hw_vendor_model') }}</th><th>{{ t('hw_dev_class') }}</th><th>{{ t('hw_driver') }}</th><th>IOMMU</th><th>NUMA</th><th>{{ t('hw_pt_status') }}</th><th style="text-align:right">{{ t('hmn_col_ops') }}</th></tr></thead>
-            <tbody>
-              <tr v-for="p in detail.pci_devices" :key="p.pci_address">
-                <td class="mono" style="font-size:12px">{{ p.pci_address }}</td>
-                <td><strong>{{ p.vendor }}</strong> {{ p.device_name }}</td>
-                <td class="muted">{{ p.device_class }}</td>
-                <td class="mono" style="font-size:12px">{{ p.driver }}</td>
-                <td class="mono">{{ p.iommu_group }}</td>
-                <td class="mono">{{ p.numa_node }}</td>
-                <td>
-                  <span v-if="p.passthrough_capable" class="apple-badge" :class="ptState(p.passthrough_state).badge"><span class="dot"></span>{{ ptState(p.passthrough_state).txt }}</span>
-                  <span v-else class="muted" style="font-size:12px"><i class="fas fa-circle-minus"></i> {{ t('hw_pt_na') }}</span>
-                </td>
-                <td style="text-align:right">
-                  <button v-if="p.passthrough_capable && (p.passthrough_state==='host' || p.passthrough_state==='bound')"
-                          class="apple-btn apple-btn--ghost apple-btn--sm"
-                          :disabled="pciBusy===p.pci_address || !(detail.iommu_summary && detail.iommu_summary.enabled)"
-                          :title="!(detail.iommu_summary && detail.iommu_summary.enabled) ? t('hw_iommu_need_first') : ''"
-                          @click="togglePci(p)">
-                    <i v-if="pciBusy===p.pci_address" class="fas fa-spinner fa-spin"></i>
-                    <i v-else :class="p.passthrough_state==='host'?'fas fa-bolt':'fas fa-rotate-left'"></i>
-                    {{ p.passthrough_state==='host' ? t('hw_pt_bind') : t('hw_pt_unbind') }}
-                  </button>
-                  <span v-else-if="p.passthrough_state==='in_use'" class="muted" style="font-size:12px">{{ t('hw_pt_locked') }}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        </template>
+        <div v-else class="apple-card" style="text-align:center;padding:24px"><span class="muted">{{ t('hd_no_inventory') }}</span></div>
       </div>
 
-      <!-- HA STATUS -->
-      <div v-else-if="detailTab==='ha'">
-        <div class="ha-score-panel apple-card apple-card--glass">
-          <ring-progress :value="ha.health_score" :color="overallColor(ha.overall_status)" :label="t('ha_health_score')" :size="140"/>
-          <div class="ha-score-info">
-            <h3 :style="{color:overallColor(ha.overall_status)}">{{ overallText(ha.overall_status) }}</h3>
-            <div class="muted">{{ t('ha_last_check') }}：{{ fmt(ha.last_check_time, {mode:'relative'}) }}</div>
-            <div class="muted">{{ t('ha_interval') }}：{{ ha.check_interval_seconds }}s</div>
-            <span class="apple-badge" :class="ha.enabled?'apple-badge--running':'apple-badge--stopped'" style="margin-top:8px"><span class="dot"></span>{{ ha.enabled ? t('ha_enabled_on') : t('ha_enabled_off') }}</span>
-          </div>
-        </div>
-
-        <div class="ha-checks-grid">
-          <div v-for="ck in haCheckList" :key="ck.key" class="apple-card ha-check-card" :style="{borderLeft:'4px solid '+haStatusColor(ck.status)}">
-            <div class="hc-head">
-              <i class="fas" :class="ck.icon" :style="{color:haStatusColor(ck.status)}"></i>
-              <strong>{{ t('ha_check_'+ck.key) }}</strong>
-              <span class="hc-badge" :style="{background:haStatusColor(ck.status)+'22',color:haStatusColor(ck.status)}">{{ haStatusText(ck.status) }}</span>
-            </div>
-            <p class="hc-msg">{{ ck.message }}</p>
-            <div class="hc-metrics">
-              <template v-if="ck.key==='network_heartbeat'">
-                <span>{{ t('ha_resp') }}: <b>{{ ck.response_time_ms }}ms</b></span>
-                <span>{{ t('ha_loss') }}: <b>{{ ck.packet_loss_percent }}%</b></span>
-                <span>{{ t('ha_fails') }}: <b>{{ ck.consecutive_failures }}</b></span>
-              </template>
-              <template v-else-if="ck.key==='storage_heartbeat'">
-                <span>{{ t('ha_lat') }}: <b>{{ ck.storage_latency_ms }}ms</b></span>
-                <span>{{ t('ha_lock') }}: <b>{{ ck.lock_file_writable ? 'OK' : 'FAIL' }}</b></span>
-              </template>
-              <template v-else-if="ck.key==='libvirt_service'">
-                <span>{{ ck.version }}</span>
-                <span>VM: <b>{{ ck.vm_count_accessible }}</b></span>
-              </template>
-              <template v-else-if="ck.key==='resource_availability'">
-                <span>CPU {{ t('sp_free') }}: <b>{{ ck.cpu_available_percent }}%</b></span>
-                <span>{{ t('col_mem') }} {{ t('sp_free') }}: <b>{{ ck.memory_available_gb }}GB</b></span>
-                <span>{{ t('ha_failover_cap') }}: <b>{{ ck.can_accept_failover_vms }}</b></span>
-              </template>
-              <template v-else-if="ck.key==='fencing_capability'">
-                <span>IPMI: <b>{{ ck.ipmi_accessible ? 'OK' : 'N/A' }}</b></span>
-                <span>{{ t('ha_fence_agent') }}: <b>{{ ck.fence_agent_configured ? 'OK' : 'N/A' }}</b></span>
-              </template>
-              <template v-else-if="ck.key==='time_sync'">
-                <span>{{ t('ha_clock_offset') }}: <b>{{ ck.clock_offset_ms == null ? '—' : ck.clock_offset_ms + 'ms' }}</b></span>
-                <span>{{ t('ha_offset_thresh') }}: <b>{{ ck.max_offset_ms }}ms</b></span>
-                <span v-if="ck.is_ntp_server" class="hw-chip" style="background:rgba(0,122,255,.12);color:var(--color-blue)"><i class="fas fa-server"></i> {{ t('ha_ntp_server') }}</span>
-                <span v-else>{{ t('ha_ntp_source') }}: <b>{{ ck.ntp_source }}</b></span>
-              </template>
-            </div>
-          </div>
-        </div>
-
-        <div class="hw-section-title"><i class="fas fa-clock-rotate-left" :style="{color:C.gray}"></i> {{ t('ha_events') }}</div>
-        <div class="apple-card ha-timeline">
-          <div class="ha-event" v-for="(e,i) in ha.recent_events" :key="i">
-            <div class="hev-dot" :style="{background:evColor(e.event_type)}"><i class="fas" :class="evIcon(e.event_type)"></i></div>
-            <div class="hev-body">
-              <div class="hev-desc">{{ e.description }}</div>
-              <div class="muted" style="font-size:12px">{{ fmt(e.timestamp) }}<template v-if="e.affected_vms && e.affected_vms.length"> · {{ t('ha_affected') }}: {{ e.affected_vms.join(', ') }}</template></div>
-            </div>
-          </div>
-          <div v-if="!ha.recent_events.length" class="muted" style="padding:14px;text-align:center">{{ t('ha_no_events') }}</div>
-        </div>
-      </div>
-
-      <!-- MONITOR -->
+      <!-- MONITOR：真实实时趋势（轮询 /hosts/:id/metrics）-->
       <div v-else-if="detailTab==='monitor'">
         <div class="apple-card mon-chart-card">
-          <div class="mc-head"><i class="fas fa-chart-area" :style="{color:C.blue}"></i> {{ t('host_perf_trend') }}</div>
+          <div class="mc-head"><i class="fas fa-chart-area" :style="{color:C.blue}"></i> {{ t('host_perf_trend') }}
+            <span class="muted" style="font-weight:400;font-size:12px;margin-left:8px">{{ t('hd_realtime_note') }}</span>
+          </div>
           <div class="mc-canvas"><canvas id="host-mon-chart"></canvas></div>
         </div>
       </div>
@@ -1066,40 +915,6 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" @click="batchDlg.open=false">{{ t('op_cancel') }}</button>
           <button class="apple-btn apple-btn--primary" :disabled="batchDlg.busy" @click="submitBatch"><i v-if="batchDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- IOMMU/VFIO 启用回执（展示真实内核步骤）-->
-    <div v-if="iommuConfirm.open" class="modal-mask" @click.self="iommuConfirm.open=false">
-      <div class="modal-dialog modal-sm">
-        <div class="modal-head"><i class="fas fa-plug-circle-bolt" style="color:var(--color-orange)"></i> {{ t('hw_iommu_title') }}</div>
-        <div class="modal-body">
-          <p style="margin-bottom:10px">{{ iommuConfirm.title }}</p>
-          <ul class="iommu-steps">
-            <li v-for="(s,i) in iommuConfirm.steps" :key="i"><i class="fas fa-angle-right"></i> {{ s }}</li>
-          </ul>
-          <div class="hosts-pick-hint" style="margin-top:12px"><i class="fas fa-triangle-exclamation"></i> {{ t('hw_iommu_reboot_hint') }}</div>
-        </div>
-        <div class="modal-foot"><button class="apple-btn apple-btn--primary" @click="iommuConfirm.open=false">{{ t('op_close') }}</button></div>
-      </div>
-    </div>
-
-    <!-- N5 · 启用 SR-IOV 对话框 -->
-    <div v-if="sriovDlg.open" class="modal-mask" @click.self="!sriovDlg.busy && (sriovDlg.open=false)">
-      <div class="modal-dialog modal-sm">
-        <div class="modal-head"><i class="fas fa-ethernet" style="color:var(--color-teal,#30b0c7)"></i> {{ t('sriov_enable') }}</div>
-        <div class="modal-body">
-          <div class="form-row"><label>{{ t('sriov_pf_name') }}</label><input v-model="sriovDlg.form.pf" placeholder="ens6f0（留空自动命名）"></div>
-          <div class="form-grid-2">
-            <div class="form-row"><label>{{ t('sriov_num_vfs') }} <span class="req">*</span></label><input type="number" min="1" max="64" v-model.number="sriovDlg.form.num_vfs" :class="{invalid:sriovDlg.errors.num_vfs}"></div>
-            <div class="form-row"><label>{{ t('hw_speed') }}</label><select v-model.number="sriovDlg.form.link_gbe"><option :value="10">10 GbE</option><option :value="25">25 GbE</option><option :value="100">100 GbE</option></select></div>
-          </div>
-          <div class="hosts-pick-hint" style="margin-top:8px"><i class="fas fa-circle-info"></i> {{ t('sriov_hint') }}</div>
-        </div>
-        <div class="modal-foot">
-          <button class="apple-btn apple-btn--secondary" :disabled="sriovDlg.busy" @click="sriovDlg.open=false">{{ t('op_cancel') }}</button>
-          <button class="apple-btn apple-btn--primary" :disabled="sriovDlg.busy" @click="saveSriov"><i v-if="sriovDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
         </div>
       </div>
     </div>
