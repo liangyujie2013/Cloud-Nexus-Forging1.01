@@ -37,7 +37,9 @@ const DashboardView = {
   components: { RingProgress },
   props: { tab: { type: String, default: 'overview' } },
   setup(props) {
-    const summary = ref({})
+    // summary 现由真实拓扑 + GPU 清单派生（后端无 /summary 端点），见下方 summary computed。
+    // hostMetrics：来自真实 /hosts/metrics（字段 cpu_usage_pct / mem_usage_pct），按 host id 索引。
+    const hostMetrics = ref({})
     // 预置 cluster 字段，避免首屏（SSE 未到达前）容量条出现「裸单位」无数值的难看状态
     const metrics = ref({ cluster: { cpu_usage: 0, mem_usage: 0, total_vcpus: 0, used_vcpus: 0, total_mem_tb: 0, used_mem_tb: 0 }, gpus: [], hosts: [] })
     const clusters = ref([])
@@ -86,18 +88,79 @@ const DashboardView = {
       })
     })
 
-    // 按集群聚合主机负载（实时 metrics.hosts ⨉ 集群归属），用于「各集群负载」卡片
+    // 真实派生 summary：基于拓扑 store（数据中心/集群/主机/VM）+ GPU 清单。
+    // 后端无 /summary 聚合端点，故在前端按单一可信来源（store）实时计算，避免顶部卡片空白。
+    const summary = computed(() => {
+      const tp = window.cnfTopology
+      const hosts = tp ? tp.hostStats.value : []
+      const vms = (tp && tp.state && tp.state.vms) ? tp.state.vms : []
+      const dcs = (tp && tp.state && tp.state.datacenters) ? tp.state.datacenters : []
+      const cls = clusters.value && clusters.value.length ? clusters.value : ((tp && tp.state && tp.state.clusters) ? tp.state.clusters : [])
+      const gpus = gpuInventory.value || []
+      return {
+        datacenters: dcs.length,
+        clusters: cls.length,
+        hosts: hosts.length,
+        hosts_connected: hosts.filter((h) => h.status === 'connected').length,
+        vms: vms.length,
+        vms_running: vms.filter((v) => v.status === 'running').length,
+        gpus: gpus.length,
+        gpus_assigned: gpus.filter((g) => g.status === 'assigned').length,
+      }
+    })
+
+    // 单台主机实时 CPU%（优先真实 SSE 帧 metrics.hosts，回退 /hosts/metrics 快照）。
+    const hostCpu = (h) => {
+      const sse = (metrics.value.hosts || []).find((x) => x.id === h.id)
+      if (sse && sse.cpu_usage != null) return sse.cpu_usage
+      const m = hostMetrics.value[String(h.id)]
+      return (m && m.reachable !== false && m.cpu_usage_pct != null) ? m.cpu_usage_pct : null
+    }
+    const hostMem = (h) => {
+      const m = hostMetrics.value[String(h.id)]
+      return (m && m.reachable !== false && m.mem_usage_pct != null) ? m.mem_usage_pct : null
+    }
+
+    // 按集群聚合主机负载——使用真实 /hosts/metrics，仅统计采集到的主机，杜绝 NaN。
     const clusterLoad = computed(() => {
-      const byHost = {}
-      ;(metrics.value.hosts || []).forEach((h) => { byHost[h.id] = h })
       return clusters.value.map((cl) => {
         const hosts = (window.cnfTopology ? window.cnfTopology.hostStats.value : []).filter((h) => h.cluster_id === cl.id)
-        const live = hosts.map((h) => byHost[h.id] ? byHost[h.id].cpu_usage : h.cpu_usage)
-        const cpu = live.length ? Math.round(live.reduce((a, b) => a + b, 0) / live.length) : 0
-        const mem = hosts.length ? Math.round(hosts.reduce((a, b) => a + (b.mem_usage || 0), 0) / hosts.length) : 0
+        const cpuVals = hosts.map(hostCpu).filter((v) => v != null && !Number.isNaN(v))
+        const memVals = hosts.map(hostMem).filter((v) => v != null && !Number.isNaN(v))
+        const cpu = cpuVals.length ? Math.round(cpuVals.reduce((a, b) => a + b, 0) / cpuVals.length) : 0
+        const mem = memVals.length ? Math.round(memVals.reduce((a, b) => a + b, 0) / memVals.length) : 0
         return { id: cl.id, name: cl.name, host_count: cl.host_count, host_online: cl.host_online, cpu, mem }
       })
     })
+
+    // 拉取真实主机实时指标快照（用于集群负载/容量条），定时刷新。
+    let metricsTimer = null
+    const refreshHostMetrics = async () => {
+      const res = await api('/hosts/metrics')
+      if (res && !res.error) {
+        hostMetrics.value = res
+        // 用真实数据填充集群级 CPU/内存快照（取所有可达主机均值），供顶部 CPU 折线与容量条使用。
+        const vals = Object.values(res).filter((m) => m && m.reachable !== false)
+        if (vals.length) {
+          const avgCpu = Math.round(vals.reduce((a, m) => a + (m.cpu_usage_pct || 0), 0) / vals.length)
+          const avgMem = Math.round(vals.reduce((a, m) => a + (m.mem_usage_pct || 0), 0) / vals.length)
+          const totMem = vals.reduce((a, m) => a + (m.mem_total_mb || 0), 0)
+          const usedMem = vals.reduce((a, m) => a + (m.mem_used_mb || 0), 0)
+          metrics.value = {
+            ...metrics.value,
+            cluster: {
+              ...metrics.value.cluster,
+              cpu_usage: avgCpu, mem_usage: avgMem,
+              total_mem_tb: +(totMem / 1024 / 1024).toFixed(2),
+              used_mem_tb: +(usedMem / 1024 / 1024).toFixed(2),
+            },
+          }
+          history.push(avgCpu)
+          if (history.length > 30) history.shift()
+          if (chart) { chart.data.labels = history.map((_, i) => i); chart.data.datasets[0].data = [...history]; chart.update('none') }
+        }
+      }
+    }
 
     const startStream = () => {
       // 真实后端 SSE 路径为 /metrics/stream；demo Mock 为 /monitoring/metrics/stream。
@@ -148,19 +211,15 @@ const DashboardView = {
     // 小工具：api() 失败时返回 {error}，这里统一兜底，避免把错误对象塞进数据态导致渲染异常。
     const okOr = (res, fallback) => (res && !res.error ? res : fallback)
     onMounted(async () => {
-      // summary：真实后端暂未实现 /summary，失败则保持空对象（界面据此降级，不报错）。
-      summary.value = okOr(await api('/summary'), {})
-      // 先取一次快照，首屏即有数据（容量条/集群负载不再为空）。
-      // 真实后端暂无 /monitoring/metrics 快照端点 → 失败时沿用预置默认值即可。
-      const snap = await api('/monitoring/metrics')
-      if (snap && !snap.error && snap.cluster) {
-        metrics.value = snap
-        for (let i = 0; i < 12; i++) history.push(Math.max(2, Math.round(snap.cluster.cpu_usage + (Math.random() - 0.5) * 10)))
-      }
+      // 确保拓扑 store 已加载（summary computed 依赖它）。
+      if (window.cnfTopology && window.cnfTopology.fetchAll) { try { await window.cnfTopology.fetchAll() } catch (e) {} }
       clusters.value = okOr(await api('/clusters'), [])
       tasks.value = okOr(await api('/tasks'), [])
       rules.value = okOr(await api('/alert-rules'), [])
       gpuInventory.value = okOr(await api('/gpus'), [])  // P1：GPU 归属清单
+      // 真实主机指标：首屏拉一次 + 每 5s 刷新（集群负载/容量条/CPU 折线据此）。
+      await refreshHostMetrics()
+      metricsTimer = setInterval(refreshHostMetrics, 5000)
       startStream()
       if (props.tab !== 'alerts') buildChart()
     })
@@ -168,7 +227,7 @@ const DashboardView = {
     watch(() => props.tab, async (tb) => {
       if (tb !== 'alerts') { chart = null; await buildChart() }
     })
-    onBeforeUnmount(() => { if (es) es.close(); if (chart) chart.destroy() })
+    onBeforeUnmount(() => { if (es) es.close(); if (chart) chart.destroy(); if (metricsTimer) clearInterval(metricsTimer) })
 
     const sevColor = (s) => (s === 'critical' ? 'var(--color-red)' : 'var(--color-orange)')
 

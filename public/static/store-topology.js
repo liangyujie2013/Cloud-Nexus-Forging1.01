@@ -57,7 +57,8 @@ async function fetchAll(force) {
     // 真实后端解包后应为数组；若为 error 对象（如 401）则置空数组，避免渲染崩溃。
     state.datacenters = Array.isArray(dcs) ? dcs : []
     state.clusters = Array.isArray(cls) ? cls : []
-    state.hosts = Array.isArray(hs) ? hs : []
+    // 后端主机 IP 字段为 ip_address；前端统一用 h.ip。在此规整，保证列表/去重/详情一致。
+    state.hosts = (Array.isArray(hs) ? hs : []).map((h) => ({ ...h, ip: h.ip || h.ip_address || '' }))
     state.vms = Array.isArray(vms) ? vms : []
     state.loaded = true
   } finally {
