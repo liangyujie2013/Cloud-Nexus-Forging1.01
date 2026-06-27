@@ -12,6 +12,10 @@ import { cors } from 'hono/cors'
 import { mockData, genMetrics, getHostHardware, getHostHA, getClusterHAStatus } from './mock-data'
 import { buildDomainXML, type VMConfig } from './libvirt-xml'
 
+// 静态资源缓存破坏版本号：每次进程启动生成一次，附加到所有 /static/*.js|css 的查询串，
+// 确保前端发布后浏览器不会命中旧缓存（此前无版本号导致用户刷新仍看到旧界面）。
+const ASSET_VER = String(Date.now())
+
 // UUID 生成：优先用 Web Crypto（Cloudflare Workers / 现代 Node），否则回退手工生成（兼容 Node 18 无全局 crypto 的情况）
 const genUUID = (): string => {
   try { const g: any = (globalThis as any).crypto; if (g && typeof g.randomUUID === 'function') return g.randomUUID() } catch {}
@@ -1827,8 +1831,8 @@ app.get('/', (c) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cloud Nexus Forging · 企业级分布式虚拟化管理平台</title>
   <link rel="icon" href="/favicon.ico">
-  <link rel="stylesheet" href="/static/apple-hig.css">
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/apple-hig.css?v=${ASSET_VER}">
+  <link rel="stylesheet" href="/static/app.css?v=${ASSET_VER}">
   <!-- 本地化前端依赖（消除外网 CDN 依赖，避免受限网络白屏；生产可离线运行）-->
   <link href="/static/vendor/fontawesome.css" rel="stylesheet">
   <script src="/static/vendor/vue.global.prod.js"></script>
@@ -1837,28 +1841,28 @@ app.get('/', (c) => {
 <body>
   <div id="app"></div>
   <!-- 国际化 + 主题（最先加载） -->
-  <script src="/static/i18n.js"></script>
+  <script src="/static/i18n.js?v=${ASSET_VER}"></script>
   <!-- 通用组件（component-context-menu.js 负责初始化全局 window.api / __CNF_VIEWS） -->
-  <script src="/static/component-context-menu.js"></script>
-  <script src="/static/component-vm-wizard.js"></script>
+  <script src="/static/component-context-menu.js?v=${ASSET_VER}"></script>
+  <script src="/static/component-vm-wizard.js?v=${ASSET_VER}"></script>
   <!-- 统一拓扑 Store（单一可信数据源，须在依赖它的组件/视图之前加载） -->
-  <script src="/static/store-topology.js"></script>
+  <script src="/static/store-topology.js?v=${ASSET_VER}"></script>
   <!-- 拓扑相关组件：资源拓扑树 + 添加主机向导 -->
-  <script src="/static/component-topology-tree.js"></script>
-  <script src="/static/component-host-wizard.js"></script>
+  <script src="/static/component-topology-tree.js?v=${ASSET_VER}"></script>
+  <script src="/static/component-host-wizard.js?v=${ASSET_VER}"></script>
   <!-- 9 模块视图 -->
-  <script src="/static/view-dashboard.js"></script>
-  <script src="/static/view-infrastructure.js"></script>
-  <script src="/static/view-hosts.js"></script>
-  <script src="/static/view-compute.js"></script>
-  <script src="/static/view-availability.js"></script>
-  <script src="/static/view-storage.js"></script>
-  <script src="/static/view-network.js"></script>
-  <script src="/static/view-monitoring.js"></script>
-  <script src="/static/view-access-control.js"></script>
-  <script src="/static/view-system.js"></script>
+  <script src="/static/view-dashboard.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-infrastructure.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-hosts.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-compute.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-availability.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-storage.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-network.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-monitoring.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-access-control.js?v=${ASSET_VER}"></script>
+  <script src="/static/view-system.js?v=${ASSET_VER}"></script>
   <!-- 应用根组件（最后加载） -->
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=${ASSET_VER}"></script>
 </body>
 </html>`)
 })
