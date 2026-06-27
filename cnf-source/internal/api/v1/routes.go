@@ -87,6 +87,9 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/hosts/selinux/batch", h.postSELinuxBatch, h.Mw.RequirePermission("host.update"))
 	api.Get("/hosts/:id/selinux", h.getHostSELinux, h.Mw.RequirePermission("host.read"))
 	api.Post("/hosts/:id/selinux", h.postHostSELinux, h.Mw.RequirePermission("host.update"))
+	// 主机 SSH 端口修改：双写+验证+回退+同步DB（单机 + 多机批量）。批量静态段先注册。
+	api.Post("/hosts/ssh-port/batch", h.postSSHPortBatch, h.Mw.RequirePermission("host.update"))
+	api.Post("/hosts/:id/ssh-port", h.postHostSSHPort, h.Mw.RequirePermission("host.update"))
 
 	// ---- 离线安装包仓库（自动部署 libvirt/KVM 时源不可用的兜底） ----
 	api.Get("/offline-packages", h.listOfflinePackages, h.Mw.RequirePermission("host.read"))
