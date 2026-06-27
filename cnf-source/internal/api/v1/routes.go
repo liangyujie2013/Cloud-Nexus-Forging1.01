@@ -78,6 +78,10 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	// 主机网络：真实读取网卡（名称/MAC/UUID/模式/IP/掩码/网关）+ DHCP↔静态切换写配置
 	api.Get("/hosts/:id/network", h.getHostNetwork, h.Mw.RequirePermission("host.read"))
 	api.Put("/hosts/:id/network", h.updateHostNetwork, h.Mw.RequirePermission("host.update"))
+	// 第4点 标准交换机（Linux bridge + bond via nmcli）：读 / 建 / 删。
+	api.Get("/hosts/:id/switches", h.getHostSwitches, h.Mw.RequirePermission("host.read"))
+	api.Post("/hosts/:id/switches", h.createHostSwitch, h.Mw.RequirePermission("host.update"))
+	api.Delete("/hosts/:id/switches/:name", h.deleteHostSwitch, h.Mw.RequirePermission("host.update"))
 	// 主机防火墙（firewalld）：读状态 / 开关 / 平台端口放行 / 自定义端口策略（单机 + 多机批量）
 	// 批量端点为静态段，置于 /hosts/:id/firewall 之前确保不被当作 :id。
 	api.Post("/hosts/firewall/batch", h.postFirewallBatch, h.Mw.RequirePermission("host.update"))
