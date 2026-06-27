@@ -78,6 +78,11 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	// 主机网络：真实读取网卡（名称/MAC/UUID/模式/IP/掩码/网关）+ DHCP↔静态切换写配置
 	api.Get("/hosts/:id/network", h.getHostNetwork, h.Mw.RequirePermission("host.read"))
 	api.Put("/hosts/:id/network", h.updateHostNetwork, h.Mw.RequirePermission("host.update"))
+	// 主机防火墙（firewalld）：读状态 / 开关 / 平台端口放行 / 自定义端口策略（单机 + 多机批量）
+	// 批量端点为静态段，置于 /hosts/:id/firewall 之前确保不被当作 :id。
+	api.Post("/hosts/firewall/batch", h.postFirewallBatch, h.Mw.RequirePermission("host.update"))
+	api.Get("/hosts/:id/firewall", h.getHostFirewall, h.Mw.RequirePermission("host.read"))
+	api.Post("/hosts/:id/firewall", h.postHostFirewall, h.Mw.RequirePermission("host.update"))
 
 	// ---- 离线安装包仓库（自动部署 libvirt/KVM 时源不可用的兜底） ----
 	api.Get("/offline-packages", h.listOfflinePackages, h.Mw.RequirePermission("host.read"))
