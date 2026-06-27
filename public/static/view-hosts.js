@@ -232,6 +232,52 @@ const HostsView = {
         await store.fetchAll()
       } catch (e) { toast(t('op_failed'), 'error') } finally { fwBatch.busy = false }
     }
+
+    // ============================================================
+    //  第2点 · SELinux 管理 —— 单机抽屉 + 多机批量（真实 getenforce/setenforce + config 持久化）
+    // ============================================================
+    const seDlg = reactive({ open: false, loading: false, busy: false, host: null, state: null, loadError: '', mode: 'enforcing', result: null })
+    const openSelinux = async (h) => {
+      seDlg.host = h; seDlg.state = null; seDlg.loadError = ''; seDlg.result = null
+      seDlg.open = true; seDlg.loading = true
+      try {
+        const res = await api('/hosts/' + h.id + '/selinux')
+        if (!res || res.error || res.reachable === false) seDlg.loadError = (res && res.error) || t('se_load_fail')
+        else { seDlg.state = res; seDlg.mode = res.current || 'enforcing' }
+      } catch (e) { seDlg.loadError = t('se_load_fail') } finally { seDlg.loading = false }
+    }
+    const submitSelinux = async () => {
+      if (!seDlg.host) return
+      seDlg.busy = true; seDlg.result = null
+      try {
+        const res = await api('/hosts/' + seDlg.host.id + '/selinux', { method: 'POST', body: JSON.stringify({ mode: seDlg.mode }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        seDlg.result = res
+        toast(res.message || t('se_op_done'), res.reboot_required ? 'warning' : 'success')
+        const fresh = await api('/hosts/' + seDlg.host.id + '/selinux')
+        if (fresh && !fresh.error && fresh.reachable !== false) seDlg.state = fresh
+        await store.fetchAll()
+      } catch (e) { toast(t('op_failed'), 'error') } finally { seDlg.busy = false }
+    }
+
+    // ---- 多机批量 SELinux ----
+    const seBatch = reactive({ open: false, busy: false, mode: 'enforcing', selected: {}, results: [] })
+    const openSeBatch = () => { seBatch.selected = {}; seBatch.results = []; seBatch.mode = 'enforcing'; seBatch.open = true }
+    const seBatchCount = computed(() => Object.keys(seBatch.selected).filter((k) => seBatch.selected[k]).length)
+    const submitSeBatch = async () => {
+      const ids = Object.keys(seBatch.selected).filter((k) => seBatch.selected[k]).map(Number)
+      if (!ids.length) { toast(t('se_batch_pick'), 'warning'); return }
+      seBatch.busy = true; seBatch.results = []
+      try {
+        const res = await api('/hosts/selinux/batch', { method: 'POST', body: JSON.stringify({ host_ids: ids, mode: seBatch.mode }) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        seBatch.results = (res && res.results) || []
+        const ok = seBatch.results.filter((r) => r.ok).length
+        const reboot = seBatch.results.filter((r) => r.reboot_required).length
+        toast(t('se_batch_done', { ok, total: seBatch.results.length, reboot }), ok === seBatch.results.length ? 'success' : 'warning')
+        await store.fetchAll()
+      } catch (e) { toast(t('op_failed'), 'error') } finally { seBatch.busy = false }
+    }
     const openNetEdit = async (h) => {
       netDlg.host = h
       netDlg.nics = []; netDlg.selected = null; netDlg.info = null
@@ -621,6 +667,7 @@ const HostsView = {
       clusterGroups, netDlg, openNetEdit, submitNet, pickNic, batchDlg, openBatch, submitBatch,
       fwDlg, openFirewall, fwToggle, fwOpenPlatform, fwAddPort, fwRemovePort, reloadFirewall,
       fwBatch, openFwBatch, fwBatchCount, submitFwBatch,
+      seDlg, openSelinux, submitSelinux, seBatch, openSeBatch, seBatchCount, submitSeBatch,
       bytesRate, utilColor, C, t, fmt,
     }
   },
@@ -694,6 +741,7 @@ const HostsView = {
       <div class="toolbar">
         <button class="apple-btn apple-btn--primary" @click="addHost"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
         <button class="apple-btn apple-btn--secondary" @click="openFwBatch"><i class="fas fa-shield-halved"></i> {{ t('fw_batch_btn') }}</button>
+        <button class="apple-btn apple-btn--secondary" @click="openSeBatch"><i class="fas fa-user-shield"></i> {{ t('se_batch_btn') }}</button>
         <div class="toolbar-search"><i class="fas fa-magnifying-glass"></i><input v-model="search" :placeholder="t('host_search_ph')"></div>
         <div class="spacer"></div>
         <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="metricsLoading" @click="refreshMetrics" :title="t('hv_refresh')">
@@ -720,6 +768,7 @@ const HostsView = {
               <td style="text-align:right;white-space:nowrap">
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openDetail(h.id)" :title="t('hv_open_detail')"><i class="fas fa-circle-info"></i></button>
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openFirewall(h)" :title="t('fw_manage')"><i class="fas fa-shield-halved"></i> {{ t('fw_short') }}</button>
+                <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openSelinux(h)" :title="t('se_manage')"><i class="fas fa-user-shield"></i> {{ t('se_short') }}</button>
                 <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click="toggleMaintenance(h)">
                   <i v-if="maintBusy===h.id" class="fas fa-spinner fa-spin"></i>
                   <i v-else :class="h.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
@@ -1105,6 +1154,70 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" @click="fwBatch.open=false">{{ t('op_close') }}</button>
           <button class="apple-btn apple-btn--primary" :disabled="fwBatch.busy || !fwBatchCount" @click="submitFwBatch"><i v-if="fwBatch.busy" class="fas fa-spinner fa-spin"></i> {{ t('fw_batch_run') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== 第2点 · 单机 SELinux 管理 ====================== -->
+    <div v-if="seDlg.open" class="modal-mask" @click.self="seDlg.open=false">
+      <div class="modal-dialog modal-sm">
+        <div class="modal-head"><i class="fas fa-user-shield" :style="{color:C.purple}"></i> {{ t('se_title') }} <span class="muted" style="font-weight:400">· {{ seDlg.host && seDlg.host.name }}</span></div>
+        <div class="modal-body">
+          <div v-if="seDlg.loading" class="muted" style="padding:20px;text-align:center"><i class="fas fa-spinner fa-spin"></i> {{ t('se_loading') }}</div>
+          <div v-else-if="seDlg.loadError" class="form-err" style="padding:12px"><i class="fas fa-circle-exclamation"></i> {{ seDlg.loadError }}</div>
+          <template v-else-if="seDlg.state">
+            <div v-if="!seDlg.state.available" class="hosts-pick-hint"><i class="fas fa-triangle-exclamation"></i> {{ t('se_not_avail') }}</div>
+            <template v-else>
+              <div class="fw-row"><div><strong>{{ t('se_current') }}：</strong><span class="apple-badge" :class="seDlg.state.current==='enforcing'?'apple-badge--success':(seDlg.state.current==='permissive'?'apple-badge--warning':'apple-badge--secondary')"><span class="dot"></span>{{ seDlg.state.current }}</span></div>
+                <div><strong>{{ t('se_persistent') }}：</strong><span class="mono">{{ seDlg.state.persistent }}</span></div></div>
+              <div v-if="!seDlg.state.consistent" class="hosts-pick-hint" style="margin-top:8px"><i class="fas fa-circle-info"></i> {{ t('se_inconsistent') }}</div>
+              <div class="form-row" style="margin-top:14px"><label>{{ t('se_set_mode') }}</label>
+                <select v-model="seDlg.mode">
+                  <option value="enforcing">enforcing（强制）</option>
+                  <option value="permissive">permissive（宽容）</option>
+                  <option value="disabled">disabled（禁用）</option>
+                </select>
+              </div>
+              <div class="hosts-pick-hint" style="margin-top:8px"><i class="fas fa-triangle-exclamation"></i> {{ t('se_reboot_note') }}</div>
+              <div v-if="seDlg.result" class="fw-steps"><div class="muted" style="font-size:11px;margin-bottom:4px">{{ t('fw_exec_steps') }}</div><pre>{{ (seDlg.result.steps||[]).join('\\n') }}</pre>
+                <div v-if="seDlg.result.reboot_required" class="form-err" style="margin-top:6px"><i class="fas fa-power-off"></i> {{ t('se_need_reboot') }}</div></div>
+            </template>
+          </template>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="seDlg.open=false">{{ t('op_close') }}</button>
+          <button v-if="seDlg.state && seDlg.state.available" class="apple-btn apple-btn--primary" :disabled="seDlg.busy" @click="submitSelinux"><i v-if="seDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('se_apply') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== 第2点 · 多机批量 SELinux ====================== -->
+    <div v-if="seBatch.open" class="modal-mask" @click.self="seBatch.open=false">
+      <div class="modal-dialog">
+        <div class="modal-head"><i class="fas fa-user-shield" :style="{color:C.indigo}"></i> {{ t('se_batch_title') }}</div>
+        <div class="modal-body">
+          <div class="hosts-pick-hint" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> {{ t('se_batch_hint') }}</div>
+          <div class="form-row"><label>{{ t('se_set_mode') }}</label>
+            <select v-model="seBatch.mode"><option value="enforcing">enforcing</option><option value="permissive">permissive</option><option value="disabled">disabled</option></select>
+          </div>
+          <label style="font-weight:600;font-size:13px">{{ t('fw_batch_hosts') }} ({{ seBatchCount }})</label>
+          <div class="fw-host-pick">
+            <label v-for="h in filteredHosts" :key="h.id" class="fw-host-item">
+              <input type="checkbox" v-model="seBatch.selected[h.id]"> <span>{{ h.name }}</span><span class="muted" style="font-size:11px">{{ h.ip }}</span>
+            </label>
+          </div>
+          <div v-if="seBatch.results.length" class="fw-batch-results">
+            <div class="muted" style="font-size:11px;margin:8px 0 4px">{{ t('fw_batch_results') }}</div>
+            <div v-for="r in seBatch.results" :key="r.host_id" class="fw-batch-line">
+              <i :class="r.ok?'fas fa-circle-check':'fas fa-circle-xmark'" :style="{color:r.ok?C.green:C.red}"></i>
+              host {{ r.host_id }} <span v-if="r.reboot_required" class="apple-badge apple-badge--warning" style="font-size:10px">{{ t('se_need_reboot_short') }}</span>
+              <span v-if="r.error" class="muted">— {{ r.error }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="seBatch.open=false">{{ t('op_close') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="seBatch.busy || !seBatchCount" @click="submitSeBatch"><i v-if="seBatch.busy" class="fas fa-spinner fa-spin"></i> {{ t('se_batch_run') }}</button>
         </div>
       </div>
     </div>
