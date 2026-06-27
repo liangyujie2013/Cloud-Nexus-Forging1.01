@@ -519,6 +519,8 @@ const dict = {
     mon_kpi_storage: '存储用量', mon_kpi_alerts: '活跃告警', mon_kpi_gpu: 'GPU 占用', mon_kpi_overcommit: 'vCPU 超分',
     mon_chart_cpumem: 'CPU / 内存利用率趋势', mon_chart_net: '网络吞吐 (Mbps)', mon_chart_iops: '存储 IOPS 趋势',
     mon_net_in: '入向', mon_net_out: '出向', mon_realtime_hosts: '主机实时负载', mon_no_alerts: '无活跃告警',
+    mon_no_hosts: '暂无主机数据（请先在主机管理中纳管主机）',
+    rule_empty: '暂无告警规则，点击右上角「新建告警规则」创建第一条', rule_operator: '运算符', rule_threshold: '阈值', rule_duration: '持续(秒)',
     // —— 告警规则 CRUD ——
     rule_create_title: '新建告警规则', rule_edit_title: '编辑告警规则', rule_metric_ph: '如 host.cpu_usage',
     rule_cond_ph: '如 > 90% 持续 5 分钟', rule_del_confirm: '确认删除告警规则「{name}」？',
@@ -1128,6 +1130,8 @@ const dict = {
     mon_kpi_storage: 'Storage Usage', mon_kpi_alerts: 'Active Alerts', mon_kpi_gpu: 'GPU Utilization', mon_kpi_overcommit: 'vCPU Overcommit',
     mon_chart_cpumem: 'CPU / Memory Utilization Trend', mon_chart_net: 'Network Throughput (Mbps)', mon_chart_iops: 'Storage IOPS Trend',
     mon_net_in: 'Inbound', mon_net_out: 'Outbound', mon_realtime_hosts: 'Host Realtime Load', mon_no_alerts: 'No active alerts',
+    mon_no_hosts: 'No host data yet (onboard hosts in Host Management first)',
+    rule_empty: 'No alert rules yet. Click "New Alert Rule" to create the first one.', rule_operator: 'Operator', rule_threshold: 'Threshold', rule_duration: 'Duration(s)',
     rule_create_title: 'New Alert Rule', rule_edit_title: 'Edit Alert Rule', rule_metric_ph: 'e.g. host.cpu_usage',
     rule_cond_ph: 'e.g. > 90% for 5 min', rule_del_confirm: 'Delete alert rule "{name}"?',
     rule_op_edit: 'Edit', rule_op_del: 'Delete', rule_op_toggle: 'Enable / Disable',

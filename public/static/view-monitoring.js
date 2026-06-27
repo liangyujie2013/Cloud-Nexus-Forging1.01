@@ -72,10 +72,30 @@ const MonitoringView = {
     const stopStream = () => { if (es) { es.close(); es = null } }
 
     const mergedGpus = computed(() => gpus.value.map((g) => ({ ...g, ...(live.value[g.id] || {}) })))
+    // 主机实时负载：以真实 /hosts/metrics 为准（字段 cpu_usage_pct / mem_usage_pct）。
+    // 不可达主机 reachable=false，CPU/内存显示「—」而非 NaN。
     const mergedHosts = computed(() => hosts.value.map((h) => {
-      const l = liveHosts.value[h.id] || {}
-      return { ...h, cpu_usage: l.cpu_usage ?? h.cpu_usage, mem_usage: l.mem_usage ?? Math.round((h.mem_used_gb / h.mem_total_gb) * 100) }
+      const m = liveHosts.value[h.id] || {}
+      const reachable = m.reachable !== false && (m.cpu_usage_pct != null || m.mem_usage_pct != null)
+      return {
+        ...h,
+        live_reachable: reachable,
+        cpu_usage: reachable && m.cpu_usage_pct != null ? m.cpu_usage_pct : null,
+        mem_usage: reachable && m.mem_usage_pct != null ? m.mem_usage_pct : null,
+      }
     }))
+    // 实时指标轮询（真实 /hosts/metrics，5s）。替代不可用的逐主机 SSE。
+    let metricsTimer = null
+    const pollHostMetrics = async () => {
+      const res = await api('/hosts/metrics')
+      if (res && !res.error) liveHosts.value = res
+    }
+    const startMetricsPoll = () => {
+      if (metricsTimer) return
+      pollHostMetrics()
+      metricsTimer = setInterval(pollHostMetrics, 5000)
+    }
+    const stopMetricsPoll = () => { if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null } }
 
     // ---- Chart.js rendering ----
     const baseOpts = (yMax) => ({
@@ -141,43 +161,97 @@ const MonitoringView = {
     const load = async () => {
       if (props.tab === 'overview') {
         loading.value = true
-        const [ov, hi] = await Promise.all([api('/monitoring/overview'), api('/monitoring/history?points=24')])
-        overview.value = ov; history.value = hi
+        // 总览 KPI 由真实拓扑 + 实时指标派生（不再依赖 mock /monitoring/overview）。
+        await buildOverview()
         loading.value = false
         await nextTick(); renderCharts()
       } else if (props.tab === 'realtime') {
-        if (!gpus.value.length) gpus.value = await api('/gpus')
-        if (!hosts.value.length) hosts.value = await api('/hosts')
+        const g = await api('/gpus'); gpus.value = Array.isArray(g) ? g : []
+        const hs = await api('/hosts'); hosts.value = Array.isArray(hs) ? hs : []
+        // GPU 实时（SSE 可用则用，不可用静默降级），主机实时用真实 /hosts/metrics 轮询。
         startStream()
+        startMetricsPoll()
       } else if (props.tab === 'rules') {
         await loadRules()
       }
     }
-    const loadRules = async () => { rules.value = await api('/alert-rules') }
+
+    // 由真实数据构建总览 KPI 与趋势：主机实时指标 + 集群超分 + 历史样本。
+    const buildOverview = async () => {
+      const [hs, metrics, hist, vmsR, gpusR, rulesR] = await Promise.all([
+        api('/hosts'), api('/hosts/metrics'), api('/metrics/history?points=24'),
+        api('/vms'), api('/gpus'), api('/alert-rules'),
+      ])
+      const hostList = Array.isArray(hs) ? hs : []
+      const vmList = Array.isArray(vmsR) ? vmsR : []
+      const gpuList = Array.isArray(gpusR) ? gpusR : []
+      const ruleList = Array.isArray(rulesR) ? rulesR : []
+      const mx = (metrics && !metrics.error) ? metrics : {}
+      // 聚合 CPU/内存使用率（仅统计可达主机的真实值）。
+      let cpuSum = 0, cpuN = 0, memUsed = 0, memTotal = 0, diskMax = 0, online = 0
+      hostList.forEach((h) => {
+        const m = mx[h.id] || {}
+        if (m.reachable === false) return
+        online++
+        if (m.cpu_usage_pct != null) { cpuSum += m.cpu_usage_pct; cpuN++ }
+        if (m.mem_used_mb != null && m.mem_total_mb) { memUsed += m.mem_used_mb; memTotal += m.mem_total_mb }
+        if (m.root_disk_pct != null) diskMax = Math.max(diskMax, m.root_disk_pct)
+      })
+      const cpuPct = cpuN ? +(cpuSum / cpuN).toFixed(1) : 0
+      const memPct = memTotal ? +((memUsed / memTotal) * 100).toFixed(1) : 0
+      // 健康度：任一维度 >85 critical，>60 warning，否则 healthy。score = 100 - worst。
+      const worst = Math.max(cpuPct, memPct, diskMax)
+      const level = worst > 85 ? 'critical' : worst > 60 ? 'warning' : 'healthy'
+      const vmsRunning = vmList.filter((v) => v.status === 'running' || v.state === 'running').length
+      const gpusBusy = gpuList.filter((g) => g.status === 'assigned').length
+      const activeAlerts = ruleList.filter((r) => r.enabled).length
+      overview.value = {
+        health: { level, score: Math.max(0, Math.round(100 - worst)) },
+        kpis: {
+          cpu_usage_pct: cpuPct, mem_usage_pct: memPct,
+          storage_usage_pct: Math.round(diskMax),
+          hosts_online: online, hosts_total: hostList.length,
+          vms_running: vmsRunning, vms_total: vmList.length,
+          gpus_busy: gpusBusy, gpus_total: gpuList.length,
+          active_alerts: activeAlerts,
+        },
+      }
+      // 趋势图：用真实历史样本（无则用当前点起步）。
+      if (hist && hist.series && hist.series.length) {
+        history.value = hist
+      } else {
+        const now = new Date()
+        const hh = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0')
+        history.value = { series: [{ t: hh, cpu: cpuPct, mem: memPct, net_in: 0, net_out: 0, iops: 0 }] }
+      }
+    }
+    const loadRules = async () => { const r = await api('/alert-rules'); rules.value = Array.isArray(r) ? r : [] }
 
     onMounted(load)
     watch(() => props.tab, (nv, ov) => {
-      if (ov === 'realtime' && nv !== 'realtime') stopStream()
+      if (ov === 'realtime' && nv !== 'realtime') { stopStream(); stopMetricsPoll() }
       if (ov === 'overview' && nv !== 'overview') destroyCharts()
       load()
     })
-    onBeforeUnmount(() => { stopStream(); destroyCharts() })
+    onBeforeUnmount(() => { stopStream(); stopMetricsPoll(); destroyCharts() })
 
     // =========================================================================
     //  告警规则 CRUD
     // =========================================================================
+    // 告警规则字段与真实后端一致：metric/operator/threshold/duration_seconds/severity/notify_channel/enabled。
+    // 后端仅支持 新建/删除/启停（无 PUT 编辑）：编辑= 删除旧规则后按新值重建。
     const ruleDlg = reactive({ open: false, mode: 'create', id: null, busy: false, form: {}, errors: {} })
-    const blankRule = () => ({ name: '', metric: '', condition: '', severity: 'warning', channel: 'email', enabled: true })
+    const blankRule = () => ({ name: '', metric: 'cpu_usage', operator: '>', threshold: 85, duration_seconds: 300, severity: 'warning', notify_channel: 'email', enabled: true })
 
     const openCreateRule = () => { ruleDlg.mode = 'create'; ruleDlg.id = null; ruleDlg.form = blankRule(); ruleDlg.errors = {}; ruleDlg.open = true }
-    const openEditRule = (r) => { ruleDlg.mode = 'edit'; ruleDlg.id = r.id; ruleDlg.form = { name: r.name, metric: r.metric, condition: r.condition, severity: r.severity, channel: r.channel, enabled: r.enabled }; ruleDlg.errors = {}; ruleDlg.open = true }
+    const openEditRule = (r) => { ruleDlg.mode = 'edit'; ruleDlg.id = r.id; ruleDlg.form = { name: r.name, metric: r.metric, operator: r.operator || '>', threshold: r.threshold, duration_seconds: r.duration_seconds || 300, severity: r.severity, notify_channel: r.notify_channel || 'email', enabled: r.enabled }; ruleDlg.errors = {}; ruleDlg.open = true }
     const closeRuleDlg = () => { ruleDlg.open = false }
 
     const validateRule = () => {
       const e = {}
       if (!ruleDlg.form.name || !ruleDlg.form.name.trim()) e.name = t('op_required')
       if (!ruleDlg.form.metric || !ruleDlg.form.metric.trim()) e.metric = t('op_required')
-      if (!ruleDlg.form.condition || !ruleDlg.form.condition.trim()) e.condition = t('op_required')
+      if (ruleDlg.form.threshold == null || isNaN(Number(ruleDlg.form.threshold))) e.threshold = t('op_required')
       ruleDlg.errors = e
       return Object.keys(e).length === 0
     }
@@ -186,18 +260,29 @@ const MonitoringView = {
       if (!validateRule()) return
       ruleDlg.busy = true
       try {
-        let res
-        if (ruleDlg.mode === 'create') res = await api('/alert-rules', { method: 'POST', body: JSON.stringify(ruleDlg.form) })
-        else res = await api('/alert-rules/' + ruleDlg.id, { method: 'PUT', body: JSON.stringify(ruleDlg.form) })
+        const body = {
+          name: ruleDlg.form.name.trim(), metric: ruleDlg.form.metric,
+          operator: ruleDlg.form.operator, threshold: Number(ruleDlg.form.threshold),
+          duration_seconds: Number(ruleDlg.form.duration_seconds) || 0,
+          severity: ruleDlg.form.severity, notify_channel: ruleDlg.form.notify_channel,
+          enabled: ruleDlg.form.enabled,
+        }
+        // 编辑模式：后端无 PUT，先删旧再建新（等效更新）。
+        if (ruleDlg.mode === 'edit' && ruleDlg.id) {
+          const d = await api('/alert-rules/' + ruleDlg.id, { method: 'DELETE' })
+          if (d && d.error) { toast(d.error, 'error'); return }
+        }
+        const res = await api('/alert-rules', { method: 'POST', body: JSON.stringify(body) })
         if (res && res.error) { toast(res.error, 'error'); return }
-        toast(res.message || t('op_confirm'), 'success')
+        toast(t('op_confirm'), 'success')
         ruleDlg.open = false
         await loadRules()
       } catch (err) { toast(t('op_failed'), 'error') } finally { ruleDlg.busy = false }
     }
 
     const toggleRule = async (r) => {
-      const res = await api('/alert-rules/' + r.id, { method: 'PUT', body: JSON.stringify({ enabled: !r.enabled }) })
+      // 真实启停端点：POST /alert-rules/:id/enabled { enabled }
+      const res = await api('/alert-rules/' + r.id + '/enabled', { method: 'POST', body: JSON.stringify({ enabled: !r.enabled }) })
       if (res && res.error) { toast(res.error, 'error'); return }
       await loadRules()
     }
@@ -241,7 +326,7 @@ const MonitoringView = {
               </div>
               <div class="mon-kpi">
                 <div class="mk-ico" :style="{background:utilColor(overview.kpis.cpu_usage_pct)+'1a',color:utilColor(overview.kpis.cpu_usage_pct)}"><i class="fas fa-microchip"></i></div>
-                <div class="mk-body"><div class="mk-val">{{ overview.kpis.cpu_usage_pct }}<span class="mk-sub">%</span></div><div class="mk-lab">{{ t('mon_kpi_cpu') }} · {{ t('mon_kpi_overcommit') }} {{ overview.kpis.vcpu_overcommit }}x</div></div>
+                <div class="mk-body"><div class="mk-val">{{ overview.kpis.cpu_usage_pct }}<span class="mk-sub">%</span></div><div class="mk-lab">{{ t('mon_kpi_cpu') }}</div></div>
               </div>
               <div class="mon-kpi">
                 <div class="mk-ico" :style="{background:utilColor(overview.kpis.mem_usage_pct)+'1a',color:utilColor(overview.kpis.mem_usage_pct)}"><i class="fas fa-memory"></i></div>
@@ -249,7 +334,7 @@ const MonitoringView = {
               </div>
               <div class="mon-kpi">
                 <div class="mk-ico" :style="{background:utilColor(overview.kpis.storage_usage_pct)+'1a',color:utilColor(overview.kpis.storage_usage_pct)}"><i class="fas fa-hard-drive"></i></div>
-                <div class="mk-body"><div class="mk-val">{{ overview.kpis.storage_usage_pct }}<span class="mk-sub">%</span></div><div class="mk-lab">{{ t('mon_kpi_storage') }} · {{ overview.kpis.storage_used_tb }}/{{ overview.kpis.storage_total_tb }} TB</div></div>
+                <div class="mk-body"><div class="mk-val">{{ overview.kpis.storage_usage_pct }}<span class="mk-sub">%</span></div><div class="mk-lab">{{ t('mon_kpi_storage') }}</div></div>
               </div>
               <div class="mon-kpi">
                 <div class="mk-ico" :style="{background:C.purple+'1a',color:C.purple}"><i class="fas fa-bolt-lightning"></i></div>
@@ -311,10 +396,13 @@ const MonitoringView = {
             <tbody>
               <tr v-for="h in mergedHosts" :key="h.id">
                 <td><strong>{{ h.name }}</strong><div class="muted" style="font-size:12px">{{ h.cpu_model }}</div></td>
-                <td><span class="apple-badge" :class="h.status==='connected'?'apple-badge--running':'apple-badge--warning'"><span class="dot"></span>{{ h.status==='connected'?t('dash_connected'):t('mon_health_warning') }}</span></td>
-                <td><div class="flex between" style="margin-bottom:3px"><span class="mono" style="font-size:12px">{{ Math.round(h.cpu_usage) }}%</span></div><div class="usage-bar"><div class="fill" :style="{width:h.cpu_usage+'%',background:utilColor(h.cpu_usage),transition:'width .5s'}"></div></div></td>
-                <td><div class="flex between" style="margin-bottom:3px"><span class="mono" style="font-size:12px">{{ Math.round(h.mem_usage) }}%</span></div><div class="usage-bar"><div class="fill" :style="{width:h.mem_usage+'%',background:utilColor(h.mem_usage),transition:'width .5s'}"></div></div></td>
+                <td><span class="apple-badge" :class="h.live_reachable?'apple-badge--running':'apple-badge--warning'"><span class="dot"></span>{{ h.live_reachable?t('dash_connected'):t('host_st_offline') }}</span></td>
+                <td v-if="h.cpu_usage!=null"><div class="flex between" style="margin-bottom:3px"><span class="mono" style="font-size:12px">{{ Math.round(h.cpu_usage) }}%</span></div><div class="usage-bar"><div class="fill" :style="{width:h.cpu_usage+'%',background:utilColor(h.cpu_usage),transition:'width .5s'}"></div></div></td>
+                <td v-else class="muted" style="font-size:12px">—</td>
+                <td v-if="h.mem_usage!=null"><div class="flex between" style="margin-bottom:3px"><span class="mono" style="font-size:12px">{{ Math.round(h.mem_usage) }}%</span></div><div class="usage-bar"><div class="fill" :style="{width:h.mem_usage+'%',background:utilColor(h.mem_usage),transition:'width .5s'}"></div></div></td>
+                <td v-else class="muted" style="font-size:12px">—</td>
               </tr>
+              <tr v-if="!mergedHosts.length"><td colspan="4" style="text-align:center;padding:32px;color:var(--text-tertiary)">{{ t('mon_no_hosts') }}</td></tr>
             </tbody>
           </table>
         </div>
@@ -325,21 +413,21 @@ const MonitoringView = {
         <div class="toolbar"><span class="muted">{{ rules.length }} {{ t('rule_title') }}</span><div class="spacer"></div><button class="apple-btn apple-btn--primary" @click="openCreateRule"><i class="fas fa-plus"></i> {{ t('rule_add') }}</button></div>
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
-            <thead><tr><th>{{ t('rule_name') }}</th><th>{{ t('rule_metric') }}</th><th>{{ t('rule_condition') }}</th><th>{{ t('rule_severity') }}</th><th>{{ t('rule_triggered') }}</th><th>{{ t('rule_channel') }}</th><th>{{ t('rule_enabled') }}</th><th style="text-align:right">{{ t('op_actions') }}</th></tr></thead>
+            <thead><tr><th>{{ t('rule_name') }}</th><th>{{ t('rule_metric') }}</th><th>{{ t('rule_condition') }}</th><th>{{ t('rule_severity') }}</th><th>{{ t('rule_channel') }}</th><th>{{ t('rule_enabled') }}</th><th style="text-align:right">{{ t('op_actions') }}</th></tr></thead>
             <tbody>
               <tr v-for="r in rules" :key="r.id">
                 <td><strong>{{ r.name }}</strong></td>
                 <td class="mono muted">{{ r.metric }}</td>
-                <td>{{ r.condition }}</td>
+                <td class="mono">{{ r.operator }} {{ r.threshold }}<span v-if="r.duration_seconds" class="muted" style="font-size:12px"> · {{ r.duration_seconds }}s</span></td>
                 <td><span class="apple-badge" :style="{color:sevColor(r.severity)}"><span class="dot" :style="{background:sevColor(r.severity)}"></span>{{ sevLabel(r.severity) }}</span></td>
-                <td><strong :style="{color: r.triggered>0?'var(--color-orange)':'var(--text-tertiary)'}">{{ r.triggered }}</strong></td>
-                <td class="muted">{{ r.channel }}</td>
+                <td class="muted">{{ r.notify_channel }}</td>
                 <td><button class="mon-toggle" :class="{on:r.enabled}" @click="toggleRule(r)" :title="t('rule_op_toggle')"><span></span></button></td>
                 <td style="text-align:right;white-space:nowrap">
                   <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openEditRule(r)"><i class="fas fa-pen"></i></button>
                   <button class="apple-btn apple-btn--ghost apple-btn--sm" style="color:var(--color-red)" @click="askDelRule(r)"><i class="fas fa-trash"></i></button>
                 </td>
               </tr>
+              <tr v-if="!rules.length"><td colspan="7" style="text-align:center;padding:40px;color:var(--text-tertiary)"><i class="fas fa-bell-slash" style="font-size:28px;opacity:.4;display:block;margin-bottom:10px"></i>{{ t('rule_empty') }}</td></tr>
             </tbody>
           </table>
         </div>
@@ -351,11 +439,17 @@ const MonitoringView = {
           <div class="modal-head"><i class="fas fa-bell" style="color:var(--color-orange)"></i> {{ ruleDlg.mode==='create' ? t('rule_create_title') : t('rule_edit_title') }}</div>
           <div class="modal-body">
             <div class="form-row"><label>{{ t('rule_name') }} <span class="req">*</span></label><input v-model="ruleDlg.form.name" :class="{invalid:ruleDlg.errors.name}"><div v-if="ruleDlg.errors.name" class="form-err">{{ ruleDlg.errors.name }}</div></div>
-            <div class="form-row"><label>{{ t('rule_metric') }} <span class="req">*</span></label><input class="mono" v-model="ruleDlg.form.metric" :class="{invalid:ruleDlg.errors.metric}" :placeholder="t('rule_metric_ph')"><div v-if="ruleDlg.errors.metric" class="form-err">{{ ruleDlg.errors.metric }}</div></div>
-            <div class="form-row"><label>{{ t('rule_condition') }} <span class="req">*</span></label><input v-model="ruleDlg.form.condition" :class="{invalid:ruleDlg.errors.condition}" :placeholder="t('rule_cond_ph')"><div v-if="ruleDlg.errors.condition" class="form-err">{{ ruleDlg.errors.condition }}</div></div>
+            <div class="form-grid-2">
+              <div class="form-row"><label>{{ t('rule_metric') }} <span class="req">*</span></label><select v-model="ruleDlg.form.metric" :class="{invalid:ruleDlg.errors.metric}"><option value="cpu_usage">CPU 使用率 %</option><option value="mem_usage">内存使用率 %</option><option value="disk_usage">磁盘使用率 %</option><option value="load1">负载 (1m)</option></select></div>
+              <div class="form-row"><label>{{ t('rule_operator') }}</label><select v-model="ruleDlg.form.operator"><option value=">">&gt;</option><option value=">=">&ge;</option><option value="<">&lt;</option><option value="<=">&le;</option></select></div>
+            </div>
+            <div class="form-grid-2">
+              <div class="form-row"><label>{{ t('rule_threshold') }} <span class="req">*</span></label><input type="number" step="0.1" v-model.number="ruleDlg.form.threshold" :class="{invalid:ruleDlg.errors.threshold}"><div v-if="ruleDlg.errors.threshold" class="form-err">{{ ruleDlg.errors.threshold }}</div></div>
+              <div class="form-row"><label>{{ t('rule_duration') }}</label><input type="number" min="0" v-model.number="ruleDlg.form.duration_seconds" placeholder="300"></div>
+            </div>
             <div class="form-grid-2">
               <div class="form-row"><label>{{ t('rule_severity') }}</label><select v-model="ruleDlg.form.severity"><option value="critical">{{ t('sev_critical') }}</option><option value="warning">{{ t('sev_warning') }}</option><option value="info">{{ t('sev_info') }}</option></select></div>
-              <div class="form-row"><label>{{ t('rule_channel') }}</label><select v-model="ruleDlg.form.channel"><option value="email">Email</option><option value="webhook">Webhook</option><option value="sms">SMS</option></select></div>
+              <div class="form-row"><label>{{ t('rule_channel') }}</label><select v-model="ruleDlg.form.notify_channel"><option value="email">Email</option><option value="webhook">Webhook</option><option value="sms">SMS</option></select></div>
             </div>
             <label class="mon-check"><input type="checkbox" v-model="ruleDlg.form.enabled"> {{ t('rule_enabled') }}</label>
           </div>
