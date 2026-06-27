@@ -566,7 +566,9 @@ const HostsView = {
       </div>
       <div v-if="!filteredHosts.length" class="apple-card" style="text-align:center;padding:40px"><span class="muted"><i class="fas fa-server"></i> {{ t('hv_no_hosts') }}</span></div>
       <div class="grid grid-3">
-        <div class="apple-card host-tile" v-for="h in filteredHosts" :key="h.id" @click="openDetail(h.id)" @contextmenu="hostCtx.open($event, h)" :title="t('hctx_open_detail')">
+        <div class="apple-card host-tile" :class="{'host-tile--maint': h.status==='maintenance'}" v-for="h in filteredHosts" :key="h.id" @click="openDetail(h.id)" @contextmenu="hostCtx.open($event, h)" :title="t('hctx_open_detail')">
+          <!-- 维护模式醒目角标：进入维护后卡片有明显视觉变化（呼应「进入维护要有明显变化」）-->
+          <div v-if="h.status==='maintenance'" class="ht-maint-ribbon"><i class="fas fa-screwdriver-wrench"></i> {{ t('host_st_maint') }}</div>
           <div class="ht-head">
             <div class="ht-title"><i class="fas fa-server" :style="{color:C.blue}"></i> {{ h.name }} <i class="fas fa-ellipsis-vertical host-ctx-hint" :title="t('hctx_group_config')" @click.stop="hostCtx.open($event, h)"></i></div>
             <span class="apple-badge" :class="statusMeta(h.status).cls"><span class="dot"></span>{{ t(statusMeta(h.status).key) }}</span>

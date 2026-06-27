@@ -82,6 +82,8 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	// ---- 离线安装包仓库（自动部署 libvirt/KVM 时源不可用的兜底） ----
 	api.Get("/offline-packages", h.listOfflinePackages, h.Mw.RequirePermission("host.read"))
 	api.Post("/hosts/:id/maintenance", h.setHostMaintenance, h.Mw.RequirePermission("host.update"))
+	// 主机电源：reboot/shutdown 经 SSH 真实下发（power_on 需带外，明确不支持）
+	api.Post("/hosts/:id/power", h.hostPower, h.Mw.RequirePermission("host.update"))
 	api.Delete("/hosts/:id", h.deleteHost, h.Mw.RequirePermission("host.delete"))
 
 	// ---- 虚拟机生命周期（RBAC: vm.*） ----

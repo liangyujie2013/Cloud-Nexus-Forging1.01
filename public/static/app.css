@@ -917,8 +917,11 @@
    主机管理 v2.0 —— 主机卡片 / 详情 Tab / 硬件表格 / HA 面板
    ========================================================================== */
 .host-filter-select { padding: 7px 12px; border: 1px solid var(--separator); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; cursor: pointer; }
-.host-tile { cursor: pointer; transition: all var(--duration-fast); display: flex; flex-direction: column; gap: 10px; }
+.host-tile { cursor: pointer; transition: all var(--duration-fast); display: flex; flex-direction: column; gap: 10px; position: relative; overflow: hidden; }
 .host-tile:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(0,0,0,.09); }
+/* 维护模式：卡片整体降饱和 + 橙色边框，进入维护后有明显视觉变化 */
+.host-tile--maint { border: 1.5px solid #f59e0b; background: linear-gradient(0deg, rgba(245,158,11,.05), rgba(245,158,11,.05)); }
+.ht-maint-ribbon { position: absolute; top: 10px; right: -34px; transform: rotate(45deg); background: #f59e0b; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 40px; letter-spacing: .5px; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
 .ht-head { display: flex; align-items: center; justify-content: space-between; }
 .ht-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .ht-meta { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); }

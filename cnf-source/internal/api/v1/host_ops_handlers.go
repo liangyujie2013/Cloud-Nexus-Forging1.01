@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cnf/cnfv1/internal/hostops"
+	"github.com/cnf/cnfv1/internal/model"
 	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/gofiber/fiber/v3"
 )
@@ -290,4 +291,116 @@ func (h *Handlers) updateHostNetwork(c fiber.Ctx) error {
 		"data":    fiber.Map{"steps": steps},
 		"message": "主机网络已更新并生效",
 	})
+}
+
+// ============================================================
+//  功能：主机电源（reboot/shutdown 真实下发）与维护模式（真实前置检查 + 状态联动）
+// ============================================================
+
+// hostPower POST /hosts/:id/power  {action: reboot|shutdown}
+//
+// 通过 SSH 在目标主机真实下发 systemctl reboot/poweroff。power_on 需带外管理，
+// 明确返回不支持（绝不伪造成功）。下发后把主机状态置为 disconnected（重启/关机后将失联），
+// 由后续心跳/状态刷新恢复，前端因此能看到真实状态变化。
+func (h *Handlers) hostPower(c fiber.Ctx) error {
+	id, err := paramInt(c, "id")
+	if err != nil {
+		return badRequest(c, "id 非法")
+	}
+	var body struct {
+		Action string `json:"action"`
+	}
+	if err := c.Bind().Body(&body); err != nil {
+		return badRequest(c, "请求体非法")
+	}
+	if body.Action == "" {
+		return badRequest(c, "缺少 action（reboot/shutdown）")
+	}
+
+	cli, err := h.dialHost(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, mysql.ErrNoCredential) {
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"error": "该主机未存储 SSH 凭据，无法执行电源操作。请先更新凭据或重新纳管。",
+				"code":  "NO_CREDENTIAL",
+			})
+		}
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{"error": err.Error(), "code": "SSH_UNREACHABLE"})
+	}
+	defer cli.Close()
+
+	res, perr := hostops.PowerAction(cli, body.Action)
+	if perr != nil {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{"error": perr.Error(), "code": "POWER_FAILED"})
+	}
+
+	// 真实联动：重启/关机后主机将失联，置为 disconnected，前端立即看到状态变化。
+	_ = h.MySQL.UpdateHostStatus(c.Context(), id, model.HostDisconnected)
+
+	h.audit(c, "host.power."+body.Action, "host", id, map[string]any{"action": body.Action})
+	return c.JSON(fiber.Map{"data": res, "message": res.Message})
+}
+
+// setHostMaintenance POST /hosts/:id/maintenance  {enabled:bool}
+//
+// 进入维护模式前，用 virsh 真实核实目标主机上是否仍有运行中的虚拟机；存在则拒绝并回传
+// 清单（前端提示先迁移/关机），绝不静默放行。通过后写 DB（maintenance_mode + status），
+// 前端据此显示明显的维护标识与「退出维护」入口（功能联动、状态可见）。
+func (h *Handlers) setHostMaintenance(c fiber.Ctx) error {
+	id, err := paramInt(c, "id")
+	if err != nil {
+		return badRequest(c, "id 非法")
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.Bind().Body(&body); err != nil {
+		return badRequest(c, "请求体非法")
+	}
+
+	// 进入维护：前置核实运行中 VM。退出维护：无需检查。
+	if body.Enabled {
+		cli, derr := h.dialHost(c.Context(), id)
+		if derr != nil {
+			if errors.Is(derr, mysql.ErrNoCredential) {
+				return c.Status(fiber.StatusOK).JSON(fiber.Map{
+					"error": "该主机未存储 SSH 凭据，无法核实运行中虚拟机以安全进入维护模式。",
+					"code":  "NO_CREDENTIAL",
+				})
+			}
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{"error": derr.Error(), "code": "SSH_UNREACHABLE"})
+		}
+		vms, verr := hostops.ListRunningVMs(cli)
+		cli.Close()
+		if verr != nil {
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"error": "无法核实运行中虚拟机，为安全起见拒绝进入维护模式：" + verr.Error(),
+				"code":  "VM_CHECK_FAILED",
+			})
+		}
+		if len(vms) > 0 {
+			children := make([]fiber.Map, 0, len(vms))
+			for _, v := range vms {
+				children = append(children, fiber.Map{"name": v.Name, "type": "vm"})
+			}
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"error":    "该主机仍有运行中的虚拟机，请先迁移或关机后再进入维护模式",
+				"code":     "HAS_RUNNING_VMS",
+				"children": children,
+			})
+		}
+	}
+
+	if err := h.MySQL.SetHostMaintenance(c.Context(), id, body.Enabled); err != nil {
+		return hierarchyError(c, err)
+	}
+	status := model.HostConnected
+	msg := "已退出维护模式"
+	if body.Enabled {
+		status = model.HostMaintenance
+		msg = "已进入维护模式"
+	}
+	h.audit(c, "host.maintenance", "host", id, map[string]any{"enabled": body.Enabled})
+	// message 同时置于 data 内：前端 window.api() 成功时解包返回 data，需在 data 内才能读到提示文案。
+	return c.JSON(fiber.Map{"data": fiber.Map{"status": string(status), "message": msg}, "message": msg})
 }

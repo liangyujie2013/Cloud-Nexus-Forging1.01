@@ -283,28 +283,6 @@ func (h *Handlers) deleteHost(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
 
-// setHostMaintenance POST /hosts/:id/maintenance  {enabled:bool}
-func (h *Handlers) setHostMaintenance(c fiber.Ctx) error {
-	id, err := paramInt(c, "id")
-	if err != nil {
-		return badRequest(c, "id 非法")
-	}
-	var body struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := c.Bind().Body(&body); err != nil {
-		return badRequest(c, "请求体非法")
-	}
-	if err := h.MySQL.SetHostMaintenance(c.Context(), id, body.Enabled); err != nil {
-		return hierarchyError(c, err)
-	}
-	status := model.HostConnected
-	if body.Enabled {
-		status = model.HostMaintenance
-	}
-	return c.JSON(fiber.Map{"status": string(status)})
-}
-
 // getHostHardware GET /hosts/:id/hardware —— 返回硬件清单与虚拟化能力。
 //
 // 优先尝试 libvirt 实时探测 CPU/内存/虚拟化能力；探测不可用时回退到
