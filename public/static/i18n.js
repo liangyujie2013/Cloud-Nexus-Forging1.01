@@ -463,6 +463,8 @@ const dict = {
 
     // ===== 基础设施 · 资源池 =====
     pool_unready_title: '资源池功能正在建设中', pool_unready_hint: '该模块的后端服务尚未上线（/resource-pools 暂未实现）。为避免展示不真实的占位数据，此处暂不显示任何资源池。后端就绪后将自动展示真实数据。',
+    ha_unready_title: 'HA 配置功能正在建设中', ha_unready_hint: '该模块的后端服务尚未上线（/cluster-configs 暂未实现）。为避免展示不真实的占位数据，此处暂不显示任何 HA 配置。后端就绪后将自动展示真实数据。',
+    bk_unready_title: '备份恢复功能正在建设中', bk_unready_hint: '该模块的后端服务尚未上线（/backup-jobs 暂未实现）。为避免展示不真实的占位数据，此处暂不显示任何备份任务。后端就绪后将自动展示真实数据。',
     pool_title: '资源池', pool_add: '新建资源池', pool_cpu_limit: 'CPU 上限',
     pool_cpu_reserved: 'CPU 预留', pool_mem_limit: '内存上限', pool_mem_reserved: '内存预留', pool_vms: '虚拟机数',
     shares_high: '高份额', shares_normal: '正常份额', shares_low: '低份额',
@@ -1078,6 +1080,8 @@ const dict = {
 
     // ===== Infrastructure resource pools =====
     pool_unready_title: 'Resource Pools — under construction', pool_unready_hint: 'The backend for this module is not online yet (/resource-pools not implemented). To avoid showing fake placeholder data, no pools are displayed here. Real data will appear automatically once the backend is ready.',
+    ha_unready_title: 'HA Config — under construction', ha_unready_hint: 'The backend for this module is not online yet (/cluster-configs not implemented). To avoid showing fake placeholder data, no HA configs are displayed. Real data will appear automatically once the backend is ready.',
+    bk_unready_title: 'Backup & Restore — under construction', bk_unready_hint: 'The backend for this module is not online yet (/backup-jobs not implemented). To avoid showing fake placeholder data, no backup jobs are displayed. Real data will appear automatically once the backend is ready.',
     pool_title: 'Resource Pools', pool_add: 'New Pool', pool_cpu_limit: 'CPU Limit',
     pool_cpu_reserved: 'CPU Reserved', pool_mem_limit: 'Mem Limit', pool_mem_reserved: 'Mem Reserved', pool_vms: 'VMs',
     shares_high: 'High Shares', shares_normal: 'Normal Shares', shares_low: 'Low Shares',

@@ -1,8 +1,10 @@
 // =============================================================================
 //  模块视图：可用性管理 (view-availability.js)
-//  子标签：ha HA 配置（集群 高可用/资源调度/CPU兼容/超分配）/ migration 迁移中心（在线迁移控制台
-//          + 历史）/ backup 备份恢复（备份作业列表）。
-//  API：/cluster-configs、/migrations(+/progress)、/backup-jobs、/hosts、/vms。
+//  子标签：ha HA 配置（集群 高可用/资源调度/CPU兼容）/ backup 备份恢复（备份作业列表）。
+//  说明：迁移中心独立页面已移除——在线迁移入口统一收敛到「虚拟机列表 → 右键 → 迁移」。
+//  诚实空态：/cluster-configs、/backup-jobs 后端尚未实现（404），不展示任何占位/演示数据，
+//           仅显示「建设中」诚实空态，后端就绪后自动展示真实数据。
+//  API：/cluster-configs、/backup-jobs、/hosts、/vms、/clusters。
 // =============================================================================
 (function () {
 const { ref, reactive, computed, onMounted, watch } = Vue
@@ -14,6 +16,7 @@ const AvailabilityView = {
   setup(props) {
     // ---- HA 配置 ----
     const configs = ref([])
+    const haReady = ref(true)        // 后端是否可用（false=建设中诚实空态）
     const sel = ref(null)
     const hosts = ref([])
     const toast = ref('')
@@ -23,39 +26,15 @@ const AvailabilityView = {
       const r = await api('/cluster-configs/' + sel.value.id, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sel.value),
       })
+      if (r && r.error) { showToast(r.error); return }
       const i = configs.value.findIndex((c) => c.id === sel.value.id)
       if (i >= 0) configs.value[i] = JSON.parse(JSON.stringify(sel.value))
-      showToast(r.message || t('cc_saved'))
-    }
-
-    // ---- 迁移中心 ----
-    const vms = ref([])
-    const history = ref([])
-    const form = reactive({ vm: '', dst: '', live: true, storage: false, compressed: true, downtime: 300 })
-    const job = reactive({ active: false, progress: 0, phase: '', throughput: 0, remaining: 0, done: false })
-    let timer = null
-    let startTs = 0
-    const selectedVM = computed(() => vms.value.find((v) => v.name === form.vm))
-    const gpuBlocked = computed(() => form.live && selectedVM.value && selectedVM.value.gpus > 0)
-    const submitMigration = async () => {
-      if (!form.vm || !form.dst || gpuBlocked.value) return
-      await api('/migrations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-      job.active = true; job.done = false; job.progress = 0; job.phase = t('mig_phase_precopy')
-      startTs = Date.now(); clearInterval(timer); timer = setInterval(poll, 600)
-    }
-    const poll = async () => {
-      const r = await api('/migrations/progress?start=' + startTs)
-      job.progress = r.progress; job.phase = r.phase; job.throughput = r.throughput_mbps; job.remaining = r.remaining_mb
-      if (r.done) {
-        job.done = true; clearInterval(timer)
-        history.value.unshift({ id: Date.now(), vm: form.vm, src: t('mig_current_host'), dst: form.dst,
-          live: form.live, storage: form.storage, status: 'success', downtime_ms: form.downtime,
-          throughput_mbps: 9000, duration_s: 8, time: new Date().toISOString().slice(0, 16).replace('T', ' ') })
-      }
+      showToast((r && r.message) || t('cc_saved'))
     }
 
     // ---- 备份 ----
     const backupJobs = ref([])
+    const bkReady = ref(true)        // 后端是否可用（false=建设中诚实空态）
     const clusters = ref([])
     const allVms = ref([])
 
@@ -71,8 +50,8 @@ const AvailabilityView = {
       errors: {},
     })
     const openBackupCreate = async () => {
-      if (!allVms.value.length) allVms.value = await api('/vms')
-      if (!clusters.value.length) clusters.value = await api('/clusters')
+      if (!allVms.value.length) { const r = await api('/vms'); allVms.value = Array.isArray(r) ? r : [] }
+      if (!clusters.value.length) { const r = await api('/clusters'); clusters.value = Array.isArray(r) ? r : [] }
       bkDlg.form = {
         name: '', scope: 'vm', target_vm_ids: allVms.value[0] ? [allVms.value[0].id] : [], cluster_id: clusters.value[0]?.id || null,
         mode: 'full', location: 'local', location_target: '',
@@ -110,14 +89,14 @@ const AvailabilityView = {
           retention_type: f.retention_type, retention_value: Number(f.retention_value),
         }
         const res = await api('/backup-jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-        if (res.error) { showToast(res.error); bkDlg.busy = false; return }
+        if (res && res.error) { showToast(res.error); bkDlg.busy = false; return }
         backupJobs.value.unshift(res)
         bkDlg.open = false
         showToast(t('bk_created').replace('{name}', res.name))
       } catch (err) { showToast(t('toast_failed')) }
       finally { bkDlg.busy = false }
     }
-    const runBackupNow = (b) => { showToast(t('bk_run_now') + ': ' + b.name + ' （原型）') }
+    const runBackupNow = (b) => { showToast(t('bk_run_now') + ': ' + b.name) }
 
     const showToast = (m) => { toast.value = m; setTimeout(() => (toast.value = ''), 3200) }
     const bkStatusBadge = (s) => ({
@@ -127,25 +106,34 @@ const AvailabilityView = {
       pending: { cls: 'apple-badge--stopped', label: t('st_pending') || '待运行' },
     }[s] || { cls: '', label: s })
 
+    // 后端是否真实可用：返回数组=就绪；返回带 error / 非数组=未就绪（404 等）→ 诚实空态
+    const isReadyList = (r) => Array.isArray(r)
+
     const load = async () => {
-      if (props.tab === 'ha' && !configs.value.length) {
-        configs.value = await api('/cluster-configs'); hosts.value = await api('/hosts')
-        if (configs.value.length) pick(configs.value[0])
+      if (props.tab === 'ha') {
+        const r = await api('/cluster-configs')
+        if (isReadyList(r)) {
+          haReady.value = true
+          configs.value = r
+          const hh = await api('/hosts'); hosts.value = Array.isArray(hh) ? hh : []
+          if (configs.value.length && !sel.value) pick(configs.value[0])
+        } else {
+          haReady.value = false
+          configs.value = []
+          sel.value = null
+        }
       }
-      if (props.tab === 'migration') {
-        if (!hosts.value.length) hosts.value = await api('/hosts')
-        if (!vms.value.length) { vms.value = (await api('/vms')).filter((v) => v.status === 'running'); if (vms.value.length) form.vm = vms.value[0].name }
-        if (!history.value.length) history.value = await api('/migrations')
+      if (props.tab === 'backup') {
+        const r = await api('/backup-jobs')
+        if (isReadyList(r)) { bkReady.value = true; backupJobs.value = r }
+        else { bkReady.value = false; backupJobs.value = [] }
       }
-      if (props.tab === 'backup' && !backupJobs.value.length) backupJobs.value = await api('/backup-jobs')
     }
     onMounted(load)
     watch(() => props.tab, load)
 
-    // P10：迁移入口统一到「虚拟机列表 → 右键 → 迁移」，此处提供跳转
-    const gotoVmList = () => window.dispatchEvent(new CustomEvent('cnf:goto', { detail: { module: 'compute', tab: 'vms' } }))
-    return { props, configs, sel, hosts, members, pick, saveHA, toast,
-             vms, history, form, job, gpuBlocked, submitMigration, backupJobs, bkStatusBadge, t, gotoVmList,
+    return { props, configs, haReady, sel, hosts, members, pick, saveHA, toast,
+             backupJobs, bkReady, bkStatusBadge, t,
              clusters, allVms, bkDlg, openBackupCreate, toggleBkVm, saveBackup, runBackupNow }
   },
   template: `
@@ -154,13 +142,21 @@ const AvailabilityView = {
 
       <!-- ===== ha：HA 配置 ===== -->
       <template v-if="props.tab==='ha'">
-        <div class="cc-layout">
+        <!-- 诚实空态：后端未就绪 -->
+        <div v-if="!haReady" class="apple-card" style="padding:48px 24px;text-align:center">
+          <i class="fas fa-shield-halved" style="font-size:40px;color:var(--text-tertiary);opacity:.5"></i>
+          <h3 style="margin:18px 0 8px">{{ t('ha_unready_title') }}</h3>
+          <div class="muted" style="max-width:560px;margin:0 auto;line-height:1.7;font-size:13px">{{ t('ha_unready_hint') }}</div>
+        </div>
+        <!-- 真实数据 -->
+        <div v-else class="cc-layout">
           <div class="apple-card" style="padding:8px">
             <div class="cc-list-item" v-for="c in configs" :key="c.id" :class="{active:sel&&sel.id===c.id}" @click="pick(c)">
               <i class="fas fa-layer-group" :style="{color:sel&&sel.id===c.id?'var(--color-blue)':'var(--text-tertiary)'}"></i>
               <div style="flex:1"><div style="font-weight:600;font-size:14px">{{ c.name }}</div>
                 <div class="muted" style="font-size:11px"><span v-if="c.ha_enabled">HA</span><span v-if="c.drs_enabled"> · 资源调度</span><span v-if="c.evc_enabled"> · CPU兼容</span></div></div>
             </div>
+            <div v-if="!configs.length" class="muted" style="padding:18px;text-align:center;font-size:13px">{{ t('mig_no_history') }}</div>
           </div>
           <div v-if="sel">
             <div class="apple-card setting-block">
@@ -195,56 +191,36 @@ const AvailabilityView = {
         </div>
       </template>
 
-      <!-- ===== migration：迁移记录（控制台已精简，迁移入口统一走 虚拟机列表 → 右键 → 迁移）===== -->
-      <template v-else-if="props.tab==='migration'">
-        <div class="iso-repo-note" style="margin-bottom:14px">
-          <i class="fas fa-circle-info"></i>
-          <div>
-            <strong>{{ t('mig_center_tip_title') }}</strong>
-            <div class="muted" style="margin-top:4px;line-height:1.6">{{ t('mig_center_tip') }}</div>
-            <button class="apple-btn apple-btn--primary apple-btn--sm" style="margin-top:10px" @click="gotoVmList"><i class="fas fa-desktop"></i> {{ t('mig_goto_vms') }}</button>
-          </div>
-        </div>
-        <div class="apple-card" style="padding:0">
-          <div style="padding:16px 16px 0"><h3 style="margin:0 0 4px"><i class="fas fa-clock-rotate-left" style="color:var(--color-indigo)"></i> {{ t('mig_history') }}</h3></div>
-          <table class="apple-table">
-            <thead><tr><th>{{ t('mig_vm') }}</th><th>{{ t('mig_path') }}</th><th>{{ t('mig_mode') }}</th><th>{{ t('mig_downtime_col') }}</th><th>{{ t('status') }}</th><th>{{ t('task_time') }}</th></tr></thead>
-            <tbody>
-              <tr v-for="m in history" :key="m.id">
-                <td><strong>{{ m.vm }}</strong></td>
-                <td class="mono" style="font-size:12px">{{ m.src }} → {{ m.dst }}</td>
-                <td><span class="apple-badge" :class="m.live?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ m.live?t('mig_online'):t('mig_cold') }}</span><span v-if="m.storage" class="apple-badge apple-badge--warning"><span class="dot"></span>{{ t('mig_col_storage') }}</span></td>
-                <td class="mono">{{ m.downtime_ms }}ms</td>
-                <td><span class="apple-badge" :class="m.status==='success'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ m.status==='success'?t('mig_success'):t('mig_failed') }}</span></td>
-                <td class="muted" style="font-size:12px">{{ m.time }}</td>
-              </tr>
-              <tr v-if="!history.length"><td colspan="6" class="muted" style="text-align:center;padding:18px">{{ t('mig_no_history') }}</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </template>
-
       <!-- ===== backup：备份恢复 ===== -->
       <template v-else>
-        <div class="toolbar"><span class="muted">{{ backupJobs.length }} {{ t('bk_title') }}</span><div class="spacer"></div><button class="apple-btn apple-btn--primary" @click="openBackupCreate"><i class="fas fa-plus"></i> {{ t('bk_add') }}</button></div>
-        <div class="apple-card" style="padding:0">
-          <table class="apple-table">
-            <thead><tr><th>{{ t('bk_job_name') }}</th><th>{{ t('bk_target') }}</th><th>{{ t('bk_schedule') }}</th><th>{{ t('bk_mode') }}</th><th>{{ t('bk_retention') }}</th><th>{{ t('bk_last_run') }}</th><th>{{ t('bk_last_status') }}</th><th>{{ t('bk_last_size') }}</th><th>{{ t('actions') }}</th></tr></thead>
-            <tbody>
-              <tr v-for="b in backupJobs" :key="b.id">
-                <td><strong>{{ b.name }}</strong></td>
-                <td class="mono">{{ b.target_vm }}</td>
-                <td>{{ b.schedule }}</td>
-                <td><span class="apple-badge">{{ b.mode==='full'?t('bk_mode_full'):(b.mode==='differential'?t('bk_mode_differential'):t('bk_mode_incremental')) }}</span></td>
-                <td>{{ b.retention }}</td>
-                <td class="muted">{{ b.last_run }}</td>
-                <td><span class="apple-badge" :class="bkStatusBadge(b.last_status).cls"><span class="dot"></span>{{ bkStatusBadge(b.last_status).label }}</span></td>
-                <td class="mono">{{ b.last_size_gb }} GB</td>
-                <td><button class="apple-btn apple-btn--ghost apple-btn--sm" @click="runBackupNow(b)"><i class="fas fa-play"></i> {{ t('bk_run_now') }}</button></td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- 诚实空态：后端未就绪 -->
+        <div v-if="!bkReady" class="apple-card" style="padding:48px 24px;text-align:center">
+          <i class="fas fa-clock-rotate-left" style="font-size:40px;color:var(--text-tertiary);opacity:.5"></i>
+          <h3 style="margin:18px 0 8px">{{ t('bk_unready_title') }}</h3>
+          <div class="muted" style="max-width:560px;margin:0 auto;line-height:1.7;font-size:13px">{{ t('bk_unready_hint') }}</div>
         </div>
+        <template v-else>
+          <div class="toolbar"><span class="muted">{{ backupJobs.length }} {{ t('bk_title') }}</span><div class="spacer"></div><button class="apple-btn apple-btn--primary" @click="openBackupCreate"><i class="fas fa-plus"></i> {{ t('bk_add') }}</button></div>
+          <div class="apple-card" style="padding:0">
+            <table class="apple-table">
+              <thead><tr><th>{{ t('bk_job_name') }}</th><th>{{ t('bk_target') }}</th><th>{{ t('bk_schedule') }}</th><th>{{ t('bk_mode') }}</th><th>{{ t('bk_retention') }}</th><th>{{ t('bk_last_run') }}</th><th>{{ t('bk_last_status') }}</th><th>{{ t('bk_last_size') }}</th><th>{{ t('actions') }}</th></tr></thead>
+              <tbody>
+                <tr v-for="b in backupJobs" :key="b.id">
+                  <td><strong>{{ b.name }}</strong></td>
+                  <td class="mono">{{ b.target_vm }}</td>
+                  <td>{{ b.schedule }}</td>
+                  <td><span class="apple-badge">{{ b.mode==='full'?t('bk_mode_full'):(b.mode==='differential'?t('bk_mode_differential'):t('bk_mode_incremental')) }}</span></td>
+                  <td>{{ b.retention }}</td>
+                  <td class="muted">{{ b.last_run }}</td>
+                  <td><span class="apple-badge" :class="bkStatusBadge(b.last_status).cls"><span class="dot"></span>{{ bkStatusBadge(b.last_status).label }}</span></td>
+                  <td class="mono">{{ b.last_size_gb }} GB</td>
+                  <td><button class="apple-btn apple-btn--ghost apple-btn--sm" @click="runBackupNow(b)"><i class="fas fa-play"></i> {{ t('bk_run_now') }}</button></td>
+                </tr>
+                <tr v-if="!backupJobs.length"><td colspan="9" class="muted" style="text-align:center;padding:18px">{{ t('mig_no_history') }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </template>
 
       <!-- ===== P12 新建备份任务对话框 ===== -->

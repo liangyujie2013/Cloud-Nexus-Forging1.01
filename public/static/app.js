@@ -54,7 +54,6 @@ const App = {
       ] },
       { key: 'availability', icon: 'fa-shield-halved', label: 'nav_mod_availability', children: [
         { key: 'ha', label: 'nav_avail_ha' },
-        { key: 'migration', label: 'nav_avail_migration' },
         { key: 'backup', label: 'nav_avail_backup' },
       ] },
       { key: 'storage', icon: 'fa-database', label: 'nav_mod_storage', children: [
