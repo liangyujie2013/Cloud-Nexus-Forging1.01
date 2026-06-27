@@ -184,7 +184,20 @@ const App = {
       hostWizardPreset.value = (e && e.detail && e.detail.presetClusterId) || 0
       hostWizardOpen.value = true
     }
-    const onHostWizardDone = () => { hostWizardOpen.value = false }
+    // 主机纳管完成：关闭向导并【强制】从后端重新拉取全量层级数据。
+    // fetchAll 默认带缓存(state.loaded 命中即返回旧数据)，必须传 force=true，
+    // 否则新纳管主机不会出现在列表/拓扑里，造成"添加主机后识别不到"的问题。
+    const onHostWizardDone = async () => {
+      hostWizardOpen.value = false
+      const store = window.cnfTopology
+      if (store && typeof store.fetchAll === 'function') {
+        await store.fetchAll(true)
+        // 同步刷新一次真实指标，避免新主机指标列长期空白。
+        if (typeof store.fetchHostMetrics === 'function') { store.fetchHostMetrics().catch(() => {}) }
+      }
+      // 广播一个全局事件，任何正在监听的视图都可据此做局部刷新。
+      window.dispatchEvent(new CustomEvent('cnf:hosts-changed', { detail: { reason: 'added' } }))
+    }
 
     // ---- 跨视图导航（资源拓扑树点击节点 → 切换模块/子页 + 高亮目标）----
     const currentFocus = ref(null)

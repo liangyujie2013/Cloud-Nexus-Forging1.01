@@ -23,7 +23,12 @@ const PORT = Number(process.env.PORT) || 3000
 //  路由先命中（Hono 先注册先匹配）。故这里用独立的外层 Hono 实例。
 //  未设置 CNF_PROXY_TARGET 时维持原 demo Mock 行为不变。
 // =============================================================================
-const PROXY_TARGET = process.env.CNF_PROXY_TARGET
+// 默认指向本地真实 Go 后端 :8090。
+// 历史问题：未设置该环境变量时会回落到内置 demo Mock，导致前端全程拿到「演示假数据」
+// （6 台假主机 / 各类残留垃圾数据），且新增/删除主机无法识别。改为默认代理真实后端，
+// 彻底杜绝 mock 污染；如需强制走 demo，可显式设置 CNF_PROXY_TARGET=mock。
+const RAW_PROXY = process.env.CNF_PROXY_TARGET || 'http://127.0.0.1:8090'
+const PROXY_TARGET = RAW_PROXY === 'mock' ? '' : RAW_PROXY
 const app = new Hono()
 
 // 静态资源：/static/* -> public/static/*（放最前，优先于代理与 demo）
@@ -74,7 +79,7 @@ if (PROXY_TARGET) {
   })
   console.log(`🔀 /api/v1/* 反向代理 -> ${target}（同源真实后端）`)
 } else {
-  console.log('ℹ️  未设置 CNF_PROXY_TARGET，/api/v1 走内置 demo Mock')
+  console.log('ℹ️  CNF_PROXY_TARGET=mock，/api/v1 走内置 demo Mock（仅供前端独立演示）')
 }
 
 // 其余所有请求（含页面 HTML、未代理时的 demo /api/v1）回落到原 demo app。

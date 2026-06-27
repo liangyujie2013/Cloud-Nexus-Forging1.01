@@ -520,6 +520,10 @@ const HostsView = {
       const res = await store.removeHost(host.id)
       if (!res.ok) { blockDlg.open = true; blockDlg.title = t('del_blocked_title'); blockDlg.message = res.error; blockDlg.children = res.children || []; blockDlg.host = null; return }
       toast(t('toast_success'), 'success')
+      // 删除后强制从后端重新对齐主机列表（force=true 绕过缓存），
+      // 保证"增删后始终识别真实主机"，避免乐观更新与后端不一致。
+      await store.fetchAll(true)
+      window.dispatchEvent(new CustomEvent('cnf:hosts-changed', { detail: { reason: 'removed', id: host.id } }))
     }
 
     // ---- detail VM list ----
@@ -719,11 +723,15 @@ const HostsView = {
     const stopMonitor = () => { if (monTimer) { clearInterval(monTimer); monTimer = null } }
     watch(detailTab, (nv) => { if (nv === 'monitor') startMonitor(); else { stopMonitor(); destroyCharts() } })
 
+    // 主机增删后(在任意视图触发的 cnf:hosts-changed)，本视图强制重新对齐列表，
+    // 保证"不管在哪里添加/删除，主机列表始终识别到真实最新主机"。
+    const onHostsChanged = async () => { await store.fetchAll(true) }
     onMounted(async () => {
       if (!hosts.value.length) await store.fetchAll()
       if (props.tab === 'list' || props.tab === 'management') startMetricsPolling()
+      window.addEventListener('cnf:hosts-changed', onHostsChanged)
     })
-    onBeforeUnmount(() => { destroyCharts(); stopMetricsPolling(); stopMonitor(); if (detailMetTimer) clearInterval(detailMetTimer) })
+    onBeforeUnmount(() => { destroyCharts(); stopMetricsPolling(); stopMonitor(); if (detailMetTimer) clearInterval(detailMetTimer); window.removeEventListener('cnf:hosts-changed', onHostsChanged) })
 
     // 单台主机详情：由列表/管理视图点击进入。只要拿到真实硬件或实时状态任一即展示。
     const showDetailView = computed(() => !!selectedId.value && (!!detail.value || !!liveStatus.value) && !loading.value)
