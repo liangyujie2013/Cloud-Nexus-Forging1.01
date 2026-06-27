@@ -40,6 +40,32 @@ const HostsView = {
     const statusFilter = ref('')
     let charts = {}
 
+    // ============================================================
+    //  实时指标（真实数据）—— 批量采集 + 轮询；不可达/无凭据显示「—」，绝不伪造。
+    // ============================================================
+    const metricsLoading = computed(() => store.state.metricsLoading)
+    let metricsTimer = null
+    const refreshMetrics = async () => { await store.fetchHostMetrics() }
+    const startMetricsPolling = () => {
+      stopMetricsPolling()
+      refreshMetrics()
+      metricsTimer = setInterval(refreshMetrics, 15000)  // 15s 轮询真实指标
+    }
+    const stopMetricsPolling = () => { if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null } }
+    // 取某主机真实指标（可能为 null）
+    const hMetric = (h) => (h && h.metrics) || null
+    // 指标百分比 → 显示文本（有值则 round + %，否则 —）
+    const pctText = (v) => (v == null || isNaN(v) ? '—' : Math.round(v) + '%')
+    const pctWidth = (v) => (v == null || isNaN(v) ? 0 : Math.max(0, Math.min(100, v)))
+    // 运行时长（秒）→ 友好文本
+    const uptimeText = (sec) => {
+      if (!sec || sec <= 0) return '—'
+      const d = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60)
+      if (d > 0) return d + t('hv_uptime_d') + ' ' + hh + t('hv_uptime_h')
+      if (hh > 0) return hh + t('hv_uptime_h') + ' ' + mm + t('hv_uptime_m')
+      return mm + t('hv_uptime_m')
+    }
+
     // ---- list filtering ----
     const filteredHosts = computed(() => {
       let list = hosts.value
@@ -65,12 +91,14 @@ const HostsView = {
       const [hw, h] = await Promise.all([api('/hosts/' + id + '/hardware'), api('/hosts/' + id + '/ha-status')])
       detail.value = hw; ha.value = h
       loading.value = false
-      window.dispatchEvent(new CustomEvent('cnf:goto', { detail: { module: 'hosts', tab: 'detail' } }))
+      // 详情视图覆盖在当前视图之上（showDetailView=true 即接管渲染），无需切换 nav tab。
+      stopMetricsPolling()
     }
     const backToList = () => {
-      destroyCharts()
+      destroyCharts(); stopMonitor()
       selectedId.value = null; detail.value = null; ha.value = null
-      window.dispatchEvent(new CustomEvent('cnf:goto', { detail: { module: 'hosts', tab: 'list' } }))
+      // 返回后恢复列表/管理视图的指标轮询
+      if (props.tab === 'list' || props.tab === 'management') startMetricsPolling()
     }
     // 添加主机：复用全局主机纳管向导（与基础设施一致）
     const addHost = () => window.dispatchEvent(new CustomEvent('cnf:open-host-wizard', { detail: { presetClusterId: 0 } }))
@@ -208,9 +236,14 @@ const HostsView = {
       } catch (err) { toast(t('op_failed'), 'error') } finally { batchDlg.busy = false }
     }
 
-    // react to nav tab changes (e.g. user clicks "主机列表")
+    // react to nav tab changes（列表/管理/网络三个独立视图）
     watch(() => props.tab, (nv) => {
-      if (nv === 'list') { selectedId.value = null; detail.value = null; destroyCharts() }
+      if (nv === 'list' || nv === 'management' || nv === 'network') {
+        selectedId.value = null; detail.value = null; destroyCharts()
+      }
+      // 列表与管理视图需要实时指标；进入即开始轮询，离开停止。
+      if (nv === 'list' || nv === 'management') startMetricsPolling()
+      else stopMetricsPolling()
     })
     // allow opening a specific host via focus prop (from topology tree: {focusType:'host', focusId})
     watch(() => props.focus, (f) => {
@@ -407,44 +440,80 @@ const HostsView = {
     const evIcon = (t2) => ({ failover: 'fa-arrows-turn-right', recovery: 'fa-circle-check', fence: 'fa-bolt', warning: 'fa-triangle-exclamation' }[t2] || 'fa-circle-info')
     const evColor = (t2) => ({ failover: C.orange, recovery: C.green, fence: C.red, warning: C.orange }[t2] || C.gray)
 
-    // ---- charts (overview tab: CPU/mem rings already; monitor tab: history line) ----
+    // ---- charts (overview tab: CPU/mem rings already; monitor tab: REAL history line) ----
+    // 真实监控趋势：进入「监控」页后每隔几秒采集一次 GET /hosts/:id/metrics，
+    // 将真实 CPU%/内存% 追加到历史缓冲并重绘曲线。无 Math.random，无伪造数据。
+    const monHistory = reactive({ labels: [], cpu: [], mem: [] })
+    let monTimer = null
     const destroyCharts = () => { Object.values(charts).forEach((c) => c && c.destroy()); charts = {} }
+    const fetchOneMetric = async (id) => {
+      try {
+        const res = await api('/hosts/' + id + '/metrics')
+        if (res && !res.error && res.reachable !== false) return res
+      } catch (e) {}
+      return null
+    }
+    const pushMonPoint = (m) => {
+      const ts = fmt(new Date(), { mode: 'time' })
+      monHistory.labels.push(ts)
+      monHistory.cpu.push(m && m.cpu_usage_pct != null ? Math.round(m.cpu_usage_pct * 10) / 10 : null)
+      monHistory.mem.push(m && m.mem_usage_pct != null ? Math.round(m.mem_usage_pct * 10) / 10 : null)
+      // 仅保留最近 40 个采样点（约 2 分钟 @3s）
+      while (monHistory.labels.length > 40) { monHistory.labels.shift(); monHistory.cpu.shift(); monHistory.mem.shift() }
+    }
     const renderMonitorChart = async () => {
-      if (!window.Chart) return
+      if (!window.Chart || !selectedId.value) return
       await nextTick()
       const el = document.getElementById('host-mon-chart')
       if (!el) return
-      if (charts.mon) charts.mon.destroy()
-      // synthesize a deterministic-ish 20-point history around current usage
-      const base = detailHost.value ? detailHost.value.cpu_usage : 50
-      const mbase = detailHost.value ? detailHost.value.mem_usage : 50
-      const labels = Array.from({ length: 20 }, (_, i) => { const d = new Date(Date.now() - (19 - i) * 180000); return fmt(d, { mode: 'time' }) })
-      const cpu = labels.map((_, i) => Math.max(2, Math.min(99, Math.round(base + 14 * Math.sin(i / 3) + (Math.random() - 0.5) * 8))))
-      const mem = labels.map((_, i) => Math.max(2, Math.min(99, Math.round(mbase + 8 * Math.sin(i / 4 + 1) + (Math.random() - 0.5) * 5))))
       const sec = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary') || '#888'
+      if (charts.mon) {
+        charts.mon.data.labels = monHistory.labels.slice()
+        charts.mon.data.datasets[0].data = monHistory.cpu.slice()
+        charts.mon.data.datasets[1].data = monHistory.mem.slice()
+        charts.mon.update('none')
+        return
+      }
       charts.mon = new Chart(el, {
         type: 'line',
-        data: { labels, datasets: [
-          { label: 'CPU %', data: cpu, borderColor: C.blue, backgroundColor: 'rgba(0,122,255,.12)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 0 },
-          { label: t('col_mem') + ' %', data: mem, borderColor: C.indigo, backgroundColor: 'transparent', fill: false, tension: 0.4, borderWidth: 2, pointRadius: 0 },
+        data: { labels: monHistory.labels.slice(), datasets: [
+          { label: 'CPU %', data: monHistory.cpu.slice(), borderColor: C.blue, backgroundColor: 'rgba(0,122,255,.12)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 0, spanGaps: true },
+          { label: t('col_mem') + ' %', data: monHistory.mem.slice(), borderColor: C.indigo, backgroundColor: 'transparent', fill: false, tension: 0.4, borderWidth: 2, pointRadius: 0, spanGaps: true },
         ] },
         options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
           plugins: { legend: { position: 'top', align: 'end', labels: { usePointStyle: true, boxWidth: 10, color: sec, font: { size: 12 } } } },
           scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 7, color: '#999', font: { size: 11 } } }, y: { beginAtZero: true, max: 100, grid: { color: 'rgba(120,120,128,.14)' }, ticks: { color: '#999', font: { size: 11 } } } } },
       })
     }
-    watch(detailTab, (nv) => { if (nv === 'monitor') renderMonitorChart(); else destroyCharts() })
+    const startMonitor = async () => {
+      stopMonitor()
+      monHistory.labels = []; monHistory.cpu = []; monHistory.mem = []
+      // 立即取一帧再开始轮询，避免空图
+      const first = await fetchOneMetric(selectedId.value)
+      pushMonPoint(first); await renderMonitorChart()
+      monTimer = setInterval(async () => {
+        const m = await fetchOneMetric(selectedId.value)
+        pushMonPoint(m); renderMonitorChart()
+      }, 3000)
+    }
+    const stopMonitor = () => { if (monTimer) { clearInterval(monTimer); monTimer = null } }
+    watch(detailTab, (nv) => { if (nv === 'monitor') startMonitor(); else { stopMonitor(); destroyCharts() } })
 
-    onMounted(async () => { if (!hosts.value.length) await store.fetchAll() })
-    onBeforeUnmount(destroyCharts)
+    onMounted(async () => {
+      if (!hosts.value.length) await store.fetchAll()
+      if (props.tab === 'list' || props.tab === 'management') startMetricsPolling()
+    })
+    onBeforeUnmount(() => { destroyCharts(); stopMetricsPolling(); stopMonitor() })
 
-    const showDetailView = computed(() => props.tab === 'detail' && selectedId.value && detail.value)
+    // 单台主机详情：由列表/管理视图点击进入（selectedId+detail 就绪即展示，覆盖当前列表/管理视图）。
+    const showDetailView = computed(() => !!selectedId.value && !!detail.value)
 
     return {
       props, hosts, filteredHosts, search, statusFilter, statusMeta, openDetail, backToList, addHost,
       selectedId, detail, ha, detailTab, loading, showDetailView, detailHost, detailVMs,
       toggleMaintenance, maintBusy, blockDlg, gotoMigrate,
       hostCtx, onHostCtxAction,
+      metricsLoading, refreshMetrics, hMetric, pctText, pctWidth, uptimeText,
       clusterGroups, netDlg, openNetEdit, submitNet, pickNic, batchDlg, openBatch, submitBatch,
       haCheckList, haStatusColor, haStatusText, overallColor, overallText, evIcon, evColor,
       iommuBusy, pciBusy, gpuBusy, toggleIommu, togglePci, switchGpuMode, releaseGpu,
@@ -455,8 +524,12 @@ const HostsView = {
   },
   template: `
   <div>
-    <!-- ====================== 主机列表（卡片 · 实时负载 / 维护模式）====================== -->
+    <!-- ====================== ① 主机列表（卡片 · 真实实时负载）====================== -->
     <template v-if="props.tab==='list' && !showDetailView">
+      <div class="hmn-intro">
+        <div class="hmn-intro-title"><i class="fas fa-server" :style="{color:C.blue}"></i> {{ t('hv_list_title') }}</div>
+        <div class="muted">{{ t('hv_list_intro') }}</div>
+      </div>
       <div class="toolbar">
         <button class="apple-btn apple-btn--primary" @click="addHost"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
         <div class="toolbar-search"><i class="fas fa-magnifying-glass"></i><input v-model="search" :placeholder="t('host_search_ph')"></div>
@@ -467,8 +540,12 @@ const HostsView = {
           <option value="disconnected">{{ t('host_st_offline') }}</option>
         </select>
         <div class="spacer"></div>
-        <span class="muted">{{ filteredHosts.length }} {{ t('host_machine') }}</span>
+        <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="metricsLoading" @click="refreshMetrics" :title="t('hv_refresh')">
+          <i class="fas fa-rotate" :class="{'fa-spin':metricsLoading}"></i> {{ t('hv_refresh') }}
+        </button>
+        <span class="muted" style="margin-left:10px">{{ filteredHosts.length }} {{ t('host_machine') }}</span>
       </div>
+      <div v-if="!filteredHosts.length" class="apple-card" style="text-align:center;padding:40px"><span class="muted"><i class="fas fa-server"></i> {{ t('hv_no_hosts') }}</span></div>
       <div class="grid grid-3">
         <div class="apple-card host-tile" v-for="h in filteredHosts" :key="h.id" @click="openDetail(h.id)" @contextmenu="hostCtx.open($event, h)" :title="t('hctx_open_detail')">
           <div class="ht-head">
@@ -477,61 +554,104 @@ const HostsView = {
           </div>
           <div class="ht-meta">{{ h.ip }} · {{ h.cluster_name }}</div>
           <div class="ht-cpu">{{ h.cpu_model }}</div>
-          <div class="ht-bars">
+          <!-- 真实指标：采集中显示提示；不可达显示「—」；有数据显示真实百分比。绝不显示 NaN。 -->
+          <div v-if="hMetric(h) && hMetric(h).reachable===false" class="ht-metric-warn muted" style="font-size:12px;padding:10px 0">
+            <i class="fas fa-plug-circle-xmark" :style="{color:C.gray}"></i> {{ t('hv_metric_unreachable') }}
+          </div>
+          <div v-else-if="!hMetric(h) && metricsLoading" class="muted" style="font-size:12px;padding:10px 0">
+            <i class="fas fa-spinner fa-spin"></i> {{ t('hv_metric_loading') }}
+          </div>
+          <div v-else class="ht-bars">
             <div class="ht-bar">
-              <div class="flex between"><span class="muted" style="font-size:12px">CPU</span><span class="mono" style="font-size:12px">{{ Math.round(h.cpu_usage) }}%</span></div>
-              <div class="usage-bar"><div class="fill" :style="{width:h.cpu_usage+'%',background:utilColor(h.cpu_usage)}"></div></div>
+              <div class="flex between"><span class="muted" style="font-size:12px">CPU</span><span class="mono" style="font-size:12px">{{ pctText(hMetric(h) && hMetric(h).cpu_usage_pct) }}</span></div>
+              <div class="usage-bar"><div class="fill" :style="{width:pctWidth(hMetric(h) && hMetric(h).cpu_usage_pct)+'%',background:utilColor(pctWidth(hMetric(h) && hMetric(h).cpu_usage_pct))}"></div></div>
             </div>
             <div class="ht-bar">
-              <div class="flex between"><span class="muted" style="font-size:12px">{{ t('col_mem') }}</span><span class="mono" style="font-size:12px">{{ Math.round(h.mem_usage) }}%</span></div>
-              <div class="usage-bar"><div class="fill" :style="{width:h.mem_usage+'%',background:utilColor(h.mem_usage)}"></div></div>
+              <div class="flex between"><span class="muted" style="font-size:12px">{{ t('col_mem') }}</span><span class="mono" style="font-size:12px">{{ pctText(hMetric(h) && hMetric(h).mem_usage_pct) }}</span></div>
+              <div class="usage-bar"><div class="fill" :style="{width:pctWidth(hMetric(h) && hMetric(h).mem_usage_pct)+'%',background:utilColor(pctWidth(hMetric(h) && hMetric(h).mem_usage_pct))}"></div></div>
             </div>
           </div>
           <div class="ht-foot">
             <span class="muted"><i class="fas fa-desktop"></i> {{ h.vm_running }}/{{ h.vm_count }} VM</span>
-            <span class="muted" v-if="h.gpus"><i class="fas fa-microchip" style="color:#76b900"></i> {{ h.gpus }} GPU</span>
+            <span class="muted" v-if="hMetric(h) && hMetric(h).reachable!==false"><i class="fas fa-hard-drive" :style="{color:C.indigo}"></i> {{ pctText(hMetric(h).root_disk_pct) }}</span>
             <div class="spacer"></div>
-            <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click.stop="toggleMaintenance(h)">
-              <i v-if="maintBusy===h.id" class="fas fa-spinner fa-spin"></i>
-              <i v-else :class="h.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
-              {{ h.status==='maintenance' ? t('host_exit_maint') : t('host_enter_maint') }}
-            </button>
+            <span class="muted" v-if="hMetric(h) && hMetric(h).reachable!==false" style="font-size:11px"><i class="fas fa-clock"></i> {{ uptimeText(hMetric(h).uptime_sec) }}</span>
           </div>
         </div>
       </div>
     </template>
 
-    <!-- ============ 主机管理 / 网络（按集群分组统一管理宿主机管理网络）============ -->
-    <template v-else-if="props.tab==='detail' && !showDetailView">
+    <!-- ====================== ② 主机管理（运维：状态 / 电源 / 维护模式，一行一台）====================== -->
+    <template v-else-if="props.tab==='management' && !showDetailView">
       <div class="hmn-intro">
-        <div class="hmn-intro-title"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('hmn_title') }}</div>
-        <div class="muted">{{ t('hmn_intro') }}</div>
+        <div class="hmn-intro-title"><i class="fas fa-screwdriver-wrench" :style="{color:C.orange}"></i> {{ t('hv_mgmt_title') }}</div>
+        <div class="muted">{{ t('hv_mgmt_intro') }}</div>
+      </div>
+      <div class="toolbar">
+        <button class="apple-btn apple-btn--primary" @click="addHost"><i class="fas fa-plus"></i> {{ t('hw_add_host') }}</button>
+        <div class="toolbar-search"><i class="fas fa-magnifying-glass"></i><input v-model="search" :placeholder="t('host_search_ph')"></div>
+        <div class="spacer"></div>
+        <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="metricsLoading" @click="refreshMetrics" :title="t('hv_refresh')">
+          <i class="fas fa-rotate" :class="{'fa-spin':metricsLoading}"></i> {{ t('hv_refresh') }}
+        </button>
+      </div>
+      <div class="apple-card" style="padding:0;overflow-x:auto">
+        <table class="apple-table">
+          <thead><tr>
+            <th>{{ t('hmn_col_host') }}</th><th>{{ t('hmn_col_status') }}</th><th>{{ t('hmn_col_ip') }}</th>
+            <th>{{ t('hv_col_cpu') }}</th><th>{{ t('hv_col_mem') }}</th><th>{{ t('hv_col_disk') }}</th>
+            <th>{{ t('hv_col_load') }}</th><th>{{ t('hv_col_uptime') }}</th><th style="text-align:right">{{ t('hmn_col_ops') }}</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="h in filteredHosts" :key="h.id">
+              <td><strong style="cursor:pointer" @click="openDetail(h.id)">{{ h.name }}</strong><div class="muted" style="font-size:11px">{{ h.cluster_name }}</div></td>
+              <td><span class="apple-badge" :class="statusMeta(h.status).cls"><span class="dot"></span>{{ t(statusMeta(h.status).key) }}</span></td>
+              <td class="mono">{{ h.ip }}</td>
+              <td class="mono"><span :style="{color: hMetric(h)&&hMetric(h).reachable!==false ? utilColor(pctWidth(hMetric(h).cpu_usage_pct)) : ''}">{{ hMetric(h)&&hMetric(h).reachable!==false ? pctText(hMetric(h).cpu_usage_pct) : '—' }}</span></td>
+              <td class="mono"><span :style="{color: hMetric(h)&&hMetric(h).reachable!==false ? utilColor(pctWidth(hMetric(h).mem_usage_pct)) : ''}">{{ hMetric(h)&&hMetric(h).reachable!==false ? pctText(hMetric(h).mem_usage_pct) : '—' }}</span></td>
+              <td class="mono muted">{{ hMetric(h)&&hMetric(h).reachable!==false ? pctText(hMetric(h).root_disk_pct) : '—' }}</td>
+              <td class="mono muted">{{ hMetric(h)&&hMetric(h).reachable!==false ? (hMetric(h).load1!=null?hMetric(h).load1:'—') : '—' }}</td>
+              <td class="mono muted" style="font-size:12px">{{ hMetric(h)&&hMetric(h).reachable!==false ? uptimeText(hMetric(h).uptime_sec) : '—' }}</td>
+              <td style="text-align:right;white-space:nowrap">
+                <button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openDetail(h.id)" :title="t('hv_open_detail')"><i class="fas fa-circle-info"></i></button>
+                <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="maintBusy===h.id" @click="toggleMaintenance(h)">
+                  <i v-if="maintBusy===h.id" class="fas fa-spinner fa-spin"></i>
+                  <i v-else :class="h.status==='maintenance'?'fas fa-play':'fas fa-wrench'"></i>
+                  {{ h.status==='maintenance' ? t('host_exit_maint') : t('host_enter_maint') }}
+                </button>
+              </td>
+            </tr>
+            <tr v-if="!filteredHosts.length"><td colspan="9" class="muted" style="text-align:center;padding:18px">{{ t('hv_no_hosts') }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <!-- ====================== ③ 主机网络（真实网卡 + DHCP/静态切换，一行一台）====================== -->
+    <template v-else-if="props.tab==='network' && !showDetailView">
+      <div class="hmn-intro">
+        <div class="hmn-intro-title"><i class="fas fa-network-wired" :style="{color:C.teal}"></i> {{ t('hv_net_title') }}</div>
+        <div class="muted">{{ t('hv_net_intro') }}</div>
       </div>
       <div class="apple-card hmn-cluster-card" v-for="g in clusterGroups" :key="g.cluster_id">
         <div class="hmn-cluster-head">
           <div><i class="fas fa-layer-group" :style="{color:C.indigo}"></i> <strong>{{ g.cluster_name }}</strong>
             <span class="muted" style="margin-left:8px;font-weight:400">· {{ g.hosts.length }} {{ t('hmn_hosts_n') }}</span></div>
-          <button class="apple-btn apple-btn--secondary apple-btn--sm" @click="openBatch(g)"><i class="fas fa-sliders"></i> {{ t('hmn_batch') }}</button>
         </div>
         <div style="overflow-x:auto">
           <table class="apple-table hmn-table">
             <thead><tr>
               <th>{{ t('hmn_col_host') }}</th><th>{{ t('hmn_col_status') }}</th><th>{{ t('hmn_col_ip') }}</th>
-              <th>{{ t('hmn_col_netmask') }}</th><th>{{ t('hmn_col_gateway') }}</th><th>{{ t('hmn_col_vlan') }}</th>
-              <th>{{ t('hmn_col_nic') }}</th><th style="text-align:right">{{ t('hmn_col_ops') }}</th>
+              <th style="text-align:right">{{ t('hmn_col_ops') }}</th>
             </tr></thead>
             <tbody>
               <tr v-for="h in g.hosts" :key="h.id">
                 <td><strong>{{ h.name }}</strong></td>
                 <td><span class="apple-badge" :class="statusMeta(h.status).cls"><span class="dot"></span>{{ t(statusMeta(h.status).key) }}</span></td>
                 <td class="mono">{{ h.ip }}</td>
-                <td class="mono muted">{{ h.netmask || '—' }}</td>
-                <td class="mono muted">{{ h.gateway || '—' }}</td>
-                <td class="mono"><span class="hw-chip">VLAN {{ h.mgmt_vlan ?? '—' }}</span></td>
-                <td class="mono muted">{{ h.mgmt_nic || '—' }}</td>
-                <td style="text-align:right"><button class="apple-btn apple-btn--ghost apple-btn--sm" @click="openNetEdit(h)"><i class="fas fa-pen"></i> {{ t('hmn_edit_host') }}</button></td>
+                <td style="text-align:right"><button class="apple-btn apple-btn--secondary apple-btn--sm" @click="openNetEdit(h)"><i class="fas fa-ethernet"></i> {{ t('hv_open_net') }}</button></td>
               </tr>
-              <tr v-if="!g.hosts.length"><td colspan="8" class="muted" style="text-align:center;padding:16px">{{ t('hmn_no_hosts') }}</td></tr>
+              <tr v-if="!g.hosts.length"><td colspan="4" class="muted" style="text-align:center;padding:16px">{{ t('hmn_no_hosts') }}</td></tr>
             </tbody>
           </table>
         </div>

@@ -22,7 +22,29 @@ const state = reactive({
   vms: [],
   loaded: false,
   loading: false,
+  // 实时指标（来自 GET /hosts/metrics 真实采集，键为 host id 字符串）。
+  // 形如 { "21": {reachable:true, cpu_usage_pct, mem_usage_pct, ...} }
+  metrics: {},
+  metricsLoading: false,
 })
+
+// ---- 拉取全量主机实时指标（真实数据，无 mock）----
+// 调用后端批量端点 GET /hosts/metrics（并发 SSH 采集，不可达主机返回 {reachable:false}）。
+async function fetchHostMetrics() {
+  state.metricsLoading = true
+  try {
+    // api() 成功时解包 {data:{...}} → 直接得到 {hostId: metrics} 映射。
+    const res = await api('/hosts/metrics')
+    if (res && !res.error && typeof res === 'object') {
+      state.metrics = res
+    }
+  } catch (e) {
+    // 静默失败仅清空指标（卡片显示「—」），不伪造数据。
+  } finally {
+    state.metricsLoading = false
+  }
+  return state.metrics
+}
 
 // ---- 拉取全量层级数据 ----
 async function fetchAll(force) {
@@ -83,6 +105,8 @@ const hostStats = computed(() =>
     const hostVMs = state.vms.filter((v) => v.host_id === h.id)
     const cl = state.clusters.find((c) => c.id === h.cluster_id)
     const dc = state.datacenters.find((d) => d.id === h.datacenter_id)
+    // 合入真实实时指标（若已采集到）。metrics 键为 host id 字符串。
+    const m = state.metrics[String(h.id)] || null
     return {
       ...h,
       cluster_name: cl ? cl.name : '未分配',
@@ -90,6 +114,9 @@ const hostStats = computed(() =>
       vm_count: hostVMs.length,
       vm_running: hostVMs.filter((v) => v.status === 'running').length,
       vms_list: hostVMs,
+      // 真实指标（来自后端 SSH 采集）；未采集到或不可达时 metrics=null / reachable:false。
+      metrics: m,
+      metrics_reachable: m ? m.reachable !== false : null,
     }
   })
 )
@@ -531,6 +558,7 @@ function navigateTo(type, id) {
 window.cnfTopology = {
   state,
   fetchAll,
+  fetchHostMetrics,
   datacenterStats, clusterStats, hostStats, topologyTree,
   addHostToCluster, precheckHostSSH, precheckHostStreamSSH, onboardHostSSH, onboardHostStreamSSH, getOfflinePackages, getMigrationTargets, migrateVm,
   createDatacenter, updateDatacenter, createCluster, updateCluster,

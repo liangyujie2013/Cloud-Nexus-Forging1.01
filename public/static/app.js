@@ -44,7 +44,8 @@ const App = {
       ] },
       { key: 'hosts', icon: 'fa-server', label: 'nav_mod_hosts', children: [
         { key: 'list', label: 'nav_hosts_list' },
-        { key: 'detail', label: 'nav_hosts_detail' },
+        { key: 'management', label: 'nav_hosts_management' },
+        { key: 'network', label: 'nav_hosts_network' },
       ] },
       { key: 'compute', icon: 'fa-desktop', label: 'nav_mod_compute', children: [
         { key: 'vms', label: 'nav_compute_vms' },
