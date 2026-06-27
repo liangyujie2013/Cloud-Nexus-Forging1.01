@@ -10,7 +10,7 @@ const t = window.t
 
 // ---------------------------- 通用：圆环进度 ----------------------------
 const RingProgress = {
-  props: { value: { type: Number, default: 0 }, size: { type: Number, default: 88 }, color: { type: String, default: '#007AFF' }, label: String },
+  props: { value: { type: Number, default: 0 }, size: { type: Number, default: 88 }, color: { type: String, default: '#005A9C' }, label: String },
   template: `
     <div class="ring-wrap">
       <svg class="apple-ring" :width="size" :height="size">
@@ -51,7 +51,7 @@ const DashboardView = {
     let chart = null
     const history = []
 
-    const cpuColor = (v) => (v > 80 ? '#FF3B30' : v > 60 ? '#FF9500' : '#34C759')
+    const cpuColor = (v) => (v > 80 ? '#E53E3E' : v > 60 ? '#F5A623' : '#00A859')
     const pct = (a, b) => (b ? Math.min(100, Math.round((a / b) * 100)) : 0)
 
     // P1：GPU 概要按「分配状态」统计（已分配/可分配），比单纯 util>5 更贴近企业语义
@@ -200,7 +200,7 @@ const DashboardView = {
       if (ctx && window.Chart && !chart) {
         chart = new Chart(ctx, {
           type: 'line',
-          data: { labels: history.map((_, i) => i), datasets: [{ data: [...history], borderColor: '#0A84FF', backgroundColor: 'rgba(10,132,255,0.12)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
+          data: { labels: history.map((_, i) => i), datasets: [{ data: [...history], borderColor: '#005A9C', backgroundColor: 'rgba(0,90,156,0.12)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
           options: { responsive: true, maintainAspectRatio: false, animation: false,
             scales: { y: { min: 0, max: 100, ticks: { callback: (v) => v + '%' } }, x: { display: false } },
             plugins: { legend: { display: false } } },

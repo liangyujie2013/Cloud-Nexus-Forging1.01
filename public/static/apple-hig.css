@@ -1,67 +1,112 @@
 /* ============================================================================
- * CNFv1.0 Apple HIG 设计系统
- * 严格遵循 Apple Human Interface Guidelines：系统色彩、毛玻璃、动效、深色模式
+ * Cloud Nexus Forging (CNF) 设计系统 · Nutanix Prism 视觉风格
+ * 设计语言：Nutanix 蓝绿企业级配色 + 8px 栅格 + 极简卡片/表格 + 线性图标
+ * 架构说明：本系统由 CSS 变量驱动；下方 --nv-* 为 Nutanix 设计 Token 命名空间，
+ *           原有 --color-* / --bg-* / --radius-* / --shadow-* 变量被重定义为
+ *           Nutanix 取值并指向 --nv-* Token，使全站外观随之迁移，
+ *           而 JS/模板/类名/品牌术语完全不变。
  * 同时用于 Vue 工程与在线原型
  * ============================================================================ */
 
 :root {
-  /* ---- Apple 系统色彩（精确匹配）---- */
-  --color-blue:        #007AFF;
-  --color-blue-dark:   #0051D5;
-  --color-green:       #34C759;
-  --color-indigo:      #5856D6;
-  --color-orange:      #FF9500;
-  --color-pink:        #FF2D55;
-  --color-purple:      #AF52DE;
-  --color-red:         #FF3B30;
-  --color-teal:        #5AC8FA;
-  --color-yellow:      #FFCC00;
-  --color-gray:        #8E8E93;
+  /* ======================================================================
+   * Nutanix Prism Design Token（--nv-* 命名空间，单一可信来源）
+   * ==================================================================== */
+  /* 品牌色 */
+  --nv-primary:        #005A9C;   /* Nutanix 蓝（主品牌/动作） */
+  --nv-primary-dark:   #004478;   /* 蓝-按下/悬停 */
+  --nv-primary-light:  #E6F0FA;   /* 蓝-浅底（选中态/标签背景） */
+  --nv-accent:         #00A859;   /* Nutanix 绿（强调/成功） */
+  --nv-accent-dark:    #008547;
+  --nv-accent-light:   #E6F7EE;
+
+  /* 中性色 */
+  --nv-bg:             #F5F7FA;   /* 页面背景 */
+  --nv-surface:        #FFFFFF;   /* 卡片/容器表面 */
+  --nv-text-primary:   #1A1A1A;   /* 主文本 */
+  --nv-text-secondary: #666666;   /* 次要文本 */
+  --nv-text-muted:     #999999;   /* 辅助/占位文本 */
+  --nv-border:         #E0E4E8;   /* 边框/分割线 */
+
+  /* 状态色 */
+  --nv-success:        #00A859;
+  --nv-warning:        #F5A623;
+  --nv-danger:         #E53E3E;
+  --nv-info:           #005A9C;
+
+  /* 间距（8px 基准栅格） */
+  --nv-space-1: 8px;  --nv-space-2: 16px; --nv-space-3: 24px;
+  --nv-space-4: 32px; --nv-space-5: 48px;
+
+  /* 圆角 */
+  --nv-radius-sm: 4px;
+  --nv-radius-md: 6px;
+  --nv-radius-lg: 8px;
+
+  /* 阴影 */
+  --nv-shadow-card:     0 2px 8px rgba(0,0,0,0.06);
+  --nv-shadow-dropdown: 0 4px 16px rgba(0,0,0,0.10);
+
+  /* ======================================================================
+   * 兼容层：原有变量重定向到 Nutanix Token（让全站既有样式自动迁移）
+   * ==================================================================== */
+  /* ---- 状态/语义色彩（映射到 Nutanix 蓝绿主题）---- */
+  --color-blue:        var(--nv-primary);
+  --color-blue-dark:   var(--nv-primary-dark);
+  --color-green:       var(--nv-accent);
+  --color-indigo:      #4A6FA5;   /* 蓝紫 → 偏蓝的次级蓝 */
+  --color-orange:      var(--nv-warning);
+  --color-pink:        #C2185B;
+  --color-purple:      #6B4FA0;
+  --color-red:         var(--nv-danger);
+  --color-teal:        #1E88A8;
+  --color-yellow:      #F5A623;
+  --color-gray:        #8A8F98;
 
   /* ---- 背景层次 ---- */
-  --bg-primary:        #FFFFFF;
-  --bg-secondary:      #F2F2F7;
-  --bg-tertiary:       #FFFFFF;
-  --bg-grouped:        #F2F2F7;
-  --bg-elevated:       #FFFFFF;
+  --bg-primary:        var(--nv-surface);
+  --bg-secondary:      var(--nv-bg);
+  --bg-tertiary:       var(--nv-surface);
+  --bg-grouped:        var(--nv-bg);
+  --bg-elevated:       var(--nv-surface);
 
   /* ---- 文本 ---- */
-  --text-primary:      rgba(0,0,0,0.88);
-  --text-secondary:    rgba(60,60,67,0.60);
-  --text-tertiary:     rgba(60,60,67,0.30);
+  --text-primary:      var(--nv-text-primary);
+  --text-secondary:    var(--nv-text-secondary);
+  --text-tertiary:     var(--nv-text-muted);
   --text-on-color:     #FFFFFF;
 
   /* ---- 分隔线 ---- */
-  --separator:         rgba(60,60,67,0.18);
-  --separator-opaque:  #C6C6C8;
+  --separator:         var(--nv-border);
+  --separator-opaque:  var(--nv-border);
 
-  /* ---- 毛玻璃 ---- */
-  --glass-bg:          rgba(255,255,255,0.78);
-  --glass-blur:        saturate(180%) blur(20px);
-  --glass-border:      rgba(255,255,255,0.30);
+  /* ---- 表面（替代毛玻璃：Nutanix 采用实心表面）---- */
+  --glass-bg:          var(--nv-surface);
+  --glass-blur:        none;
+  --glass-border:      var(--nv-border);
 
   /* ---- 圆角 ---- */
-  --radius-sm:  6px;
-  --radius-md:  10px;
-  --radius-lg:  14px;
-  --radius-xl:  20px;
+  --radius-sm:  var(--nv-radius-sm);   /* 4px */
+  --radius-md:  var(--nv-radius-md);   /* 6px */
+  --radius-lg:  var(--nv-radius-lg);   /* 8px */
+  --radius-xl:  var(--nv-radius-lg);   /* 模态等大圆角统一为 8px */
   --radius-pill: 980px;
 
-  /* ---- 阴影 ---- */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,0.16);
+  /* ---- 阴影（Nutanix 轻量阴影）---- */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: var(--nv-shadow-card);
+  --shadow-lg: var(--nv-shadow-dropdown);
 
   /* ---- 动效 ---- */
-  --ease-spring:    cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-spring:    cubic-bezier(0.34, 1.20, 0.64, 1);
   --ease-standard:  cubic-bezier(0.4, 0.0, 0.2, 1);
   --duration-fast:   150ms;
   --duration-normal: 250ms;
   --duration-slow:   400ms;
 
-  /* ---- 字体 ---- */
-  --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-                 "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* ---- 字体（Nutanix 无衬线优先 Inter / SF Pro Display）---- */
+  --font-system: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+                 "Segoe UI", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
   /* ---- 间距栅格（8pt）---- */
@@ -72,67 +117,68 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg-primary:        #1C1C1E;
-    --bg-secondary:      #2C2C2E;
-    --bg-tertiary:       #3A3A3C;
-    --bg-grouped:        #000000;
-    --bg-elevated:       #2C2C2E;
+    --bg-primary:        #1B2A38;
+    --bg-secondary:      #16222E;
+    --bg-tertiary:       #22343F;
+    --bg-grouped:        #0F1A24;
+    --bg-elevated:       #1B2A38;
 
     --text-primary:      rgba(255,255,255,0.92);
-    --text-secondary:    rgba(235,235,245,0.60);
-    --text-tertiary:     rgba(235,235,245,0.30);
+    --text-secondary:    rgba(220,228,235,0.62);
+    --text-tertiary:     rgba(220,228,235,0.34);
 
-    --separator:         rgba(84,84,88,0.65);
-    --separator-opaque:  #38383A;
+    --separator:         rgba(120,140,160,0.28);
+    --separator-opaque:  #2E4254;
 
-    --glass-bg:          rgba(28,28,30,0.78);
-    --glass-border:      rgba(255,255,255,0.10);
+    --glass-bg:          #1B2A38;
+    --glass-blur:        none;
+    --glass-border:      rgba(120,140,160,0.28);
 
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.40);
-    --shadow-md: 0 4px 16px rgba(0,0,0,0.50);
-    --shadow-lg: 0 12px 40px rgba(0,0,0,0.60);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.40);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.45);
+    --shadow-lg: 0 4px 16px rgba(0,0,0,0.55);
   }
 }
 
 /* 手动主题（覆盖系统偏好）：三档外观 light / dim / dark */
 
-/* 浅色（白色背景）— 显式声明，便于从其他主题切回 */
+/* 浅色（Nutanix 浅灰背景）— 显式声明，便于从其他主题切回 */
 [data-theme="light"] {
-  --bg-primary: #FFFFFF; --bg-secondary: #F2F2F7; --bg-tertiary: #FFFFFF;
-  --bg-grouped: #F2F2F7; --bg-elevated: #FFFFFF;
-  --text-primary: rgba(0,0,0,0.88); --text-secondary: rgba(60,60,67,0.60);
-  --text-tertiary: rgba(60,60,67,0.30);
-  --separator: rgba(60,60,67,0.18); --separator-opaque: #C6C6C8;
-  --glass-bg: rgba(255,255,255,0.78); --glass-border: rgba(255,255,255,0.30);
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,0.16);
+  --bg-primary: #FFFFFF; --bg-secondary: #F5F7FA; --bg-tertiary: #FFFFFF;
+  --bg-grouped: #F5F7FA; --bg-elevated: #FFFFFF;
+  --text-primary: #1A1A1A; --text-secondary: #666666;
+  --text-tertiary: #999999;
+  --separator: #E0E4E8; --separator-opaque: #E0E4E8;
+  --glass-bg: #FFFFFF; --glass-blur: none; --glass-border: #E0E4E8;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.10);
 }
 
-/* 深灰（GitHub Dim 风格的中性深灰，护眼，对比柔和）*/
+/* 深灰（Nutanix 深蓝灰，护眼，对比柔和）*/
 [data-theme="dim"] {
-  --bg-primary: #22272E; --bg-secondary: #2D333B; --bg-tertiary: #373E47;
-  --bg-grouped: #1C2128; --bg-elevated: #2D333B;
-  --text-primary: rgba(255,255,255,0.90); --text-secondary: rgba(205,217,229,0.62);
-  --text-tertiary: rgba(205,217,229,0.34);
-  --separator: rgba(139,148,158,0.30); --separator-opaque: #444C56;
-  --glass-bg: rgba(34,39,46,0.80); --glass-border: rgba(255,255,255,0.08);
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.30);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.40);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,0.50);
+  --bg-primary: #1F2D3A; --bg-secondary: #18242F; --bg-tertiary: #28394A;
+  --bg-grouped: #14202B; --bg-elevated: #1F2D3A;
+  --text-primary: rgba(255,255,255,0.90); --text-secondary: rgba(205,217,229,0.64);
+  --text-tertiary: rgba(205,217,229,0.36);
+  --separator: rgba(120,140,160,0.30); --separator-opaque: #314556;
+  --glass-bg: #1F2D3A; --glass-blur: none; --glass-border: rgba(120,140,160,0.28);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.42);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.50);
 }
 
-/* 纯黑（OLED 全黑背景，最高对比）*/
+/* 纯黑（深蓝黑背景，最高对比）*/
 [data-theme="dark"] {
-  --bg-primary: #1C1C1E; --bg-secondary: #2C2C2E; --bg-tertiary: #3A3A3C;
-  --bg-grouped: #000000; --bg-elevated: #1C1C1E;
-  --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(235,235,245,0.60);
-  --text-tertiary: rgba(235,235,245,0.30);
-  --separator: rgba(84,84,88,0.65); --separator-opaque: #38383A;
-  --glass-bg: rgba(28,28,30,0.82); --glass-border: rgba(255,255,255,0.10);
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.40);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.50);
-  --shadow-lg: 0 12px 40px rgba(0,0,0,0.60);
+  --bg-primary: #14202B; --bg-secondary: #0F1A24; --bg-tertiary: #1F2D3A;
+  --bg-grouped: #0A1219; --bg-elevated: #14202B;
+  --text-primary: rgba(255,255,255,0.92); --text-secondary: rgba(220,228,235,0.62);
+  --text-tertiary: rgba(220,228,235,0.34);
+  --separator: rgba(120,140,160,0.26); --separator-opaque: #2E4254;
+  --glass-bg: #14202B; --glass-blur: none; --glass-border: rgba(120,140,160,0.26);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.40);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.45);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.55);
 }
 
 /* 主题切换平滑过渡 */
@@ -161,41 +207,51 @@ html, body {
 .apple-btn {
   display: inline-flex; align-items: center; justify-content: center;
   gap: var(--space-2);
-  font: 600 15px/1 var(--font-system);
-  padding: 10px 18px;
-  border: none; border-radius: var(--radius-md);
+  font: 600 14px/1 var(--font-system);
+  padding: 9px 16px;
+  border: none; border-radius: var(--nv-radius-md);
   cursor: pointer;
-  transition: transform var(--duration-fast) var(--ease-spring),
-              background var(--duration-fast) var(--ease-standard),
-              box-shadow var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-fast) var(--ease-standard),
+              box-shadow var(--duration-fast) var(--ease-standard),
+              border-color var(--duration-fast) var(--ease-standard),
+              opacity var(--duration-fast) var(--ease-standard);
   user-select: none;
 }
-.apple-btn:active { transform: scale(0.96); }
-.apple-btn--primary { background: var(--color-blue); color: #fff; }
-.apple-btn--primary:hover { background: var(--color-blue-dark); }
-.apple-btn--secondary { background: var(--bg-tertiary); color: var(--color-blue);
-  box-shadow: inset 0 0 0 1px var(--separator); }
-.apple-btn--danger { background: var(--color-red); color: #fff; }
-.apple-btn--ghost { background: transparent; color: var(--color-blue); }
+.apple-btn:active { transform: translateY(0.5px); }
+.apple-btn--sm { font-size: 13px; padding: 6px 12px; }
+/* 主按钮：Nutanix 蓝填充 */
+.apple-btn--primary { background: var(--nv-primary); color: #fff; }
+.apple-btn--primary:hover { background: var(--nv-primary-dark); }
+/* 次按钮：边框样式（白底 + 1px 边框 + 蓝字） */
+.apple-btn--secondary { background: var(--nv-surface); color: var(--nv-primary);
+  box-shadow: inset 0 0 0 1px var(--nv-border); }
+.apple-btn--secondary:hover { background: var(--nv-primary-light);
+  box-shadow: inset 0 0 0 1px var(--nv-primary); }
+.apple-btn--danger { background: var(--nv-danger); color: #fff; }
+.apple-btn--danger:hover { filter: brightness(0.93); }
+/* 文本按钮 */
+.apple-btn--ghost { background: transparent; color: var(--nv-primary); }
+.apple-btn--ghost:hover { background: var(--nv-primary-light); }
 .apple-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
 /* ============================================================================
  * 卡片 AppleCard（含毛玻璃变体）
  * ========================================================================== */
 .apple-card {
-  background: var(--bg-elevated);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  background: var(--nv-surface);
+  border: 1px solid var(--nv-border);
+  border-radius: var(--nv-radius-lg);
+  box-shadow: var(--nv-shadow-card);
   padding: var(--space-6);
-  transition: transform var(--duration-normal) var(--ease-spring),
-              box-shadow var(--duration-normal) var(--ease-standard);
+  transition: box-shadow var(--duration-normal) var(--ease-standard),
+              border-color var(--duration-normal) var(--ease-standard);
 }
-.apple-card--hover:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.apple-card--hover:hover { box-shadow: var(--nv-shadow-dropdown);
+  border-color: var(--nv-primary-light); }
+/* Nutanix 采用实心表面，毛玻璃变体退化为标准卡片 */
 .apple-card--glass {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
+  background: var(--nv-surface);
+  border: 1px solid var(--nv-border);
 }
 
 /* ============================================================================
@@ -203,17 +259,18 @@ html, body {
  * ========================================================================== */
 .apple-input, .apple-select {
   width: 100%;
-  font: 15px var(--font-system);
+  font: 14px var(--font-system);
   color: var(--text-primary);
-  background: var(--bg-secondary);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
+  background: var(--nv-surface);
+  border: 1px solid var(--nv-border);
+  border-radius: var(--nv-radius-md);
+  padding: 9px 12px;
   transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
+.apple-input::placeholder { color: var(--nv-text-muted); }
 .apple-input:focus, .apple-select:focus {
-  outline: none; border-color: var(--color-blue);
-  box-shadow: 0 0 0 4px rgba(0,122,255,0.18);
+  outline: none; border-color: var(--nv-primary);
+  box-shadow: 0 0 0 3px rgba(0,90,156,0.15);
 }
 
 /* ============================================================================
@@ -232,7 +289,7 @@ html, body {
   box-shadow: 0 2px 4px rgba(0,0,0,0.25);
   transition: transform var(--duration-normal) var(--ease-spring);
 }
-.apple-toggle input:checked + .track { background: var(--color-green); }
+.apple-toggle input:checked + .track { background: var(--nv-accent); }
 .apple-toggle input:checked + .track .thumb { transform: translateX(20px); }
 
 /* ============================================================================
@@ -254,46 +311,48 @@ html, body {
 .apple-table { width: 100%; border-collapse: separate; border-spacing: 0;
   font: 14px var(--font-system); }
 .apple-table thead th {
-  text-align: left; font-weight: 600; color: var(--text-secondary);
-  padding: 12px 16px; font-size: 13px; text-transform: uppercase;
-  letter-spacing: 0.04em; border-bottom: 1px solid var(--separator);
+  text-align: left; font-weight: 600; color: var(--nv-text-secondary);
+  padding: 12px 16px; font-size: 13px;
+  background: var(--nv-bg);
+  border-bottom: 1px solid var(--nv-border);
 }
-.apple-table tbody td { padding: 14px 16px; border-bottom: 1px solid var(--separator);
+.apple-table tbody td { padding: 14px 16px; border-bottom: 1px solid var(--nv-border);
   color: var(--text-primary); }
 .apple-table tbody tr { transition: background var(--duration-fast); }
-.apple-table tbody tr:hover { background: var(--bg-secondary); }
+.apple-table tbody tr:hover { background: var(--nv-primary-light); }
 
 /* ============================================================================
  * 徽章 AppleBadge（状态指示）
  * ========================================================================== */
 .apple-badge { display: inline-flex; align-items: center; gap: 6px;
-  font: 600 12px var(--font-system); padding: 4px 10px; border-radius: var(--radius-pill); }
+  font: 600 12px var(--font-system); padding: 3px 10px; border-radius: var(--radius-pill);
+  line-height: 1.5; }
 .apple-badge .dot { width: 7px; height: 7px; border-radius: 50%; }
-.apple-badge--running { background: rgba(52,199,89,0.15); color: var(--color-green); }
-.apple-badge--running .dot { background: var(--color-green); }
-.apple-badge--stopped { background: rgba(142,142,147,0.15); color: var(--color-gray); }
-.apple-badge--stopped .dot { background: var(--color-gray); }
-.apple-badge--error { background: rgba(255,59,48,0.15); color: var(--color-red); }
-.apple-badge--error .dot { background: var(--color-red); }
-.apple-badge--warning { background: rgba(255,149,0,0.15); color: var(--color-orange); }
-.apple-badge--warning .dot { background: var(--color-orange); }
+.apple-badge--running { background: var(--nv-accent-light); color: var(--nv-accent-dark); }
+.apple-badge--running .dot { background: var(--nv-accent); }
+.apple-badge--stopped { background: #EEF1F4; color: var(--nv-text-secondary); }
+.apple-badge--stopped .dot { background: var(--nv-text-muted); }
+.apple-badge--error { background: #FCE8E8; color: var(--nv-danger); }
+.apple-badge--error .dot { background: var(--nv-danger); }
+.apple-badge--warning { background: #FDF3E2; color: #C77C0E; }
+.apple-badge--warning .dot { background: var(--nv-warning); }
 
 /* ============================================================================
  * 模态 AppleModal
  * ========================================================================== */
 .apple-modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  position: fixed; inset: 0; background: rgba(26,26,26,0.45);
   display: flex; align-items: center; justify-content: center; z-index: 1000;
   animation: fadeIn var(--duration-normal) var(--ease-standard);
 }
 .apple-modal {
-  background: var(--bg-elevated); border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg); max-width: 90vw; max-height: 88vh; overflow: auto;
-  animation: modalIn var(--duration-normal) var(--ease-spring);
+  background: var(--nv-surface); border-radius: var(--nv-radius-lg);
+  border: 1px solid var(--nv-border);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.16); max-width: 90vw; max-height: 88vh; overflow: auto;
+  animation: modalIn var(--duration-normal) var(--ease-standard);
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes modalIn { from { opacity: 0; transform: scale(0.92) translateY(20px); }
+@keyframes modalIn { from { opacity: 0; transform: scale(0.97) translateY(12px); }
   to { opacity: 1; transform: scale(1) translateY(0); } }
 
 /* 滚动条美化 */
@@ -301,3 +360,16 @@ html, body {
 ::-webkit-scrollbar-thumb { background: var(--separator-opaque);
   border-radius: var(--radius-pill); border: 2px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+/* ============================================================================
+ * 图标规范（Nutanix 线性风格观感）
+ * 说明：图标库为 FontAwesome 6 Free（仅 solid 字形完整可用），故不替换字形类，
+ *      改为统一图标尺寸/字重/颜色，使其呈现轻量、克制的企业级线性观感。
+ * ========================================================================== */
+.fa, .fas, .far, .fab { font-weight: 500; }   /* 轻量化图标笔触观感 */
+/* 导航图标 20px */
+.nav-item i.fas, .nav-item i.far, .nav-item i.fa { font-size: 16px; }
+/* 按钮图标 16-18px，跟随按钮字号 */
+.apple-btn i { font-size: 0.95em; }
+/* 列表/表格图标统一 */
+.apple-table i { font-size: 14px; }

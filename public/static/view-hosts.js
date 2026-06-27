@@ -17,7 +17,7 @@ const toast = window.cnfToast
 const fmt = window.cnfFmtTime
 const store = window.cnfTopology
 
-const C = { blue: '#007AFF', green: '#34C759', orange: '#FF9500', red: '#FF3B30', indigo: '#5856D6', purple: '#AF52DE', teal: '#30B0C7', gray: '#8E8E93' }
+const C = { blue: '#005A9C', green: '#00A859', orange: '#F5A623', red: '#E53E3E', indigo: '#4A6FA5', purple: '#6B4FA0', teal: '#1E88A8', gray: '#8A8F98' }
 const bytesRate = (n) => {
   if (!n) return '0 B/s'
   const u = ['B/s', 'KB/s', 'MB/s', 'GB/s']; let i = 0; let v = n
@@ -1076,7 +1076,7 @@ const HostsView = {
       charts.mon = new Chart(el, {
         type: 'line',
         data: { labels: monHistory.labels.slice(), datasets: [
-          { label: 'CPU %', data: monHistory.cpu.slice(), borderColor: C.blue, backgroundColor: 'rgba(0,122,255,.12)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 0, spanGaps: true },
+          { label: 'CPU %', data: monHistory.cpu.slice(), borderColor: C.blue, backgroundColor: 'rgba(0,90,156,.12)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 0, spanGaps: true },
           { label: t('col_mem') + ' %', data: monHistory.mem.slice(), borderColor: C.indigo, backgroundColor: 'transparent', fill: false, tension: 0.4, borderWidth: 2, pointRadius: 0, spanGaps: true },
         ] },
         options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
