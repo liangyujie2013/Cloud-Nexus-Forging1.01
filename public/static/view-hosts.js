@@ -3,10 +3,10 @@
 //  独立一级模块。子标签：
 //    list      主机列表 —— 全集群主机卡片，实时 CPU/内存负载、维护模式切换
 //    detail    主机管理 / 网络 —— 按集群分组的管理网络表（IP/掩码/网关/VLAN/网卡），
-//              支持单台编辑与「集群级批量统一修改」；点击列表卡片则进入单台主机详情
+//              支持单台编辑；点击列表卡片则进入单台主机详情
 //              （概览 / 硬件 / HA 状态 / 监控 / 虚拟机）。
 //  数据：/hosts、/hosts/:id/hardware、/hosts/:id/ha-status、/hosts/:id/maintenance、
-//        /hosts/:id/network(PUT)、/clusters/:id/host-network(PUT 批量)
+//        /hosts/:id/network(PUT)
 //  时间统一走 window.cnfFmtTime（浏览器本地时区）。
 // =============================================================================
 (function () {
@@ -493,31 +493,6 @@ const HostsView = {
       } catch (err) { toast(t('op_failed'), 'error') } finally { swDlg.busy = false }
     }
 
-    // 集群级批量统一修改管理网络对话框
-    const batchDlg = reactive({ open: false, busy: false, cluster: null, form: {}, errors: {} })
-    const openBatch = (group) => {
-      batchDlg.cluster = group
-      batchDlg.form = { netmask: '', gateway: '', mgmt_vlan: '', mgmt_nic: '' }
-      batchDlg.errors = {}
-      batchDlg.open = true
-    }
-    const submitBatch = async () => {
-      const e = {}
-      if (batchDlg.form.netmask && !ipv4Re.test(batchDlg.form.netmask)) e.netmask = t('hmn_netmask_invalid')
-      if (batchDlg.form.gateway && !ipv4Re.test(batchDlg.form.gateway)) e.gateway = t('hmn_gateway_invalid')
-      const vlan = batchDlg.form.mgmt_vlan
-      if (vlan !== '' && (Number(vlan) < 0 || Number(vlan) > 4094)) e.mgmt_vlan = t('hmn_vlan_invalid')
-      batchDlg.errors = e
-      if (Object.keys(e).length) return
-      batchDlg.busy = true
-      try {
-        const res = await api('/clusters/' + batchDlg.cluster.cluster_id + '/host-network', { method: 'PUT', body: JSON.stringify(batchDlg.form) })
-        if (res && res.error) { toast(res.error, 'error'); return }
-        toast(res.message, 'success')
-        await store.fetchAll()
-        batchDlg.open = false
-      } catch (err) { toast(t('op_failed'), 'error') } finally { batchDlg.busy = false }
-    }
 
     // react to nav tab changes（列表/管理/网络三个独立视图）
     watch(() => props.tab, (nv) => {
@@ -853,7 +828,7 @@ const HostsView = {
       toggleMaintenance, maintBusy, blockDlg, gotoMigrate,
       hostCtx, onHostCtxAction, shellDlg, copyShellCmd,
       metricsLoading, refreshMetrics, hMetric, pctText, pctWidth, uptimeText,
-      clusterGroups, netDlg, openNetEdit, submitNet, pickNic, batchDlg, openBatch, submitBatch,
+      clusterGroups, netDlg, openNetEdit, submitNet, pickNic,
       swDlg, openSwitch, toggleUplink, submitSwitch, deleteSwitch, swSelectedHasMgmt,
       fwDlg, openFirewall, fwToggle, fwOpenPlatform, fwAddPort, fwRemovePort, reloadFirewall,
       fwBatch, openFwBatch, fwBatchCount, submitFwBatch,
@@ -1325,26 +1300,6 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" :disabled="swDlg.busy" @click="swDlg.open=false">{{ t('op_cancel') }}</button>
           <button class="apple-btn apple-btn--primary" :disabled="swDlg.busy || swDlg.loading || !!swDlg.loadError || !swDlg.freeNics.length" @click="submitSwitch"><i v-if="swDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-check"></i> {{ t('swd_create') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 集群级批量统一修改管理网络对话框 -->
-    <div v-if="batchDlg.open" class="modal-mask" @click.self="batchDlg.open=false">
-      <div class="modal-dialog">
-        <div class="modal-head"><i class="fas fa-sliders" :style="{color:C.indigo}"></i> {{ t('hmn_batch_title') }} <span class="muted" style="font-weight:400">· {{ batchDlg.cluster && batchDlg.cluster.cluster_name }}</span></div>
-        <div class="modal-body">
-          <div class="hosts-pick-hint" style="margin-bottom:14px"><i class="fas fa-circle-info"></i> {{ t('hmn_batch_hint') }}</div>
-          <div class="form-grid-2">
-            <div class="form-row"><label>{{ t('hmn_col_netmask') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('hmn_keep') }}</span></label><input v-model="batchDlg.form.netmask" :class="{invalid:batchDlg.errors.netmask}" placeholder="255.255.255.0"><div v-if="batchDlg.errors.netmask" class="form-err">{{ batchDlg.errors.netmask }}</div></div>
-            <div class="form-row"><label>{{ t('hmn_col_gateway') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('hmn_keep') }}</span></label><input v-model="batchDlg.form.gateway" :class="{invalid:batchDlg.errors.gateway}" placeholder="192.168.1.1"><div v-if="batchDlg.errors.gateway" class="form-err">{{ batchDlg.errors.gateway }}</div></div>
-            <div class="form-row"><label>{{ t('hmn_col_vlan') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('hmn_keep') }}</span></label><input type="number" min="0" max="4094" v-model="batchDlg.form.mgmt_vlan" :class="{invalid:batchDlg.errors.mgmt_vlan}" placeholder="10"><div v-if="batchDlg.errors.mgmt_vlan" class="form-err">{{ batchDlg.errors.mgmt_vlan }}</div></div>
-            <div class="form-row"><label>{{ t('hmn_col_nic') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('hmn_keep') }}</span></label><input v-model="batchDlg.form.mgmt_nic" placeholder="bond0"></div>
-          </div>
-        </div>
-        <div class="modal-foot">
-          <button class="apple-btn apple-btn--ghost" @click="batchDlg.open=false">{{ t('op_cancel') }}</button>
-          <button class="apple-btn apple-btn--primary" :disabled="batchDlg.busy" @click="submitBatch"><i v-if="batchDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
         </div>
       </div>
     </div>
