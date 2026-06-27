@@ -83,6 +83,10 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/hosts/firewall/batch", h.postFirewallBatch, h.Mw.RequirePermission("host.update"))
 	api.Get("/hosts/:id/firewall", h.getHostFirewall, h.Mw.RequirePermission("host.read"))
 	api.Post("/hosts/:id/firewall", h.postHostFirewall, h.Mw.RequirePermission("host.update"))
+	// 主机 SELinux：读状态(运行时+持久) / 设置模式(单机 + 多机批量)。批量静态段先注册。
+	api.Post("/hosts/selinux/batch", h.postSELinuxBatch, h.Mw.RequirePermission("host.update"))
+	api.Get("/hosts/:id/selinux", h.getHostSELinux, h.Mw.RequirePermission("host.read"))
+	api.Post("/hosts/:id/selinux", h.postHostSELinux, h.Mw.RequirePermission("host.update"))
 
 	// ---- 离线安装包仓库（自动部署 libvirt/KVM 时源不可用的兜底） ----
 	api.Get("/offline-packages", h.listOfflinePackages, h.Mw.RequirePermission("host.read"))
