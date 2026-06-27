@@ -165,3 +165,18 @@ func (h *Handlers) deleteAlertRule(c fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
+
+// listAuditLogs GET /audit-logs?limit=100 —— 真实操作审计（来自 audit_logs 表，按时间倒序）。
+//
+// 这是访问控制 → 操作审计页面的数据源，全部为平台真实记录的操作（登录/主机/虚机/网络等）。
+func (h *Handlers) listAuditLogs(c fiber.Ctx) error {
+	limit, _ := paramQueryInt(c, "limit")
+	if limit <= 0 {
+		limit = 100
+	}
+	logs, err := h.MySQL.ListAudit(c.Context(), limit)
+	if err != nil {
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"data": logs})
+}

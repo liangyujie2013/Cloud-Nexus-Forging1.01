@@ -43,18 +43,23 @@ func (r *Repository) ListAudit(ctx context.Context, limit int) ([]map[string]any
 	out := []map[string]any{}
 	for rows.Next() {
 		var (
-			id, resourceID   int
+			id               int
 			username, action string
 			resource, ip     string
 			detail           []byte
 			createdAt        any
 			uid              sql.NullInt64
+			resID            sql.NullInt64
 		)
 		if err := rows.Scan(&id, &uid, &username, &action, &resource,
-			&resourceID, &detail, &ip, &createdAt); err != nil {
+			&resID, &detail, &ip, &createdAt); err != nil {
 			return nil, err
 		}
 		userID := intPtr(uid)
+		var resourceID any
+		if resID.Valid {
+			resourceID = int(resID.Int64)
+		}
 		var d map[string]any
 		_ = scanJSON(detail, &d)
 		out = append(out, map[string]any{

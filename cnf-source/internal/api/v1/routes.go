@@ -45,6 +45,8 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/roles", h.createRole, h.Mw.RequirePermission("role.create"))
 	api.Put("/roles/:id", h.updateRole, h.Mw.RequirePermission("role.update"))
 	api.Delete("/roles/:id", h.deleteRole, h.Mw.RequirePermission("role.delete"))
+	// 操作审计：真实记录的平台操作日志（登录/主机/虚机/网络等），按时间倒序。
+	api.Get("/audit-logs", h.listAuditLogs, h.Mw.RequirePermission("user.read"))
 
 	// ---- 数据中心（RBAC: datacenter.*） ----
 	api.Get("/datacenters", h.listDatacenters, h.Mw.RequirePermission("datacenter.read"))
