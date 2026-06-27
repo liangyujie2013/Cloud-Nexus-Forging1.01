@@ -3,11 +3,109 @@ package v1
 import (
 	"context"
 	"errors"
+	"strconv"
+	"sync"
+	"time"
 
 	"github.com/cnf/cnfv1/internal/hostops"
 	"github.com/cnf/cnfv1/internal/repo/mysql"
 	"github.com/gofiber/fiber/v3"
 )
+
+// getHostMetrics GET /hosts/:id/metrics —— 单主机实时性能指标（CPU%/内存/负载/磁盘）。
+//
+// 真实采集（两次 /proc/stat 采样算 CPU 占用、free -m、loadavg、df），用于详情/监控刷新。
+func (h *Handlers) getHostMetrics(c fiber.Ctx) error {
+	id, err := paramInt(c, "id")
+	if err != nil {
+		return badRequest(c, "id 非法")
+	}
+	cli, err := h.dialHost(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, mysql.ErrNoCredential) {
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"data": fiber.Map{"reachable": false}, "code": "NO_CREDENTIAL",
+				"error": "该主机未存储 SSH 凭据，无法采集性能指标。请更新凭据或重新纳管。",
+			})
+		}
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"data": fiber.Map{"reachable": false}, "code": "SSH_UNREACHABLE", "error": err.Error(),
+		})
+	}
+	defer cli.Close()
+
+	m, err := hostops.CollectLiveMetrics(cli)
+	if err != nil {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"data": fiber.Map{"reachable": false}, "code": "COLLECT_FAILED", "error": err.Error(),
+		})
+	}
+	return c.JSON(fiber.Map{"data": m})
+}
+
+// getHostsMetrics GET /hosts/metrics —— 批量实时指标（列表卡片用），并发采集 + 整体超时。
+//
+// 返回 map：host_id(string) → LiveMetrics。无凭据/不可达的主机以 {reachable:false} 表示，
+// 绝不伪造数据；前端据此显示「—」而非 NaN。
+func (h *Handlers) getHostsMetrics(c fiber.Ctx) error {
+	hosts, err := h.Repo.ListHosts(c.Context(), 0)
+	if err != nil {
+		return serverError(c, err)
+	}
+
+	results := make(map[string]any)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8) // 限制并发，避免一次性大量 SSH
+
+	// 整体超时：列表刷新不应被慢主机拖死。
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+
+	for _, host := range hosts {
+		hid := host.ID
+		// 仅对有凭据的主机尝试采集
+		if !h.hostHasCredential(c.Context(), hid) {
+			results[itoa(hid)] = fiber.Map{"reachable": false, "code": "NO_CREDENTIAL"}
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				mu.Lock()
+				results[itoa(hid)] = fiber.Map{"reachable": false, "code": "TIMEOUT"}
+				mu.Unlock()
+				return
+			}
+			cli, derr := h.dialHost(ctx, hid)
+			if derr != nil {
+				mu.Lock()
+				results[itoa(hid)] = fiber.Map{"reachable": false, "code": "SSH_UNREACHABLE"}
+				mu.Unlock()
+				return
+			}
+			defer cli.Close()
+			m, merr := hostops.CollectLiveMetrics(cli)
+			mu.Lock()
+			if merr != nil {
+				results[itoa(hid)] = fiber.Map{"reachable": false, "code": "COLLECT_FAILED"}
+			} else {
+				results[itoa(hid)] = m
+			}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return c.JSON(fiber.Map{"data": results})
+}
+
+func itoa(i int) string {
+	return strconv.Itoa(i)
+}
 
 // getHostStatus GET /hosts/:id/status —— 通过存储的 SSH 凭据实时采集主机当前状态。
 //

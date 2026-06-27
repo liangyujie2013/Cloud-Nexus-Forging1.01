@@ -62,6 +62,8 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 
 	// ---- 主机（RBAC: host.*；含纳管 onboarding） ----
 	api.Get("/hosts", h.listHosts, h.Mw.RequirePermission("host.read"))
+	// 批量实时指标（列表卡片用）——静态段，置于 /hosts/:id 之前确保不被当作 :id。
+	api.Get("/hosts/metrics", h.getHostsMetrics, h.Mw.RequirePermission("host.read"))
 	api.Get("/hosts/:id", h.getHost, h.Mw.RequirePermission("host.read"))
 	api.Get("/hosts/:id/hardware", h.getHostHardware, h.Mw.RequirePermission("host.read"))
 	api.Post("/hosts", h.createHost, h.Mw.RequirePermission("host.create"))
@@ -72,6 +74,7 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/hosts/:id/enable-tcp", h.enableHostTCP, h.Mw.RequirePermission("host.update"))
 	// ---- 主机运维：实时状态 / 监控 / 防火墙 / SELinux / SSH 端口 / 改密码 ----
 	api.Get("/hosts/:id/status", h.getHostStatus, h.Mw.RequirePermission("host.read"))
+	api.Get("/hosts/:id/metrics", h.getHostMetrics, h.Mw.RequirePermission("host.read"))
 	// 主机网络：真实读取网卡（名称/MAC/UUID/模式/IP/掩码/网关）+ DHCP↔静态切换写配置
 	api.Get("/hosts/:id/network", h.getHostNetwork, h.Mw.RequirePermission("host.read"))
 	api.Put("/hosts/:id/network", h.updateHostNetwork, h.Mw.RequirePermission("host.update"))
