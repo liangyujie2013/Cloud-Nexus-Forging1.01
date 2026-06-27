@@ -398,6 +398,101 @@ const HostsView = {
       } catch (err) { toast(t('op_failed'), 'error') } finally { netDlg.busy = false }
     }
 
+    // ============================================================
+    //  第4点 · 标准交换机（Linux Bridge + Bond）对话框
+    //  数据源：GET/POST/DELETE /hosts/:id/switches（后端 nmcli 真实实现）
+    //  - 图形化网卡多选（点击切换上联口）
+    //  - Bond 模式下拉，默认 active-backup（后端返回 default 标志）
+    //  - 管理网卡护栏：选中 is_mgmt 网卡需勾选 ack_mgmt_risk
+    // ============================================================
+    const swDlg = reactive({
+      open: false, busy: false, loading: false, host: null,
+      loadError: '', reachable: true, hasNm: true, mgmtDev: '',
+      switches: [], freeNics: [], bondModes: [], warnings: [],
+      selUplinks: [], ackMgmt: false,
+      form: { name: 'br0', bondMode: 'active-backup', ipMode: 'none', ipv4: '', prefix: 24, gateway: '', dns: '' },
+      errors: {},
+    })
+    const swSelectedHasMgmt = computed(() =>
+      swDlg.selUplinks.some((dev) => { const n = swDlg.freeNics.find((x) => x.device === dev); return n && n.is_mgmt }))
+    const reloadSwitches = async () => {
+      swDlg.loading = true; swDlg.loadError = ''
+      try {
+        const res = await api('/hosts/' + swDlg.host.id + '/switches')
+        if (!res || res.error) { swDlg.loadError = (res && res.error) || t('swd_unreachable'); swDlg.reachable = false; return }
+        swDlg.reachable = res.reachable !== false
+        swDlg.hasNm = res.has_nm !== false
+        swDlg.mgmtDev = res.mgmt_dev || ''
+        swDlg.switches = Array.isArray(res.switches) ? res.switches : []
+        swDlg.freeNics = Array.isArray(res.free_nics) ? res.free_nics : []
+        swDlg.bondModes = Array.isArray(res.bond_modes) ? res.bond_modes : []
+        swDlg.warnings = Array.isArray(res.warnings) ? res.warnings : []
+        if (!swDlg.reachable) swDlg.loadError = t('swd_unreachable')
+        else if (!swDlg.hasNm) swDlg.loadError = t('swd_no_nm')
+        // 默认 bond 模式取后端 default 标志
+        const def = swDlg.bondModes.find((m) => m.default)
+        if (def) swDlg.form.bondMode = def.value
+      } catch (e) { swDlg.loadError = t('op_failed') } finally { swDlg.loading = false }
+    }
+    const openSwitch = async (h) => {
+      swDlg.host = h
+      swDlg.switches = []; swDlg.freeNics = []; swDlg.bondModes = []; swDlg.warnings = []
+      swDlg.selUplinks = []; swDlg.ackMgmt = false; swDlg.errors = {}; swDlg.loadError = ''
+      swDlg.reachable = true; swDlg.hasNm = true
+      swDlg.form = { name: 'br0', bondMode: 'active-backup', ipMode: 'none', ipv4: '', prefix: 24, gateway: '', dns: '' }
+      swDlg.open = true
+      await reloadSwitches()
+    }
+    const toggleUplink = (dev) => {
+      const i = swDlg.selUplinks.indexOf(dev)
+      if (i >= 0) swDlg.selUplinks.splice(i, 1); else swDlg.selUplinks.push(dev)
+      if (!swSelectedHasMgmt.value) swDlg.ackMgmt = false
+    }
+    const submitSwitch = async () => {
+      const e = {}
+      if (!swDlg.selUplinks.length) e.uplinks = t('swd_need_uplink')
+      if (!(swDlg.form.name || '').trim()) e.name = t('op_required')
+      if (swSelectedHasMgmt.value && !swDlg.ackMgmt) e.ack = t('swd_mgmt_warn')
+      if (swDlg.form.ipMode === 'static') {
+        if (!ipv4Re.test(swDlg.form.ipv4)) e.ipv4 = t('hmn_ip_invalid')
+        if (swDlg.form.gateway && !ipv4Re.test(swDlg.form.gateway)) e.gateway = t('hmn_gateway_invalid')
+      }
+      swDlg.errors = e
+      if (Object.keys(e).length) return
+      swDlg.busy = true
+      try {
+        const payload = {
+          name: swDlg.form.name.trim(),
+          uplinks: swDlg.selUplinks.slice(),
+          bond_mode: swDlg.form.bondMode,
+          ip_mode: swDlg.form.ipMode,
+          ack_mgmt_risk: swDlg.ackMgmt,
+        }
+        if (swDlg.form.ipMode === 'static') {
+          payload.ipv4 = swDlg.form.ipv4
+          payload.prefix = Number(swDlg.form.prefix)
+          payload.gateway = swDlg.form.gateway
+          payload.dns = swDlg.form.dns
+        }
+        const res = await api('/hosts/' + swDlg.host.id + '/switches', { method: 'POST', body: JSON.stringify(payload) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        toast((res && res.message) || t('swd_created'), 'success')
+        swDlg.selUplinks = []; swDlg.ackMgmt = false
+        await reloadSwitches()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { swDlg.busy = false }
+    }
+    const deleteSwitch = async (sw) => {
+      if (!window.confirm(t('swd_del_confirm'))) return
+      swDlg.busy = true
+      try {
+        const ack = sw.is_mgmt ? '?ack_mgmt_risk=true' : ''
+        const res = await api('/hosts/' + swDlg.host.id + '/switches/' + encodeURIComponent(sw.name) + ack, { method: 'DELETE' })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        toast((res && res.message) || t('swd_deleted'), 'success')
+        await reloadSwitches()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { swDlg.busy = false }
+    }
+
     // 集群级批量统一修改管理网络对话框
     const batchDlg = reactive({ open: false, busy: false, cluster: null, form: {}, errors: {} })
     const openBatch = (group) => {
@@ -759,6 +854,7 @@ const HostsView = {
       hostCtx, onHostCtxAction, shellDlg, copyShellCmd,
       metricsLoading, refreshMetrics, hMetric, pctText, pctWidth, uptimeText,
       clusterGroups, netDlg, openNetEdit, submitNet, pickNic, batchDlg, openBatch, submitBatch,
+      swDlg, openSwitch, toggleUplink, submitSwitch, deleteSwitch, swSelectedHasMgmt,
       fwDlg, openFirewall, fwToggle, fwOpenPlatform, fwAddPort, fwRemovePort, reloadFirewall,
       fwBatch, openFwBatch, fwBatchCount, submitFwBatch,
       seDlg, openSelinux, submitSelinux, seBatch, openSeBatch, seBatchCount, submitSeBatch,
@@ -901,7 +997,10 @@ const HostsView = {
                 <td><strong>{{ h.name }}</strong></td>
                 <td><span class="apple-badge" :class="statusMeta(h.status).cls"><span class="dot"></span>{{ t(statusMeta(h.status).key) }}</span></td>
                 <td class="mono">{{ h.ip }}</td>
-                <td style="text-align:right"><button class="apple-btn apple-btn--secondary apple-btn--sm" @click="openNetEdit(h)"><i class="fas fa-ethernet"></i> {{ t('hv_open_net') }}</button></td>
+                <td style="text-align:right">
+                  <button class="apple-btn apple-btn--secondary apple-btn--sm" @click="openNetEdit(h)"><i class="fas fa-ethernet"></i> {{ t('hv_open_net') }}</button>
+                  <button class="apple-btn apple-btn--secondary apple-btn--sm" style="margin-left:6px" @click="openSwitch(h)"><i class="fas fa-diagram-project"></i> {{ t('swd_open') }}</button>
+                </td>
               </tr>
               <tr v-if="!g.hosts.length"><td colspan="4" class="muted" style="text-align:center;padding:16px">{{ t('hmn_no_hosts') }}</td></tr>
             </tbody>
@@ -1128,6 +1227,104 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" @click="netDlg.open=false">{{ t('op_cancel') }}</button>
           <button class="apple-btn apple-btn--primary" :disabled="netDlg.busy || netDlg.loading || !netDlg.nics.length" @click="submitNet"><i v-if="netDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('op_confirm') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 第4点 · 标准交换机对话框（Linux Bridge + Bond，图形化网卡选择 + active-backup 默认）-->
+    <div v-if="swDlg.open" class="modal-mask" @click.self="!swDlg.busy && (swDlg.open=false)">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-head"><i class="fas fa-diagram-project" :style="{color:C.teal}"></i> {{ t('swd_title') }}<span class="muted" style="font-weight:400;margin-left:8px" v-if="swDlg.host">· {{ swDlg.host.name }}</span></div>
+        <div class="modal-body">
+          <div class="muted" style="font-size:13px;line-height:1.6;margin-bottom:12px">{{ t('swd_desc') }}</div>
+
+          <div v-if="swDlg.loading" class="apple-card" style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>
+          <div v-else-if="swDlg.loadError" class="apple-alert apple-alert--error"><i class="fas fa-triangle-exclamation"></i> {{ swDlg.loadError }}</div>
+
+          <template v-else>
+            <!-- 已有交换机 -->
+            <div class="hw-section-title"><i class="fas fa-network-wired" :style="{color:C.indigo}"></i> {{ t('swd_existing') }}</div>
+            <div class="apple-card" style="padding:0;margin-bottom:14px">
+              <table class="apple-table">
+                <thead><tr><th>{{ t('sw_name') }}</th><th>{{ t('swd_uplinks') }}</th><th>{{ t('swd_bond_mode') }}</th><th>{{ t('swd_state') }}</th><th style="text-align:right">{{ t('actions') }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="sw in swDlg.switches" :key="sw.name">
+                    <td><strong>{{ sw.name }}</strong> <span v-if="sw.is_mgmt" class="apple-badge apple-badge--warning"><span class="dot"></span>{{ t('swd_mgmt_nic') }}</span></td>
+                    <td class="mono" style="font-size:12px">{{ (sw.uplinks||[]).map(u=>u.device).join(', ') || '—' }}</td>
+                    <td>{{ sw.bond_mode_cn || sw.bond_mode || '—' }}</td>
+                    <td><span class="apple-badge" :class="sw.state==='up'||sw.state==='connected'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ sw.state }}</span></td>
+                    <td style="text-align:right"><button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="swDlg.busy" @click="deleteSwitch(sw)"><i class="fas fa-trash"></i> {{ t('swd_delete') }}</button></td>
+                  </tr>
+                  <tr v-if="!swDlg.switches.length"><td colspan="5" class="muted" style="text-align:center;padding:16px">{{ t('swd_no_switch') }}</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 新建：图形化网卡选择 -->
+            <div class="hw-section-title"><i class="fas fa-plus-circle" :style="{color:C.green}"></i> {{ t('swd_create') }}</div>
+            <div class="form-row">
+              <label>{{ t('swd_free_nics') }}</label>
+              <div class="muted" style="font-size:12px;margin-bottom:8px">{{ t('swd_pick_uplink') }}</div>
+              <div v-if="!swDlg.freeNics.length" class="muted">{{ t('swd_no_free') }}</div>
+              <div v-else class="flex" style="flex-wrap:wrap;gap:10px">
+                <div v-for="n in swDlg.freeNics" :key="n.device"
+                     class="nic-tile" :class="{active:swDlg.selUplinks.includes(n.device)}"
+                     style="cursor:pointer;border:2px solid var(--border-color);border-radius:10px;padding:10px 14px;min-width:130px;text-align:center"
+                     :style="swDlg.selUplinks.includes(n.device)?{borderColor:'var(--color-blue)',background:'var(--bg-secondary)'}:{}"
+                     @click="toggleUplink(n.device)">
+                  <i class="fas fa-ethernet" :style="{color:swDlg.selUplinks.includes(n.device)?'var(--color-blue)':'var(--text-tertiary)',fontSize:'20px'}"></i>
+                  <div style="font-weight:600;font-size:13px;margin-top:6px">{{ n.device }}</div>
+                  <div class="mono muted" style="font-size:10px">{{ n.mac }}</div>
+                  <div style="margin-top:4px">
+                    <span class="apple-badge" :class="n.state==='connected'?'apple-badge--running':'apple-badge--stopped'" style="font-size:10px"><span class="dot"></span>{{ n.state }}</span>
+                    <span v-if="n.is_mgmt" class="apple-badge apple-badge--warning" style="font-size:10px"><span class="dot"></span>{{ t('swd_mgmt_nic') }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-if="swDlg.errors.uplinks" class="form-err">{{ swDlg.errors.uplinks }}</div>
+            </div>
+
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label>{{ t('swd_sw_name') }} <span class="req">*</span></label>
+                <input class="apple-input mono" v-model="swDlg.form.name" :class="{invalid:swDlg.errors.name}" placeholder="br0" />
+                <div v-if="swDlg.errors.name" class="form-err">{{ swDlg.errors.name }}</div>
+              </div>
+              <div class="form-row" v-if="swDlg.selUplinks.length>1">
+                <label>{{ t('swd_bond_mode') }}</label>
+                <select class="apple-input" v-model="swDlg.form.bondMode">
+                  <option v-for="m in swDlg.bondModes" :key="m.value" :value="m.value">{{ m.label }}{{ m.default?' ★':'' }}</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- IP 配置 -->
+            <div class="form-row">
+              <label>{{ t('swd_ip_mode') }}</label>
+              <div class="seg-control" style="background:var(--bg-secondary)">
+                <button class="seg" :class="{active:swDlg.form.ipMode==='none'}" @click="swDlg.form.ipMode='none'">{{ t('swd_ip_none') }}</button>
+                <button class="seg" :class="{active:swDlg.form.ipMode==='dhcp'}" @click="swDlg.form.ipMode='dhcp'">{{ t('swd_ip_dhcp') }}</button>
+                <button class="seg" :class="{active:swDlg.form.ipMode==='static'}" @click="swDlg.form.ipMode='static'">{{ t('swd_ip_static') }}</button>
+              </div>
+            </div>
+            <div v-if="swDlg.form.ipMode==='static'" class="form-grid-2">
+              <div class="form-row"><label>{{ t('swd_ipv4') }} <span class="req">*</span></label><input class="apple-input mono" v-model="swDlg.form.ipv4" :class="{invalid:swDlg.errors.ipv4}" placeholder="192.168.10.2" /><div v-if="swDlg.errors.ipv4" class="form-err">{{ swDlg.errors.ipv4 }}</div></div>
+              <div class="form-row"><label>{{ t('swd_prefix') }}</label><input class="apple-input" type="number" min="1" max="32" v-model.number="swDlg.form.prefix" /></div>
+              <div class="form-row"><label>{{ t('swd_gateway') }}</label><input class="apple-input mono" v-model="swDlg.form.gateway" :class="{invalid:swDlg.errors.gateway}" /><div v-if="swDlg.errors.gateway" class="form-err">{{ swDlg.errors.gateway }}</div></div>
+              <div class="form-row"><label>{{ t('swd_dns') }}</label><input class="apple-input mono" v-model="swDlg.form.dns" placeholder="8.8.8.8" /></div>
+            </div>
+
+            <!-- 管理网卡护栏 -->
+            <div v-if="swSelectedHasMgmt" class="apple-alert apple-alert--warning" style="margin-top:8px">
+              <i class="fas fa-triangle-exclamation"></i> {{ t('swd_mgmt_warn') }}
+              <label class="switch-row" style="margin-top:8px"><input type="checkbox" v-model="swDlg.ackMgmt"> {{ t('swd_ack_mgmt') }}</label>
+              <div v-if="swDlg.errors.ack" class="form-err">{{ swDlg.errors.ack }}</div>
+            </div>
+          </template>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" :disabled="swDlg.busy" @click="swDlg.open=false">{{ t('op_cancel') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="swDlg.busy || swDlg.loading || !!swDlg.loadError || !swDlg.freeNics.length" @click="submitSwitch"><i v-if="swDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-check"></i> {{ t('swd_create') }}</button>
         </div>
       </div>
     </div>
