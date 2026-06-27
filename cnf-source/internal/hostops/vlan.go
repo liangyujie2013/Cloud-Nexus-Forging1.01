@@ -14,7 +14,7 @@ import (
 // 第6点 · VLAN（access + trunk）—— 在标准交换机（bridge+bond）之上落地 VLAN 端口组，
 // 全部用 nmcli 真实下发。
 //
-// 模型（VMware 端口组的 Linux 等价物）：
+// 模型（端口组的 Linux 等价物）：
 //
 //   access（接入）：在交换机的 bond/上行设备上建一个 VLAN 子接口（如 bond0.100），
 //                   再桥接到一个独立网桥（如 br0.100）。挂到该网桥的虚机即处于 VLAN 100，
@@ -22,7 +22,7 @@ import (
 //
 //   trunk（中继）：直接复用承载多 VLAN 的网桥。我们用「网桥 VLAN 过滤（bridge vlan filtering）」
 //                  在网桥上放行一组 VLAN ID，让带 tag 的帧透传。虚机网卡再各自设 access VLAN。
-//                  这等价于 VMware 的 VLAN trunking（VLAN 4095 / 指定范围）。
+//                  这等价于 VLAN trunking（VLAN 4095 / 指定范围）。
 //
 // 设计原则（呼应「不要 mock / 清晰报错 / 联动性 / 安全」）：
 //   - 绝不伪造：读取来自 nmcli/ip 真实输出；写入是真实 nmcli 命令；失败回滚。

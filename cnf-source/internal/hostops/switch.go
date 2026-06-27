@@ -11,7 +11,7 @@ import (
 // ============================================================
 // 标准交换机（Standard Switch）= Linux bridge + bond，全部用 nmcli 落地。
 //
-// 拓扑（VMware 标准交换机的 Linux 等价物）：
+// 拓扑（标准交换机的 Linux 等价物）：
 //
 //	物理网卡 ens34 ┐
 //	物理网卡 ens35 ┼─► bond0 (active-backup 主备/或其它模式) ─► br0 (网桥) ─► 虚拟机/管理流量

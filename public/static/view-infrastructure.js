@@ -51,6 +51,10 @@ const InfrastructureView = {
     // 每个 DC 的健康率（主机在线占比），用于卡片右上角徽标
     const dcHealth = (dc) => (dc.host_count ? Math.round((dc.host_online / dc.host_count) * 100) : 0)
 
+    // 横条逻辑：点击 KPI 汇总卡 → 经统一 navigateTo 跳到对应层级页签（DC/集群/主机/VM）。
+    //   复用与拓扑树/右键菜单一致的 cnf:navigate 事件，保持联动一致性。
+    const kpiNav = (type) => { store.navigateTo(type) }
+
     // ---- 主机详情展开（显示该主机上运行的 VM 列表）----
     const expandedHost = ref(null)
     const toggleHost = (id) => { expandedHost.value = expandedHost.value === id ? null : id }
@@ -117,7 +121,7 @@ const InfrastructureView = {
 
     // ============================================================
     //  资源池：创建 / 编辑 / 删除对话框（N2 修复死按钮 — 完整 CRUD）
-    //  对标 VMware 资源池：份额(shares) + CPU/内存上限(limit) + 预留(reservation)
+    //  对标主流平台资源池：份额(shares) + CPU/内存上限(limit) + 预留(reservation)
     // ============================================================
     const poolDlg = ref({ open: false, mode: 'create', id: null, form: {}, err: {}, saving: false })
     // 资源池后端就绪状态：后端未实现(404)时显示诚实「功能未就绪」空态，绝不把 error 渲染成假卡片。
@@ -249,7 +253,7 @@ const InfrastructureView = {
 
     return {
       props, pools, poolsReady, datacenters, clusters, hosts,
-      infraSummary, dcHealth,
+      infraSummary, dcHealth, kpiNav,
       expandedHost, toggleHost, blockDlg, addHost,
       delDatacenter, delCluster, delHost,
       dcDlg, openDcCreate, openDcEdit, saveDc,
@@ -263,12 +267,12 @@ const InfrastructureView = {
     <div>
       <!-- ===== datacenter：KPI 汇总条 + 资源拓扑树 + DC 卡片（P2 专业化 / P3 添加主机）===== -->
       <template v-if="props.tab==='datacenter'">
-        <!-- P2：顶部全局 KPI 汇总条（vCenter/CloudTower 风格大盘）-->
+        <!-- P2：顶部全局 KPI 汇总条（大盘视图）-->
         <div class="infra-kpi-bar">
-          <div class="infra-kpi"><div class="ik-ico" style="background:rgba(0,122,255,.12);color:var(--color-blue)"><i class="fas fa-building"></i></div><div><div class="ik-num">{{ infraSummary.dc }}</div><div class="ik-lbl">{{ t('nav_infra_datacenter') }}</div></div></div>
-          <div class="infra-kpi"><div class="ik-ico" style="background:rgba(88,86,214,.12);color:var(--color-indigo)"><i class="fas fa-layer-group"></i></div><div><div class="ik-num">{{ infraSummary.cluster }}</div><div class="ik-lbl">{{ t('nav_infra_clusters') }}</div></div></div>
-          <div class="infra-kpi"><div class="ik-ico" style="background:rgba(255,149,0,.12);color:var(--color-orange)"><i class="fas fa-server"></i></div><div><div class="ik-num">{{ infraSummary.hostOnline }}<span class="ik-sub">/{{ infraSummary.host }}</span></div><div class="ik-lbl">{{ t('host_machine') }} · {{ t('dash_online') }} {{ infraSummary.hostRate }}%</div></div></div>
-          <div class="infra-kpi"><div class="ik-ico" style="background:rgba(52,199,89,.12);color:var(--color-green)"><i class="fas fa-desktop"></i></div><div><div class="ik-num">{{ infraSummary.vmRunning }}<span class="ik-sub">/{{ infraSummary.vm }}</span></div><div class="ik-lbl">{{ t('dash_vms') }} · {{ t('dash_running') }} {{ infraSummary.vmRate }}%</div></div></div>
+          <div class="infra-kpi infra-kpi--link" @click="kpiNav('datacenter')" :title="t('topo_open_detail')"><div class="ik-ico" style="background:rgba(0,122,255,.12);color:var(--color-blue)"><i class="fas fa-building"></i></div><div><div class="ik-num">{{ infraSummary.dc }}</div><div class="ik-lbl">{{ t('nav_infra_datacenter') }}</div></div></div>
+          <div class="infra-kpi infra-kpi--link" @click="kpiNav('cluster')" :title="t('topo_open_detail')"><div class="ik-ico" style="background:rgba(88,86,214,.12);color:var(--color-indigo)"><i class="fas fa-layer-group"></i></div><div><div class="ik-num">{{ infraSummary.cluster }}</div><div class="ik-lbl">{{ t('nav_infra_clusters') }}</div></div></div>
+          <div class="infra-kpi infra-kpi--link" @click="kpiNav('host')" :title="t('topo_open_detail')"><div class="ik-ico" style="background:rgba(255,149,0,.12);color:var(--color-orange)"><i class="fas fa-server"></i></div><div><div class="ik-num">{{ infraSummary.hostOnline }}<span class="ik-sub">/{{ infraSummary.host }}</span></div><div class="ik-lbl">{{ t('host_machine') }} · {{ t('dash_online') }} {{ infraSummary.hostRate }}%</div></div></div>
+          <div class="infra-kpi infra-kpi--link" @click="kpiNav('vm')" :title="t('topo_open_detail')"><div class="ik-ico" style="background:rgba(52,199,89,.12);color:var(--color-green)"><i class="fas fa-desktop"></i></div><div><div class="ik-num">{{ infraSummary.vmRunning }}<span class="ik-sub">/{{ infraSummary.vm }}</span></div><div class="ik-lbl">{{ t('dash_vms') }} · {{ t('dash_running') }} {{ infraSummary.vmRate }}%</div></div></div>
         </div>
         <div class="crud-toolbar">
           <button class="apple-btn apple-btn--primary" @click="openDcCreate"><i class="fas fa-plus"></i> {{ t('dc_create') }}</button>
@@ -415,7 +419,7 @@ const InfrastructureView = {
         </div>
       </template>
 
-      <!-- ===== pools：资源池（N2 完整 CRUD — 对标 VMware 资源池）===== -->
+      <!-- ===== pools：资源池（N2 完整 CRUD — 对标主流平台资源池）===== -->
       <template v-else>
         <div class="crud-toolbar">
           <button class="apple-btn apple-btn--primary" :disabled="!poolsReady" @click="openPoolCreate"><i class="fas fa-plus"></i> {{ t('pool_add') }}</button>

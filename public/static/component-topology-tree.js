@@ -43,19 +43,22 @@ const TreeNode = {
       if (s === 'offline' || s === 'error' || s === 'stopped') return 'status-offline'
       return 'status-online'
     })
-    const onRowClick = () => {
-      if (hasChildren.value) emit('toggle', props.node.key)
-      emit('pick', props.node)
-    }
-    return { hasChildren, isOpen, statusClass, onRowClick, TYPE_ICON, TYPE_COLOR, t }
+    // IA 修正：展开/收起 与 导航 解耦——
+    //   · 点 chevron（或行的展开区）只展开/收起，不跳转；
+    //   · 点节点名称/图标才导航到详情。避免「想看详情却把整层收起来」的迷惑。
+    const onToggle = () => { if (hasChildren.value) emit('toggle', props.node.key) }
+    const onPick = () => { emit('pick', props.node) }
+    return { hasChildren, isOpen, statusClass, onToggle, onPick, TYPE_ICON, TYPE_COLOR, t }
   },
   template: `
     <div class="topo-node">
-      <div class="topo-row" :style="{paddingLeft: (depth*16+8)+'px'}" @click="onRowClick">
-        <i v-if="hasChildren" class="fas fa-chevron-right topo-chevron" :class="{open:isOpen}"></i>
+      <div class="topo-row" :style="{paddingLeft: (depth*16+8)+'px'}">
+        <i v-if="hasChildren" class="fas fa-chevron-right topo-chevron" :class="{open:isOpen}" @click.stop="onToggle" :title="isOpen ? t('topo_collapse') : t('topo_expand')"></i>
         <span v-else class="topo-chevron-placeholder"></span>
-        <i class="fas topo-type-icon" :class="TYPE_ICON[node.type]" :style="{color: TYPE_COLOR[node.type]}"></i>
-        <span class="topo-label">{{ node.label }}</span>
+        <span class="topo-pick" @click="onPick" :title="t('topo_open_detail')">
+          <i class="fas topo-type-icon" :class="TYPE_ICON[node.type]" :style="{color: TYPE_COLOR[node.type]}"></i>
+          <span class="topo-label">{{ node.label }}</span>
+        </span>
         <span v-if="node.count !== undefined && node.type!=='vm'" class="topo-count">{{ node.count }} VM</span>
         <span class="topo-status" :class="statusClass"></span>
       </div>
@@ -81,19 +84,37 @@ const TopologyTree = {
     const pick = (node) => { store.navigateTo(node.type, node.id) }
     const refreshTree = async () => { await store.fetchAll(true); window.cnfToast(t('toast_success'), 'success') }
 
+    // 一键展开/收起全部层级（L1→L2→L3→L4）——大规模拓扑下的常用 IA 操作。
+    const walkKeys = (nodes, acc) => {
+      ;(nodes || []).forEach((n) => {
+        if (n.children && n.children.length) { acc.push(n.key); walkKeys(n.children, acc) }
+      })
+      return acc
+    }
+    const expandAll = () => {
+      const m = {}; walkKeys(tree.value, []).forEach((k) => { m[k] = true }); expandedMap.value = m
+    }
+    const collapseAll = () => {
+      const m = {}; walkKeys(tree.value, []).forEach((k) => { m[k] = false }); expandedMap.value = m
+    }
+
     // 汇总（树头部展示总量）
     const totals = computed(() => {
       const s = store.state
       return { dc: s.datacenters.length, cluster: s.clusters.length, host: s.hosts.length, vm: s.vms.length }
     })
 
-    return { tree, expandedMap, toggle, pick, refreshTree, totals, t }
+    return { tree, expandedMap, toggle, pick, refreshTree, expandAll, collapseAll, totals, t }
   },
   template: `
     <div class="topology-tree" :class="{compact:compact}">
       <div class="topo-tree-header">
         <h3><i class="fas fa-sitemap"></i> {{ t('topo_tree_title') }}</h3>
-        <button class="icon-btn" :title="t('op_refresh')" @click="refreshTree"><i class="fas fa-rotate-right"></i></button>
+        <div class="topo-tree-tools">
+          <button class="icon-btn" :title="t('topo_expand_all')" @click="expandAll"><i class="fas fa-angles-down"></i></button>
+          <button class="icon-btn" :title="t('topo_collapse_all')" @click="collapseAll"><i class="fas fa-angles-up"></i></button>
+          <button class="icon-btn" :title="t('op_refresh')" @click="refreshTree"><i class="fas fa-rotate-right"></i></button>
+        </div>
       </div>
       <div class="topo-tree-totals">
         <span><i class="fas fa-building" style="color:var(--color-blue)"></i> {{ totals.dc }}</span>

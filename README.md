@@ -4,8 +4,8 @@
 
 **企业级 KVM 虚拟化管理平台 · Enterprise-Grade KVM Virtualization Management Platform**
 
-对标 VMware vCenter / Proxmox VE / SmartX CloudTower
-Benchmarked against VMware vCenter / Proxmox VE / SmartX CloudTower
+对标业界主流虚拟化管理平台
+Benchmarked against leading virtualization management platforms
 
 ![Version](https://img.shields.io/badge/version-1.0.1-blue) ![Frontend](https://img.shields.io/badge/frontend-Vue%203-42b883) ![API](https://img.shields.io/badge/API-Hono%2FREST-orange) ![i18n](https://img.shields.io/badge/i18n-中文%20%2F%20English-success)
 

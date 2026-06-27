@@ -605,6 +605,199 @@ const HostsView = {
       } catch (err) { toast(t('op_failed'), 'error') } finally { vlanDlg.busy = false }
     }
 
+    // ====================== 第5点 · 全局交换机（一份规格，多主机一致下发）======================
+    // 设计：一份标准交换机规格（网桥名 / bond 模式 / IP 模式）+ 勾选一组主机；
+    //       每台主机各自选择上行物理网卡（不同主机网卡名/数量可能不同），逐主机真实下发；
+    //       提供一致性视图（status）—— 直观看出哪些主机已落地、上行口是否一致。
+    const gswDlg = reactive({
+      open: false, busy: false, statusBusy: false,
+      form: { name: 'br0', bondMode: 'active-backup', ipMode: 'none' },
+      rows: [],
+      results: [],
+      status: null,
+      errors: {},
+    })
+    const gswPickedRows = computed(() => gswDlg.rows.filter((r) => r.picked))
+    const gswRowHasMgmt = (r) => r.selUplinks.some((dev) => { const n = r.freeNics.find((x) => x.device === dev); return n && n.is_mgmt })
+    const gswLoadRowNics = async (r) => {
+      r.loading = true; r.loadError = ''
+      try {
+        const res = await api('/hosts/' + r.host_id + '/switches')
+        if (!res || res.error) { r.loadError = (res && res.error) || t('swd_unreachable'); r.reachable = false; return }
+        r.reachable = res.reachable !== false
+        r.hasNm = res.has_nm !== false
+        r.freeNics = Array.isArray(res.free_nics) ? res.free_nics : []
+        if (!r.reachable) r.loadError = t('swd_unreachable')
+        else if (!r.hasNm) r.loadError = t('swd_no_nm')
+      } catch (e) { r.loadError = t('op_failed'); r.reachable = false } finally { r.loading = false }
+    }
+    const gswTogglePick = async (r) => {
+      r.picked = !r.picked
+      if (r.picked && !r.freeNics.length && !r.loadError) await gswLoadRowNics(r)
+      if (!r.picked) { r.selUplinks = []; r.ackMgmt = false }
+    }
+    const gswToggleUplink = (r, dev) => {
+      const i = r.selUplinks.indexOf(dev)
+      if (i >= 0) r.selUplinks.splice(i, 1); else r.selUplinks.push(dev)
+      if (!gswRowHasMgmt(r)) r.ackMgmt = false
+    }
+    const openGlobalSwitch = () => {
+      gswDlg.form = { name: 'br0', bondMode: 'active-backup', ipMode: 'none' }
+      gswDlg.results = []; gswDlg.status = null; gswDlg.errors = {}
+      gswDlg.rows = hosts.value.map((h) => ({
+        host_id: h.id, name: h.name, ip: h.ip, status: h.status,
+        picked: false, loading: false, loadError: '', reachable: true, hasNm: true,
+        freeNics: [], selUplinks: [], ackMgmt: false,
+      }))
+      gswDlg.open = true
+    }
+    const submitGlobalSwitch = async () => {
+      const e = {}
+      if (!(gswDlg.form.name || '').trim()) e.name = t('op_required')
+      const picked = gswPickedRows.value
+      if (!picked.length) e.hosts = t('gsw_need_host')
+      for (const r of picked) {
+        if (!r.selUplinks.length) { e.uplinks = t('gsw_need_uplink_each'); break }
+        if (gswRowHasMgmt(r) && !r.ackMgmt) { e.ack = t('gsw_mgmt_warn'); break }
+      }
+      gswDlg.errors = e
+      if (Object.keys(e).length) return
+      gswDlg.busy = true; gswDlg.results = []
+      try {
+        const payload = {
+          name: gswDlg.form.name.trim(),
+          bond_mode: gswDlg.form.bondMode,
+          ip_mode: gswDlg.form.ipMode,
+          hosts: picked.map((r) => ({ host_id: r.host_id, uplinks: r.selUplinks.slice(), ack_mgmt_risk: r.ackMgmt })),
+        }
+        const res = await api('/hosts/global-switch/apply', { method: 'POST', body: JSON.stringify(payload) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        gswDlg.results = (res && res.results) || []
+        const ok = gswDlg.results.filter((x) => x.ok).length
+        toast((res && res.message) || t('gsw_apply_done', { ok, total: gswDlg.results.length }), ok === gswDlg.results.length ? 'success' : 'warning')
+        await refreshGlobalSwitchStatus()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { gswDlg.busy = false }
+    }
+    const refreshGlobalSwitchStatus = async () => {
+      const name = (gswDlg.form.name || '').trim()
+      const ids = gswPickedRows.value.map((r) => r.host_id)
+      if (!name || !ids.length) { gswDlg.status = null; return }
+      gswDlg.statusBusy = true
+      try {
+        const res = await api('/hosts/global-switch/status?name=' + encodeURIComponent(name) + '&host_ids=' + ids.join(','))
+        if (!res || res.error) { gswDlg.status = null; toast((res && res.error) || t('op_failed'), 'error'); return }
+        gswDlg.status = res
+      } catch (e) { gswDlg.status = null } finally { gswDlg.statusBusy = false }
+    }
+    const deleteGlobalSwitch = async () => {
+      const name = (gswDlg.form.name || '').trim()
+      const picked = gswPickedRows.value
+      if (!name) { toast(t('op_required'), 'warning'); return }
+      if (!picked.length) { toast(t('gsw_need_host'), 'warning'); return }
+      if (!window.confirm(t('gsw_del_confirm', { name }))) return
+      const anyMgmt = (gswDlg.status && Array.isArray(gswDlg.status.states)) ? gswDlg.status.states.some((s) => s.present && s.is_mgmt) : false
+      gswDlg.busy = true; gswDlg.results = []
+      try {
+        const payload = { name, host_ids: picked.map((r) => r.host_id), ack_mgmt_risk: anyMgmt }
+        const res = await api('/hosts/global-switch/delete', { method: 'POST', body: JSON.stringify(payload) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        gswDlg.results = (res && res.results) || []
+        const ok = gswDlg.results.filter((x) => x.ok).length
+        toast((res && res.message) || t('gsw_del_done', { ok, total: gswDlg.results.length }), ok === gswDlg.results.length ? 'success' : 'warning')
+        await refreshGlobalSwitchStatus()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { gswDlg.busy = false }
+    }
+    const gswStateFor = (hostId) => {
+      if (!gswDlg.status || !Array.isArray(gswDlg.status.states)) return null
+      return gswDlg.status.states.find((s) => s.host_id === hostId) || null
+    }
+
+    // ====================== 第7点 · VMkernel 适配器 / 流量标签 ======================
+    // 主机级带 IP 的服务接口（管理/迁移/存储/容错/复制/置备）。
+    const vmkDlg = reactive({
+      open: false, busy: false, loading: false, host: null,
+      loadError: '', reachable: true, hasNm: true, mgmtDev: '',
+      vmks: [], freeNics: [], bridges: [], roles: [], usedRole: {}, warnings: [],
+      form: { role: '', uplink: '', ipMode: 'static', ipv4: '', prefix: 24, gateway: '', ackMgmt: false },
+      errors: {},
+    })
+    // 候选上行 = 空闲物理网卡 + 已有网桥（标准交换机/端口组）；含管理口标记。
+    const vmkUplinkOptions = computed(() => {
+      const opts = [{ device: '', label: t('vmk_no_uplink'), is_mgmt: false }]
+      ;(vmkDlg.freeNics || []).forEach((n) => opts.push({ device: n.device, label: n.device + (n.is_mgmt ? ' · ' + t('swd_mgmt_nic') : ''), is_mgmt: n.is_mgmt }))
+      ;(vmkDlg.bridges || []).forEach((b) => opts.push({ device: b.device, label: b.device + (b.is_mgmt ? ' · ' + t('swd_mgmt_nic') : ''), is_mgmt: b.is_mgmt }))
+      return opts
+    })
+    const vmkSelectedIsMgmt = computed(() => {
+      if (vmkDlg.form.role === 'mgmt') return true
+      const o = vmkUplinkOptions.value.find((x) => x.device === vmkDlg.form.uplink)
+      return !!(o && o.is_mgmt)
+    })
+    const vmkAvailRoles = computed(() => (vmkDlg.roles || []).filter((r) => !vmkDlg.usedRole[r.value]))
+    const reloadVMKs = async () => {
+      vmkDlg.loading = true; vmkDlg.loadError = ''
+      try {
+        const res = await api('/hosts/' + vmkDlg.host.id + '/vmkernels')
+        if (!res || res.error) { vmkDlg.loadError = (res && res.error) || t('swd_unreachable'); vmkDlg.reachable = false; return }
+        vmkDlg.reachable = res.reachable !== false
+        vmkDlg.hasNm = res.has_nm !== false
+        vmkDlg.vmks = Array.isArray(res.vmks) ? res.vmks : []
+        vmkDlg.freeNics = Array.isArray(res.free_nics) ? res.free_nics : []
+        vmkDlg.bridges = Array.isArray(res.bridges) ? res.bridges : []
+        vmkDlg.roles = Array.isArray(res.roles) ? res.roles : []
+        vmkDlg.usedRole = res.used_role || {}
+        vmkDlg.mgmtDev = res.mgmt_dev || ''
+        vmkDlg.warnings = Array.isArray(res.warnings) ? res.warnings : []
+        if (!vmkDlg.reachable) vmkDlg.loadError = t('swd_unreachable')
+        else if (!vmkDlg.hasNm) vmkDlg.loadError = t('swd_no_nm')
+        // 默认选第一个可用标签
+        const avail = vmkAvailRoles.value
+        if (avail.length && !avail.find((r) => r.value === vmkDlg.form.role)) vmkDlg.form.role = avail[0].value
+      } catch (e) { vmkDlg.loadError = t('op_failed') } finally { vmkDlg.loading = false }
+    }
+    const openVMK = async (h) => {
+      vmkDlg.host = h
+      vmkDlg.vmks = []; vmkDlg.freeNics = []; vmkDlg.bridges = []; vmkDlg.roles = []; vmkDlg.usedRole = {}; vmkDlg.warnings = []
+      vmkDlg.errors = {}; vmkDlg.loadError = ''; vmkDlg.reachable = true; vmkDlg.hasNm = true
+      vmkDlg.form = { role: '', uplink: '', ipMode: 'static', ipv4: '', prefix: 24, gateway: '', ackMgmt: false }
+      vmkDlg.open = true
+      await reloadVMKs()
+    }
+    const submitVMK = async () => {
+      const e = {}
+      if (!vmkDlg.form.role) e.role = t('op_required')
+      if (vmkDlg.form.ipMode === 'static') {
+        if (!ipv4Re.test(vmkDlg.form.ipv4)) e.ipv4 = t('hmn_ip_invalid')
+        const p = Number(vmkDlg.form.prefix)
+        if (!(p >= 1 && p <= 32)) e.prefix = t('vmk_prefix_invalid')
+        if (vmkDlg.form.gateway && !ipv4Re.test(vmkDlg.form.gateway)) e.gateway = t('hmn_gateway_invalid')
+      }
+      if (vmkSelectedIsMgmt.value && !vmkDlg.form.ackMgmt) e.ack = t('vmk_mgmt_warn')
+      vmkDlg.errors = e
+      if (Object.keys(e).length) return
+      vmkDlg.busy = true
+      try {
+        const payload = { role: vmkDlg.form.role, uplink: vmkDlg.form.uplink, ip_mode: vmkDlg.form.ipMode, ack_mgmt_risk: vmkDlg.form.ackMgmt }
+        if (vmkDlg.form.ipMode === 'static') { payload.ipv4 = vmkDlg.form.ipv4; payload.prefix = Number(vmkDlg.form.prefix); payload.gateway = vmkDlg.form.gateway }
+        const res = await api('/hosts/' + vmkDlg.host.id + '/vmkernels', { method: 'POST', body: JSON.stringify(payload) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        toast((res && res.message) || t('vmk_created'), 'success')
+        vmkDlg.form.ackMgmt = false; vmkDlg.form.ipv4 = ''; vmkDlg.form.gateway = ''
+        await reloadVMKs()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { vmkDlg.busy = false }
+    }
+    const deleteVMK = async (vmk) => {
+      if (!window.confirm(t('vmk_del_confirm', { name: vmk.name }))) return
+      vmkDlg.busy = true
+      try {
+        const ack = vmk.is_mgmt ? '?ack_mgmt_risk=true' : ''
+        const res = await api('/hosts/' + vmkDlg.host.id + '/vmkernels/' + encodeURIComponent(vmk.name) + ack, { method: 'DELETE' })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        toast((res && res.message) || t('vmk_deleted'), 'success')
+        await reloadVMKs()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { vmkDlg.busy = false }
+    }
+
 
     // react to nav tab changes（列表/管理/网络三个独立视图）
     watch(() => props.tab, (nv) => {
@@ -713,7 +906,7 @@ const HostsView = {
     const detailVMs = computed(() => detailHost.value ? detailHost.value.vms_list || [] : [])
 
     // ============================================================
-    //  P4 · 硬件 → IOMMU/VFIO 直通就绪 + GPU 管理（对标 ESXi/vCenter）
+    //  P4 · 硬件 → IOMMU/VFIO 直通就绪 + GPU 管理（对标主流虚拟化平台）
     // ============================================================
     const iommuBusy = ref(false)
     const pciBusy = ref('')
@@ -943,6 +1136,9 @@ const HostsView = {
       clusterGroups, netDlg, openNetEdit, submitNet, pickNic,
       swDlg, openSwitch, toggleUplink, submitSwitch, deleteSwitch, swSelectedHasMgmt,
       vlanDlg, openVLAN, submitAccessVLAN, submitTrunk, deleteAccessVLAN, vlanAccParentIsMgmt, vlanTrkBridgeIsMgmt,
+      gswDlg, openGlobalSwitch, gswPickedRows, gswTogglePick, gswToggleUplink, gswRowHasMgmt,
+      submitGlobalSwitch, deleteGlobalSwitch, refreshGlobalSwitchStatus, gswStateFor,
+      vmkDlg, openVMK, submitVMK, deleteVMK, vmkUplinkOptions, vmkSelectedIsMgmt, vmkAvailRoles,
       fwDlg, openFirewall, fwToggle, fwOpenPlatform, fwAddPort, fwRemovePort, reloadFirewall,
       fwBatch, openFwBatch, fwBatchCount, submitFwBatch,
       seDlg, openSelinux, submitSelinux, seBatch, openSeBatch, seBatchCount, submitSeBatch,
@@ -1022,6 +1218,7 @@ const HostsView = {
         <button class="apple-btn apple-btn--secondary" @click="openFwBatch"><i class="fas fa-shield-halved"></i> {{ t('fw_batch_btn') }}</button>
         <button class="apple-btn apple-btn--secondary" @click="openSeBatch"><i class="fas fa-user-shield"></i> {{ t('se_batch_btn') }}</button>
         <button class="apple-btn apple-btn--secondary" @click="openSpBatch"><i class="fas fa-network-wired"></i> {{ t('sp_batch_btn') }}</button>
+        <button class="apple-btn apple-btn--secondary" @click="openGlobalSwitch"><i class="fas fa-diagram-project"></i> {{ t('gsw_btn') }}</button>
         <div class="toolbar-search"><i class="fas fa-magnifying-glass"></i><input v-model="search" :placeholder="t('host_search_ph')"></div>
         <div class="spacer"></div>
         <button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="metricsLoading" @click="refreshMetrics" :title="t('hv_refresh')">
@@ -1089,6 +1286,7 @@ const HostsView = {
                   <button class="apple-btn apple-btn--secondary apple-btn--sm" @click="openNetEdit(h)"><i class="fas fa-ethernet"></i> {{ t('hv_open_net') }}</button>
                   <button class="apple-btn apple-btn--secondary apple-btn--sm" style="margin-left:6px" @click="openSwitch(h)"><i class="fas fa-diagram-project"></i> {{ t('swd_open') }}</button>
                   <button class="apple-btn apple-btn--secondary apple-btn--sm" style="margin-left:6px" @click="openVLAN(h)"><i class="fas fa-tags"></i> {{ t('vld_open') }}</button>
+                  <button class="apple-btn apple-btn--secondary apple-btn--sm" style="margin-left:6px" @click="openVMK(h)"><i class="fas fa-network-wired"></i> {{ t('vmk_open') }}</button>
                 </td>
               </tr>
               <tr v-if="!g.hosts.length"><td colspan="4" class="muted" style="text-align:center;padding:16px">{{ t('hmn_no_hosts') }}</td></tr>
@@ -1534,6 +1732,86 @@ const HostsView = {
       </div>
     </div>
 
+    <!-- ====================== 第7点 · VMkernel 适配器 / 流量标签 ====================== -->
+    <div v-if="vmkDlg.open" class="modal-mask" @click.self="!vmkDlg.busy && (vmkDlg.open=false)">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-head"><i class="fas fa-network-wired" :style="{color:C.teal||C.indigo}"></i> {{ t('vmk_title') }}<span class="muted" style="font-weight:400;margin-left:8px" v-if="vmkDlg.host">· {{ vmkDlg.host.name }}</span></div>
+        <div class="modal-body">
+          <div class="hosts-pick-hint" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> {{ t('vmk_desc') }}</div>
+          <div v-if="vmkDlg.loading" class="muted" style="padding:20px;text-align:center"><i class="fas fa-spinner fa-spin"></i> {{ t('op_loading') }}</div>
+          <div v-else-if="vmkDlg.loadError" class="form-err" style="padding:12px"><i class="fas fa-triangle-exclamation"></i> {{ vmkDlg.loadError }}</div>
+          <template v-else>
+            <!-- 已有 VMkernel 列表 -->
+            <div class="vmk-list">
+              <div class="muted" style="font-size:12px;margin-bottom:6px">{{ t('vmk_existing') }} ({{ vmkDlg.vmks.length }})</div>
+              <div v-if="!vmkDlg.vmks.length" class="muted" style="font-size:12px;padding:8px 0">{{ t('vmk_none') }}</div>
+              <table v-else class="apple-table" style="font-size:12px">
+                <thead><tr><th>{{ t('vmk_name') }}</th><th>{{ t('vmk_role') }}</th><th>{{ t('vmk_ip') }}</th><th>{{ t('vmk_uplink') }}</th><th>{{ t('vmk_zone') }}</th><th style="text-align:right">{{ t('actions') }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="v in vmkDlg.vmks" :key="v.name">
+                    <td class="mono">{{ v.name }}<i v-if="v.is_mgmt" class="fas fa-triangle-exclamation" :style="{color:C.orange,marginLeft:'5px'}" :title="t('vmk_is_mgmt')"></i></td>
+                    <td><span class="apple-badge apple-badge--running" style="font-size:10px">{{ v.role_cn }}</span></td>
+                    <td class="mono">{{ v.mode==='dhcp' ? 'DHCP' : (v.ipv4 ? v.ipv4 + '/' + v.prefix : '—') }}</td>
+                    <td class="mono muted">{{ v.uplink || '—' }}</td>
+                    <td class="mono muted">{{ v.zone || '—' }}</td>
+                    <td style="text-align:right"><button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="vmkDlg.busy" @click="deleteVMK(v)"><i class="fas fa-trash"></i> {{ t('vmk_delete') }}</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 新建 VMkernel -->
+            <div class="vmk-new">
+              <div class="muted" style="font-size:12px;margin:14px 0 8px;font-weight:600">{{ t('vmk_new') }}</div>
+              <div v-if="!vmkAvailRoles.length" class="muted" style="font-size:12px">{{ t('vmk_all_used') }}</div>
+              <template v-else>
+                <div class="vmk-form-grid">
+                  <div class="form-row"><label>{{ t('vmk_role') }}</label>
+                    <select v-model="vmkDlg.form.role" :class="{'input-err':vmkDlg.errors.role}">
+                      <option v-for="r in vmkAvailRoles" :key="r.value" :value="r.value">{{ r.label }}</option>
+                    </select>
+                  </div>
+                  <div class="form-row"><label>{{ t('vmk_uplink') }}</label>
+                    <select v-model="vmkDlg.form.uplink">
+                      <option v-for="o in vmkUplinkOptions" :key="o.device" :value="o.device">{{ o.label }}</option>
+                    </select>
+                  </div>
+                  <div class="form-row"><label>{{ t('vmk_ip_mode') }}</label>
+                    <select v-model="vmkDlg.form.ipMode">
+                      <option value="static">{{ t('vmk_static') }}</option>
+                      <option value="dhcp">DHCP</option>
+                    </select>
+                  </div>
+                </div>
+                <div v-if="vmkDlg.form.ipMode==='static'" class="vmk-form-grid">
+                  <div class="form-row"><label>{{ t('vmk_ipv4') }}</label>
+                    <input v-model="vmkDlg.form.ipv4" placeholder="10.10.20.10" :class="{'input-err':vmkDlg.errors.ipv4}">
+                    <div v-if="vmkDlg.errors.ipv4" class="form-err-text">{{ vmkDlg.errors.ipv4 }}</div>
+                  </div>
+                  <div class="form-row"><label>{{ t('vmk_prefix') }}</label>
+                    <input type="number" min="1" max="32" v-model.number="vmkDlg.form.prefix" :class="{'input-err':vmkDlg.errors.prefix}">
+                    <div v-if="vmkDlg.errors.prefix" class="form-err-text">{{ vmkDlg.errors.prefix }}</div>
+                  </div>
+                  <div class="form-row"><label>{{ t('vmk_gateway') }} <span class="muted">({{ t('vld_optional') }})</span></label>
+                    <input v-model="vmkDlg.form.gateway" placeholder="10.10.20.1" :class="{'input-err':vmkDlg.errors.gateway}">
+                    <div v-if="vmkDlg.errors.gateway" class="form-err-text">{{ vmkDlg.errors.gateway }}</div>
+                  </div>
+                </div>
+                <label v-if="vmkSelectedIsMgmt" class="gsw-ack">
+                  <input type="checkbox" v-model="vmkDlg.form.ackMgmt"> <span :style="{color:C.orange}">{{ t('vmk_ack_mgmt') }}</span>
+                </label>
+                <div v-if="vmkDlg.errors.ack" class="form-err-text">{{ vmkDlg.errors.ack }}</div>
+              </template>
+            </div>
+          </template>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" :disabled="vmkDlg.busy" @click="vmkDlg.open=false">{{ t('op_close') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="vmkDlg.busy || vmkDlg.loading || !!vmkDlg.loadError || !vmkAvailRoles.length" @click="submitVMK"><i v-if="vmkDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-check"></i> {{ t('vmk_create') }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ====================== 第1点 · 单机防火墙管理抽屉 ====================== -->
     <div v-if="fwDlg.open" class="modal-mask" @click.self="fwDlg.open=false">
       <div class="modal-dialog">
@@ -1761,6 +2039,97 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" @click="spBatch.open=false">{{ t('op_close') }}</button>
           <button class="apple-btn apple-btn--danger" :disabled="spBatch.busy || !spBatchCount || !spBatch.ack" @click="submitSpBatch"><i v-if="spBatch.busy" class="fas fa-spinner fa-spin"></i> {{ t('sp_batch_run') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== 第5点 · 全局交换机（多主机一致下发）====================== -->
+    <div v-if="gswDlg.open" class="modal-mask" @click.self="gswDlg.open=false">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-head"><i class="fas fa-diagram-project" :style="{color:C.indigo}"></i> {{ t('gsw_title') }}</div>
+        <div class="modal-body">
+          <div class="hosts-pick-hint" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> {{ t('gsw_desc') }}</div>
+          <div class="gsw-spec">
+            <div class="form-row" style="flex:1;min-width:160px"><label>{{ t('swd_sw_name') }}</label>
+              <input v-model="gswDlg.form.name" placeholder="br0" :class="{'input-err':gswDlg.errors.name}">
+              <div v-if="gswDlg.errors.name" class="form-err-text">{{ gswDlg.errors.name }}</div>
+            </div>
+            <div class="form-row" style="flex:1;min-width:160px"><label>{{ t('swd_bond_mode') }}</label>
+              <select v-model="gswDlg.form.bondMode">
+                <option value="active-backup">active-backup ({{ t('gsw_mode_ab') }})</option>
+                <option value="balance-rr">balance-rr</option>
+                <option value="802.3ad">802.3ad (LACP)</option>
+                <option value="balance-xor">balance-xor</option>
+                <option value="balance-tlb">balance-tlb</option>
+                <option value="balance-alb">balance-alb</option>
+              </select>
+            </div>
+            <div class="form-row" style="flex:1;min-width:140px"><label>{{ t('swd_ip_mode') }}</label>
+              <select v-model="gswDlg.form.ipMode">
+                <option value="none">{{ t('gsw_ip_none') }}</option>
+                <option value="dhcp">DHCP</option>
+              </select>
+            </div>
+          </div>
+          <div v-if="gswDlg.errors.hosts" class="form-err-text" style="margin:4px 0">{{ gswDlg.errors.hosts }}</div>
+          <div v-if="gswDlg.errors.uplinks" class="form-err-text" style="margin:4px 0">{{ gswDlg.errors.uplinks }}</div>
+          <div v-if="gswDlg.errors.ack" class="form-err-text" style="margin:4px 0">{{ gswDlg.errors.ack }}</div>
+
+          <label style="font-weight:600;font-size:13px">{{ t('gsw_hosts') }} ({{ gswPickedRows.length }})</label>
+          <div class="gsw-host-list">
+            <div v-for="r in gswDlg.rows" :key="r.host_id" class="gsw-host-row" :class="{'gsw-host-row--on':r.picked}">
+              <label class="gsw-host-head">
+                <input type="checkbox" :checked="r.picked" @change="gswTogglePick(r)">
+                <strong>{{ r.name }}</strong>
+                <span class="mono muted" style="font-size:11px">{{ r.ip }}</span>
+                <span v-if="r.status!=='connected'" class="apple-badge apple-badge--warning" style="font-size:10px">{{ t('host_st_offline') }}</span>
+                <span v-if="gswStateFor(r.host_id)" class="gsw-state-badge">
+                  <i :class="gswStateFor(r.host_id).present?'fas fa-circle-check':'fas fa-circle-xmark'" :style="{color:gswStateFor(r.host_id).present?C.green:C.gray}"></i>
+                  <template v-if="gswStateFor(r.host_id).present">{{ t('gsw_present') }} · {{ gswStateFor(r.host_id).uplinks || '—' }}<span v-if="gswStateFor(r.host_id).is_mgmt" :style="{color:C.orange}"> · {{ t('gsw_is_mgmt') }}</span></template>
+                  <template v-else-if="gswStateFor(r.host_id).error">{{ gswStateFor(r.host_id).error }}</template>
+                  <template v-else>{{ t('gsw_absent') }}</template>
+                </span>
+              </label>
+              <div v-if="r.picked" class="gsw-host-body">
+                <div v-if="r.loading" class="muted" style="font-size:12px"><i class="fas fa-spinner fa-spin"></i> {{ t('op_loading') }}</div>
+                <div v-else-if="r.loadError" class="form-err-text">{{ r.loadError }}</div>
+                <div v-else-if="!r.freeNics.length" class="muted" style="font-size:12px">{{ t('gsw_no_free_nic') }}</div>
+                <div v-else class="gsw-nic-pick">
+                  <span class="muted" style="font-size:11px">{{ t('swd_pick_uplink') }}：</span>
+                  <label v-for="n in r.freeNics" :key="n.device" class="gsw-nic-chip" :class="{'gsw-nic-chip--on':r.selUplinks.includes(n.device),'gsw-nic-chip--mgmt':n.is_mgmt}">
+                    <input type="checkbox" :checked="r.selUplinks.includes(n.device)" @change="gswToggleUplink(r, n.device)">
+                    <span class="mono">{{ n.device }}</span>
+                    <i v-if="n.is_mgmt" class="fas fa-triangle-exclamation" :style="{color:C.orange}" :title="t('gsw_mgmt_warn')"></i>
+                  </label>
+                </div>
+                <label v-if="gswRowHasMgmt(r)" class="gsw-ack">
+                  <input type="checkbox" v-model="r.ackMgmt"> <span :style="{color:C.orange}">{{ t('gsw_ack_mgmt') }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="gswDlg.results.length" class="fw-batch-results">
+            <div class="muted" style="font-size:11px;margin:8px 0 4px">{{ t('fw_batch_results') }}</div>
+            <div v-for="r in gswDlg.results" :key="r.host_id" class="fw-batch-line">
+              <i :class="r.ok?'fas fa-circle-check':'fas fa-circle-xmark'" :style="{color:r.ok?C.green:C.red}"></i>
+              host {{ r.host_id }}
+              <span v-if="r.error" class="muted">— {{ r.error }}</span>
+            </div>
+          </div>
+
+          <div v-if="gswDlg.status" class="gsw-consistency" :class="gswDlg.status.consistent?'gsw-consistency--ok':'gsw-consistency--warn'">
+            <i :class="gswDlg.status.consistent?'fas fa-circle-check':'fas fa-triangle-exclamation'"></i>
+            {{ t('gsw_consistency', { name: gswDlg.status.name, present: gswDlg.status.present, total: gswDlg.status.total }) }}
+            <span v-if="gswDlg.status.consistent"> · {{ t('gsw_all_consistent') }}</span>
+            <span v-else> · {{ t('gsw_inconsistent') }}</span>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="gswDlg.open=false">{{ t('op_close') }}</button>
+          <button class="apple-btn apple-btn--ghost" :disabled="gswDlg.statusBusy || !gswPickedRows.length" @click="refreshGlobalSwitchStatus"><i :class="gswDlg.statusBusy?'fas fa-spinner fa-spin':'fas fa-magnifying-glass'"></i> {{ t('gsw_check') }}</button>
+          <button class="apple-btn apple-btn--danger" :disabled="gswDlg.busy || !gswPickedRows.length" @click="deleteGlobalSwitch"><i class="fas fa-trash"></i> {{ t('gsw_delete') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="gswDlg.busy || !gswPickedRows.length" @click="submitGlobalSwitch"><i v-if="gswDlg.busy" class="fas fa-spinner fa-spin"></i> {{ t('gsw_apply') }}</button>
         </div>
       </div>
     </div>

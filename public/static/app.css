@@ -683,6 +683,13 @@
 .topo-status.status-offline { background: var(--color-red); }
 .topo-empty { padding: 24px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
 .topology-tree.compact .topo-tree-body { max-height: 360px; }
+/* IA 修正：展开/收起 与 导航 解耦 —— chevron 与 pick 各自承担交互 */
+.topo-tree-tools { display: inline-flex; align-items: center; gap: 6px; }
+.topo-row { cursor: default; }
+.topo-chevron { cursor: pointer; }
+.topo-pick { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; border-radius: var(--radius-sm); padding: 1px 2px; transition: color var(--duration-fast); }
+.topo-pick:hover .topo-label { color: var(--color-blue); }
+.topo-pick .topo-label { flex: 1; }
 
 /* ---- 数据中心统计卡 ---- */
 .dc-card { transition: box-shadow var(--duration-base), border-color var(--duration-base); }
@@ -691,6 +698,10 @@
 .infra-kpi-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
 @media (max-width: 880px) { .infra-kpi-bar { grid-template-columns: 1fr 1fr; } }
 .infra-kpi { display: flex; align-items: center; gap: 14px; background: var(--bg-card, #fff); border: 1px solid var(--separator); border-radius: var(--radius-lg, 14px); padding: 16px 18px; }
+/* 横条逻辑：可点击的 KPI 汇总卡 → 跳转对应层级页签 */
+.infra-kpi--link { cursor: pointer; transition: border-color var(--duration-fast), box-shadow var(--duration-fast), transform var(--duration-fast); }
+.infra-kpi--link:hover { border-color: var(--color-blue); box-shadow: 0 2px 10px color-mix(in srgb, var(--color-blue) 14%, transparent); transform: translateY(-1px); }
+.infra-kpi--link:active { transform: translateY(0); }
 .ik-ico { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; }
 .ik-num { font-size: 26px; font-weight: 700; line-height: 1.05; }
 .ik-num .ik-sub { font-size: 15px; color: var(--text-secondary); font-weight: 500; }
@@ -934,6 +945,30 @@
 .fw-host-item:hover { background: rgba(0,0,0,.03); }
 .fw-batch-results { margin-top: 10px; max-height: 160px; overflow-y: auto; }
 .fw-batch-line { font-size: 12px; padding: 3px 0; display: flex; align-items: center; gap: 6px; }
+/* 第5点 · 全局交换机（多主机一致下发） */
+.gsw-spec { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
+.gsw-host-list { max-height: 320px; overflow-y: auto; border: 1px solid var(--separator, #e5e5ea); border-radius: 8px; padding: 4px; margin-top: 6px; }
+.gsw-host-row { border-radius: 8px; padding: 6px 8px; border: 1px solid transparent; }
+.gsw-host-row + .gsw-host-row { margin-top: 2px; }
+.gsw-host-row--on { background: rgba(0,122,255,.05); border-color: rgba(0,122,255,.25); }
+.gsw-host-head { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-wrap: wrap; }
+.gsw-host-head strong { font-size: 13px; }
+.gsw-state-badge { margin-left: auto; font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 5px; }
+.gsw-host-body { margin: 8px 0 4px 22px; }
+.gsw-nic-pick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gsw-nic-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--separator, #e5e5ea); border-radius: 999px; cursor: pointer; font-size: 12px; }
+.gsw-nic-chip input { margin: 0; }
+.gsw-nic-chip--on { background: rgba(0,122,255,.12); border-color: rgba(0,122,255,.4); }
+.gsw-nic-chip--mgmt { border-color: rgba(255,149,0,.5); }
+.gsw-ack { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; cursor: pointer; }
+.gsw-consistency { margin-top: 12px; padding: 9px 12px; border-radius: 8px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.gsw-consistency--ok { background: rgba(52,199,89,.1); color: var(--color-green, #34c759); }
+.gsw-consistency--warn { background: rgba(255,149,0,.1); color: var(--color-orange, #ff9500); }
+/* 第7点 · VMkernel 适配器 / 流量标签 */
+.vmk-list { margin-bottom: 6px; }
+.vmk-new { border-top: 1px solid var(--separator, #e5e5ea); padding-top: 4px; }
+.vmk-form-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.vmk-form-grid .form-row { flex: 1; min-width: 150px; margin: 0; }
 .ht-head { display: flex; align-items: center; justify-content: space-between; }
 .ht-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .ht-meta { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); }

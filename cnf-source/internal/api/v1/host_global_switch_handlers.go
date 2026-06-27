@@ -43,7 +43,7 @@ func joinComma(parts []string) string { return strings.Join(parts, ",") }
 
 // 第5点 全局交换机（Global / Distributed Switch）——「一份规格，多主机一致下发」。
 //
-// 设计（VMware 分布式交换机的 Linux 等价物）：
+// 设计（分布式交换机的 Linux 等价物）：
 //   - 用户定义一套标准交换机规格（网桥名 / bond 模式 / IP 模式），并勾选一组主机。
 //   - 平台逐主机复用 CreateStandardSwitch 真实下发（nmcli bridge+bond），并行（限并发 4）。
 //   - 每台主机独立选择上行物理网卡（各主机网卡名/数量可能不同），保证落地真实。

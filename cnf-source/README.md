@@ -1,6 +1,6 @@
 # CNFv1.0 — Cloud Native Foundation v1.0
 
-> 企业级私有云虚拟化管理平台，对标 VMware vSphere 8 / SmartX ELF。
+> 企业级私有云虚拟化管理平台，对标业界主流虚拟化平台。
 > 目标 OS：**Rocky Linux 9.x / RHEL 9.x**。技术栈：**Go 1.22 + Fiber v3 + PostgreSQL 16 + libvirt/KVM**。
 
 本目录是 **路径 A（源码工程）** 的完整交付物。代码在沙箱中经过编译与单元测试验证，

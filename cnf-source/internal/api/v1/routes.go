@@ -94,6 +94,10 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/hosts/:id/vlans/trunk", h.setHostTrunk, h.Mw.RequirePermission("host.update"))
 	api.Post("/hosts/:id/vlans", h.createHostVLAN, h.Mw.RequirePermission("host.update"))
 	api.Delete("/hosts/:id/vlans/:name", h.deleteHostVLAN, h.Mw.RequirePermission("host.update"))
+	// 第7点 服务接口 / 流量标签（management/vmotion/storage…）：主机级带 IP 的服务接口
+	api.Get("/hosts/:id/vmkernels", h.getHostVMKernels, h.Mw.RequirePermission("host.read"))
+	api.Post("/hosts/:id/vmkernels", h.createHostVMKernel, h.Mw.RequirePermission("host.update"))
+	api.Delete("/hosts/:id/vmkernels/:name", h.deleteHostVMKernel, h.Mw.RequirePermission("host.update"))
 	// 主机防火墙（firewalld）：读状态 / 开关 / 平台端口放行 / 自定义端口策略（单机 + 多机批量）
 	// 批量端点为静态段，置于 /hosts/:id/firewall 之前确保不被当作 :id。
 	api.Post("/hosts/firewall/batch", h.postFirewallBatch, h.Mw.RequirePermission("host.update"))

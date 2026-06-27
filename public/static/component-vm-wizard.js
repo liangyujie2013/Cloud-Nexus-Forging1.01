@@ -3,7 +3,7 @@
 //  7 步：① 操作系统 & 名称（GuestOS 选择 + 固件/机器类型自动推导）
 //        ② 放置位置（数据中心 → 集群 → 宿主机 + 资源容量校验）
 //        ③ CPU & 内存（默认仅 vCPU 数；高级可展开 Socket×Core×Thread）
-//        ④ NUMA & 绑核（NUMA 节点选择 + 自动绑核，参考 SmartX CloudTower，废弃 128 格子）
+//        ④ NUMA & 绑核（NUMA 节点选择 + 自动绑核，废弃 128 格子）
 //        ⑤ 磁盘 & 网络（含 multiqueue 网卡队列）
 //        ⑥ GPU 设备（仅当目标主机有可用 GPU 且已启用 IOMMU）
 //        ⑦ libvirt Domain XML 预览 & 创建

@@ -685,7 +685,7 @@ const ComputeView = {
             </div>
           </template>
 
-          <!-- 完整编辑：多页签（硬件/磁盘/网络/引导）对标 vSphere 「编辑设置」 -->
+          <!-- 完整编辑：多页签（硬件/磁盘/网络/引导）对标主流平台「编辑设置」 -->
           <template v-else>
             <div v-if="editDlg.loading" class="modal-body" style="text-align:center;padding:40px"><i class="fas fa-spinner fa-spin" style="font-size:24px;color:var(--text-tertiary)"></i></div>
             <template v-else-if="editDlg.config">
