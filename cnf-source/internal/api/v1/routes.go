@@ -84,6 +84,12 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Get("/hosts/:id/switches", h.getHostSwitches, h.Mw.RequirePermission("host.read"))
 	api.Post("/hosts/:id/switches", h.createHostSwitch, h.Mw.RequirePermission("host.update"))
 	api.Delete("/hosts/:id/switches/:name", h.deleteHostSwitch, h.Mw.RequirePermission("host.update"))
+	// 第6点 VLAN（access 端口组 + trunk 中继 via nmcli/bridge）：读 / 建 access / 删 access / 设 trunk。
+	// trunk 为静态段，置于 :name 之前避免被当作端口组名。
+	api.Get("/hosts/:id/vlans", h.getHostVLANs, h.Mw.RequirePermission("host.read"))
+	api.Post("/hosts/:id/vlans/trunk", h.setHostTrunk, h.Mw.RequirePermission("host.update"))
+	api.Post("/hosts/:id/vlans", h.createHostVLAN, h.Mw.RequirePermission("host.update"))
+	api.Delete("/hosts/:id/vlans/:name", h.deleteHostVLAN, h.Mw.RequirePermission("host.update"))
 	// 主机防火墙（firewalld）：读状态 / 开关 / 平台端口放行 / 自定义端口策略（单机 + 多机批量）
 	// 批量端点为静态段，置于 /hosts/:id/firewall 之前确保不被当作 :id。
 	api.Post("/hosts/firewall/batch", h.postFirewallBatch, h.Mw.RequirePermission("host.update"))
