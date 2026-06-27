@@ -35,6 +35,7 @@ Benchmarked against leading virtualization management platforms
 | **企业级迁移** | 跨数据中心 / 跨集群 / 跨节点迁移；**同指令集跨代 CPU 兼容**；**网络一致性冷/热迁移判定** |
 | **存储** | 存储池（local / NFS / iSCSI / FC / 分布式）、卷管理、快照（级联安全约束）、**存储迁移** |
 | **网络** | 虚拟交换机、VLAN、网卡 Bond、网络拓扑 |
+| **主机网络与安全**（真实落地） | 防火墙、SELinux、SSH 端口、标准交换机、全局交换机（多主机一致下发）、VLAN（access/trunk）、**服务接口/流量标签**、维护模式 — 经 SSH + nmcli 在物理主机闭环验证 |
 | **可用性** | 高可用策略、迁移记录、备份任务 |
 | **监控** | 集群 KPI、实时主机/GPU 指标（SSE 推送）、历史趋势图、告警规则 |
 | **访问控制** | 用户 / 角色 / 权限 / 操作审计、License 节点分级（社区 1–3 / 标准 4–31 / 企业 32–64） |
@@ -133,6 +134,7 @@ npm run build
 | **Enterprise Migration** | Cross-datacenter / cross-cluster / cross-host migration; **same-ISA cross-generation CPU compatibility**; **network-consistency-based live/cold decision** |
 | **Storage** | Storage pools (local / NFS / iSCSI / FC / distributed), volumes, snapshots with cascade-safety, **storage migration** |
 | **Networking** | Virtual switches, VLANs, NIC bonding, network topology |
+| **Host network & security** (real) | Firewall, SELinux, SSH port, standard switch, global switch (consistent multi-host rollout), VLAN (access/trunk), **service interfaces / traffic labels**, maintenance mode — verified end-to-end on physical hosts via SSH + nmcli |
 | **Availability** | High-availability policies, migration records, backup jobs |
 | **Monitoring** | Cluster KPIs, real-time host/GPU metrics (SSE), time-series charts, alert rules |
 | **Access Control** | Users / roles / privileges / audit logs; license tiers (Community 1–3 / Standard 4–31 / Enterprise 32–64) |

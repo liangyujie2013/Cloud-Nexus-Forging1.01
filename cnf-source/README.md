@@ -45,6 +45,24 @@ cnf-source/
 | **磁盘 QoS / 链式克隆** | 同上 | iotune + backingStore |
 | **统一存储驱动** | `internal/storage/` | local(qcow2) / NFS(mount) / iSCSI(iscsiadm+LVM) |
 
+## 主机网络与安全管理（真实落地 · 经 SSH + nmcli 在物理主机验证）
+
+`internal/hostops/` 通过 SSH 在被纳管主机上真实读取与下发配置，全部基于 `nmcli` / `firewall-cmd` / `bridge`，
+真实采集、安全确认（涉及管理网卡需显式 ack）、幂等、失败回滚；**绝不伪造数据，错误显式上报**。
+
+| # | 能力 | 文件 | 说明 |
+|---|------|------|------|
+| 1 | **防火墙管理** | `internal/hostops/firewall.go` | firewalld 区域/端口/服务真实读写，批量端口操作 |
+| 2 | **SELinux 管理** | `internal/hostops/selinux.go` | 模式读取/切换（enforcing/permissive） |
+| 3 | **SSH 端口管理** | `internal/hostops/ssh.go` | sshd 端口读取/变更（含 SELinux 端口标注 + 防火墙放行联动） |
+| 4 | **标准交换机** | `internal/hostops/switch.go` | Linux 网桥（标准交换机等价物）+ 上行口绑定 / bond 模式 |
+| 5 | **全局交换机** | `internal/api/v1/host_global_switch_handlers.go` | 一份规格 → 多主机一致下发（并发），返回逐主机结果 + 一致性状态 |
+| 6 | **VLAN** | `internal/hostops/vlan.go` | access 端口组（VLAN 子接口 + 专属转发网桥）+ trunk 中继（网桥 VLAN 过滤透传） |
+| 7 | **服务接口 / 流量标签** | `internal/hostops/vmkernel.go` | 主机级带 IP 的服务网络接口；6 种流量标签（管理/迁移/存储/容错/复制/置备），双重持久化（连接命名 + firewalld 区域） |
+| 8 | **主机右键菜单 / 维护模式** | 前端 + `internal/api/v1/host_*` | 主机生命周期操作 + 维护模式联动 |
+
+> 流量标签持久化采用「连接命名 `vmk-<role>`（事实来源，版本无关）+ `connection.zone=cnf-<role>`（firewalld 语义）」双重手段，重启/重连后仍可稳健解析；`vmk-` 仅为内部短前缀标识，与任何第三方品牌无关。
+
 ## 数据库设计
 
 - `0001_init_hierarchy.up.sql`：datacenters → clusters → hosts → storage_pools / networks（外键级联）
