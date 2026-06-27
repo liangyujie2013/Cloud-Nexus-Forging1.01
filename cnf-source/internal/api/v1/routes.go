@@ -96,6 +96,9 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Post("/hosts/:id/maintenance", h.setHostMaintenance, h.Mw.RequirePermission("host.update"))
 	// 主机电源：reboot/shutdown 经 SSH 真实下发（power_on 需带外，明确不支持）
 	api.Post("/hosts/:id/power", h.hostPower, h.Mw.RequirePermission("host.update"))
+	// 连接管理：重新连接（SSH 探活后置 connected）/ 断开（仅标记 disconnected，保留凭据）
+	api.Post("/hosts/:id/reconnect", h.reconnectHost, h.Mw.RequirePermission("host.update"))
+	api.Post("/hosts/:id/disconnect", h.disconnectHost, h.Mw.RequirePermission("host.update"))
 	api.Delete("/hosts/:id", h.deleteHost, h.Mw.RequirePermission("host.delete"))
 
 	// ---- 虚拟机生命周期（RBAC: vm.*） ----

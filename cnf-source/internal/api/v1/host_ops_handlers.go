@@ -404,3 +404,56 @@ func (h *Handlers) setHostMaintenance(c fiber.Ctx) error {
 	// message 同时置于 data 内：前端 window.api() 成功时解包返回 data，需在 data 内才能读到提示文案。
 	return c.JSON(fiber.Map{"data": fiber.Map{"status": string(status), "message": msg}, "message": msg})
 }
+
+// ============================================================
+//  连接管理：重新连接 / 断开连接（真实联动 DB 状态 + SSH 探活）
+// ============================================================
+
+// reconnectHost POST /hosts/:id/reconnect —— 用存储的 SSH 凭据重新拨号探活。
+//
+// 成功：将主机状态置为 connected 并返回实时状态快照。
+// 失败：返回明确错误码（NO_CREDENTIAL / SSH_UNREACHABLE），不修改 DB（避免假“已连接”）。
+func (h *Handlers) reconnectHost(c fiber.Ctx) error {
+	id, err := paramInt(c, "id")
+	if err != nil {
+		return badRequest(c, "id 非法")
+	}
+	cli, err := h.dialHost(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, mysql.ErrNoCredential) {
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"data":  fiber.Map{"reachable": false},
+				"error": "该主机未存储 SSH 凭据，无法重新连接。请先更新凭据或重新纳管。",
+				"code":  "NO_CREDENTIAL",
+			})
+		}
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"data":  fiber.Map{"reachable": false},
+			"error": "SSH 连接失败：" + err.Error(),
+			"code":  "SSH_UNREACHABLE",
+		})
+	}
+	defer cli.Close()
+	// 探活通过：真实采集一次状态，并将 DB 状态同步为 connected。
+	st, _ := hostops.CollectStatus(cli)
+	_ = h.MySQL.UpdateHostStatus(c.Context(), id, model.HostConnected)
+	h.audit(c, "host.reconnect", "host", id, nil)
+	msg := "已重新连接，主机在线"
+	return c.JSON(fiber.Map{"data": fiber.Map{"status": string(model.HostConnected), "reachable": true, "live": st, "message": msg}, "message": msg})
+}
+
+// disconnectHost POST /hosts/:id/disconnect —— 将主机标记为断开（仅改 DB 状态，不动主机本身）。
+//
+// 用于运维上「暂时不纳入调度/监控」的场景；凭据与配置保留，可随时重新连接。
+func (h *Handlers) disconnectHost(c fiber.Ctx) error {
+	id, err := paramInt(c, "id")
+	if err != nil {
+		return badRequest(c, "id 非法")
+	}
+	if err := h.MySQL.UpdateHostStatus(c.Context(), id, model.HostDisconnected); err != nil {
+		return hierarchyError(c, err)
+	}
+	h.audit(c, "host.disconnect", "host", id, nil)
+	msg := "已断开连接（凭据与配置已保留，可随时重新连接）"
+	return c.JSON(fiber.Map{"data": fiber.Map{"status": string(model.HostDisconnected), "message": msg}, "message": msg})
+}

@@ -475,6 +475,24 @@ const HostsView = {
       if (command === 'enter_maintenance') return toggleMaintenance(host)
       if (command === 'exit_maintenance') return toggleMaintenance(host)
       if (command === 'remove') return removeHostCtx(host)
+      if (command === 'reconnect') {
+        toast(t('hctx_reconnecting'), 'info')
+        const res = await api('/hosts/' + host.id + '/reconnect', { method: 'POST' })
+        if (res && res.error) return toast(res.error, 'error')
+        toast((res && res.message) || t('toast_success'), 'success')
+        await store.fetchAll()
+        if (selectedId.value === host.id) await openDetail(host.id)
+        return
+      }
+      if (command === 'disconnect') {
+        if (!confirm(t('hctx_disconnect_confirm', { name: host.name }))) return
+        const res = await api('/hosts/' + host.id + '/disconnect', { method: 'POST' })
+        if (res && res.error) return toast(res.error, 'error')
+        toast((res && res.message) || t('toast_success'), 'warning')
+        await store.fetchAll()
+        return
+      }
+      if (command === 'open_shell') return openShell(host)
       if (command === 'power_on' || command === 'reboot' || command === 'shutdown') {
         if (command === 'shutdown' && !confirm(t('hctx_shutdown_confirm', { name: host.name }))) return
         const res = await api('/hosts/' + host.id + '/power', { method: 'POST', body: JSON.stringify({ action: command }) })
@@ -483,6 +501,20 @@ const HostsView = {
         await store.fetchAll()
         if (selectedId.value === host.id) await openDetail(host.id)
       }
+    }
+    // SSH 终端：浏览器无法直接开原生终端，提供真实可复制的 SSH 连接信息（端口取实时凭据）。
+    const shellDlg = reactive({ open: false, host: null, port: 22, cmd: '' })
+    const openShell = async (host) => {
+      shellDlg.host = host; shellDlg.port = 22; shellDlg.open = true
+      try {
+        const st = await api('/hosts/' + host.id + '/status')
+        if (st && st.reachable !== false && st.ssh_port) shellDlg.port = st.ssh_port
+      } catch (e) {}
+      shellDlg.cmd = 'ssh -p ' + shellDlg.port + ' root@' + (host.ip || host.ip_address || '')
+    }
+    const copyShellCmd = async () => {
+      try { await navigator.clipboard.writeText(shellDlg.cmd); toast(t('hctx_shell_copied'), 'success') }
+      catch (e) { toast(shellDlg.cmd, 'info') }
     }
     const removeHostCtx = async (host) => {
       const res = await store.removeHost(host.id)
@@ -716,7 +748,7 @@ const HostsView = {
       props, hosts, filteredHosts, search, statusFilter, statusMeta, openDetail, backToList, addHost,
       selectedId, detail, liveStatus, hwCaps, hwInv, hwProbe, detailMetric, detailTab, loading, showDetailView, detailHost, detailVMs,
       toggleMaintenance, maintBusy, blockDlg, gotoMigrate,
-      hostCtx, onHostCtxAction,
+      hostCtx, onHostCtxAction, shellDlg, copyShellCmd,
       metricsLoading, refreshMetrics, hMetric, pctText, pctWidth, uptimeText,
       clusterGroups, netDlg, openNetEdit, submitNet, pickNic, batchDlg, openBatch, submitBatch,
       fwDlg, openFirewall, fwToggle, fwOpenPlatform, fwAddPort, fwRemovePort, reloadFirewall,
@@ -1339,6 +1371,25 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" @click="spBatch.open=false">{{ t('op_close') }}</button>
           <button class="apple-btn apple-btn--danger" :disabled="spBatch.busy || !spBatchCount || !spBatch.ack" @click="submitSpBatch"><i v-if="spBatch.busy" class="fas fa-spinner fa-spin"></i> {{ t('sp_batch_run') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== 主机 SSH 终端连接信息 ====================== -->
+    <div v-if="shellDlg.open" class="modal-mask" @click.self="shellDlg.open=false">
+      <div class="modal-dialog modal-sm">
+        <div class="modal-head"><i class="fas fa-terminal" :style="{color:C.indigo}"></i> {{ t('hctx_open_shell') }} <span class="muted" style="font-weight:400">· {{ shellDlg.host && shellDlg.host.name }}</span></div>
+        <div class="modal-body">
+          <div class="hosts-pick-hint" style="margin-bottom:12px"><i class="fas fa-circle-info"></i> {{ t('hctx_shell_hint') }}</div>
+          <div class="form-row"><label>{{ t('hctx_shell_cmd') }}</label>
+            <div style="display:flex;gap:8px">
+              <input class="mono" :value="shellDlg.cmd" readonly style="flex:1">
+              <button class="apple-btn apple-btn--secondary" @click="copyShellCmd"><i class="fas fa-copy"></i> {{ t('hctx_shell_copy') }}</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" @click="shellDlg.open=false">{{ t('op_close') }}</button>
         </div>
       </div>
     </div>

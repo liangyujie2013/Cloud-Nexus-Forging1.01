@@ -120,7 +120,13 @@ const InfrastructureView = {
     //  对标 VMware 资源池：份额(shares) + CPU/内存上限(limit) + 预留(reservation)
     // ============================================================
     const poolDlg = ref({ open: false, mode: 'create', id: null, form: {}, err: {}, saving: false })
-    const reloadPools = async () => { pools.value = await window.api('/resource-pools') }
+    // 资源池后端就绪状态：后端未实现(404)时显示诚实「功能未就绪」空态，绝不把 error 渲染成假卡片。
+    const poolsReady = ref(true)
+    const reloadPools = async () => {
+      const res = await window.api('/resource-pools')
+      if (Array.isArray(res)) { pools.value = res; poolsReady.value = true }
+      else { pools.value = []; poolsReady.value = false }  // error / 404：清空 + 标记未就绪
+    }
     const openPoolCreate = () => {
       poolDlg.value = {
         open: true, mode: 'create', id: null,
@@ -224,7 +230,7 @@ const InfrastructureView = {
 
     const load = async () => {
       await store.fetchAll()
-      if (props.tab === 'pools' && !pools.value.length) pools.value = await window.api('/resource-pools')
+      if (props.tab === 'pools') await reloadPools()
     }
     onMounted(load)
     watch(() => props.tab, load)
@@ -242,7 +248,7 @@ const InfrastructureView = {
     const sharesLabel = (s) => ({ high: t('shares_high'), normal: t('shares_normal'), low: t('shares_low') }[s] || s)
 
     return {
-      props, pools, datacenters, clusters, hosts,
+      props, pools, poolsReady, datacenters, clusters, hosts,
       infraSummary, dcHealth,
       expandedHost, toggleHost, blockDlg, addHost,
       delDatacenter, delCluster, delHost,
@@ -321,26 +327,30 @@ const InfrastructureView = {
         <div class="apple-card" style="padding:0">
           <table class="apple-table">
             <thead><tr>
-              <th>{{ t('name') }}</th><th>{{ t('host_dc') }}</th><th>HA</th><th>{{ t('nav_drs') }}</th><th>CPU{{ t('cc_cpu_over') }}</th>
-              <th>{{ t('host_machine') }}</th><th>{{ t('dash_vms') }}</th><th style="width:120px">{{ t('op_actions') }}</th>
+              <th>{{ t('name') }}</th><th>{{ t('host_dc') }}</th><th style="text-align:center">HA</th><th style="text-align:center">{{ t('nav_drs') }}</th><th style="text-align:center">{{ t('cc_cpu_over') }}</th>
+              <th style="text-align:center">{{ t('host_machine') }}</th><th style="text-align:center">{{ t('dash_vms') }}</th><th style="width:150px;text-align:right">{{ t('op_actions') }}</th>
             </tr></thead>
             <tbody>
               <tr v-for="c in clusters" :key="c.id" :class="{focused: focusType==='cluster' && focusId===c.id}"
                   @contextmenu="clCtx.open($event, c)">
-                <td><strong>{{ c.name }}</strong><div class="muted" style="font-size:12px">{{ c.description }}</div></td>
+                <td><strong>{{ c.name }}</strong><div class="muted" style="font-size:12px">{{ c.description || t('cl_no_desc') }}</div></td>
                 <td><span class="apple-badge"><i class="fas fa-building"></i> {{ c.datacenter_name }}</span></td>
-                <td><i :class="c.ha_enabled?'fas fa-circle-check':'far fa-circle'" :style="{color:c.ha_enabled?'var(--color-green)':'var(--text-tertiary)'}"></i></td>
-                <td><i :class="c.drs_enabled?'fas fa-circle-check':'far fa-circle'" :style="{color:c.drs_enabled?'var(--color-green)':'var(--text-tertiary)'}"></i></td>
-                <td class="mono">{{ c.overcommit_cpu }}×</td>
-                <td><strong>{{ c.host_online }}</strong><span class="muted">/{{ c.host_count }}</span></td>
-                <td><strong>{{ c.vm_running }}</strong><span class="muted">/{{ c.vm_count }}</span></td>
-                <td>
-                  <button class="icon-btn" :title="t('hw_add_host')" @click="addHost(c.id)"><i class="fas fa-plus"></i></button>
-                  <button class="icon-btn" :title="t('op_edit')" @click="openClEdit(c)"><i class="fas fa-pen"></i></button>
-                  <button class="icon-btn danger" :title="t('op_delete')" @click="delCluster(c)"><i class="fas fa-trash"></i></button>
-                  <button class="icon-btn" :title="t('ctx_more_actions')" @click.stop="clCtx.open($event, c)"><i class="fas fa-ellipsis-vertical"></i></button>
+                <td style="text-align:center">
+                  <span class="apple-badge" :class="c.ha_enabled?'apple-badge--success':'apple-badge--secondary'"><span class="dot"></span>{{ c.ha_enabled ? t('cc_on') : t('cc_off') }}</span>
+                </td>
+                <td style="text-align:center">
+                  <span class="apple-badge" :class="c.drs_enabled?'apple-badge--success':'apple-badge--secondary'"><span class="dot"></span>{{ c.drs_enabled ? t('cc_on') : t('cc_off') }}</span>
+                </td>
+                <td style="text-align:center" class="mono" :title="t('cc_cpu_over')">{{ c.overcommit_cpu }}×</td>
+                <td style="text-align:center"><strong :style="{color: c.host_online < c.host_count ? 'var(--color-orange)' : 'inherit'}">{{ c.host_online }}</strong><span class="muted">/{{ c.host_count }}</span></td>
+                <td style="text-align:center"><strong>{{ c.vm_running }}</strong><span class="muted">/{{ c.vm_count }}</span></td>
+                <td style="text-align:right;white-space:nowrap">
+                  <button class="apple-btn apple-btn--ghost apple-btn--sm" :title="t('hw_add_host')" @click="addHost(c.id)"><i class="fas fa-plus"></i> {{ t('hw_add_host_short') }}</button>
+                  <button class="apple-btn apple-btn--ghost apple-btn--sm" :title="t('op_edit')" @click="openClEdit(c)"><i class="fas fa-pen"></i></button>
+                  <button class="apple-btn apple-btn--ghost apple-btn--sm" :title="t('ctx_more_actions')" @click.stop="clCtx.open($event, c)"><i class="fas fa-ellipsis-vertical"></i></button>
                 </td>
               </tr>
+              <tr v-if="!clusters.length"><td colspan="8" style="text-align:center;padding:32px;color:var(--text-tertiary)"><i class="fas fa-inbox" style="font-size:28px"></i><div style="margin-top:8px">{{ t('op_no_data') }}</div></td></tr>
             </tbody>
           </table>
         </div>
@@ -408,11 +418,17 @@ const InfrastructureView = {
       <!-- ===== pools：资源池（N2 完整 CRUD — 对标 VMware 资源池）===== -->
       <template v-else>
         <div class="crud-toolbar">
-          <button class="apple-btn apple-btn--primary" @click="openPoolCreate"><i class="fas fa-plus"></i> {{ t('pool_add') }}</button>
+          <button class="apple-btn apple-btn--primary" :disabled="!poolsReady" @click="openPoolCreate"><i class="fas fa-plus"></i> {{ t('pool_add') }}</button>
           <div class="spacer"></div>
           <span class="muted" style="font-size:13px">{{ pools.length }} {{ t('pool_title') }}</span>
         </div>
-        <div class="grid grid-3">
+        <!-- 后端未就绪：诚实告知（不渲染任何假卡片），与「无数据」明确区分 -->
+        <div v-if="!poolsReady" class="apple-card" style="text-align:center;padding:48px 24px">
+          <i class="fas fa-screwdriver-wrench" style="font-size:34px;color:var(--color-orange)"></i>
+          <div style="margin-top:12px;font-weight:600">{{ t('pool_unready_title') }}</div>
+          <div class="muted" style="margin-top:6px;font-size:13px;max-width:460px;margin-left:auto;margin-right:auto">{{ t('pool_unready_hint') }}</div>
+        </div>
+        <div v-else class="grid grid-3">
           <div class="apple-card pool-card" v-for="p in pools" :key="p.id">
             <div class="flex between" style="margin-bottom:6px">
               <strong>{{ p.name }}</strong>

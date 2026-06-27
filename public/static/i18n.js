@@ -95,6 +95,7 @@ const dict = {
     cc_full: '全自动', cc_aggr: '迁移阈值（激进度）',
     cc_admission: '准入控制', cc_admission_desc: '预留故障切换容量，保证 HA 资源',
     cc_host_failures: '容许主机故障数', cc_cpu_over: 'CPU 超分配比', cc_mem_over: '内存超分配比',
+    cc_on: '已启用', cc_off: '未启用', cl_no_desc: '（无描述）', hw_add_host_short: '主机',
     cc_evc_baseline: 'CPU 基线', cc_members: '集群成员主机', cc_saved: '集群设置已保存',
 
     // 权限管理（RBAC）
@@ -461,6 +462,7 @@ const dict = {
     bond_need_two: '该 bond 模式至少需要选择 2 块网卡',
 
     // ===== 基础设施 · 资源池 =====
+    pool_unready_title: '资源池功能正在建设中', pool_unready_hint: '该模块的后端服务尚未上线（/resource-pools 暂未实现）。为避免展示不真实的占位数据，此处暂不显示任何资源池。后端就绪后将自动展示真实数据。',
     pool_title: '资源池', pool_add: '新建资源池', pool_cpu_limit: 'CPU 上限',
     pool_cpu_reserved: 'CPU 预留', pool_mem_limit: '内存上限', pool_mem_reserved: '内存预留', pool_vms: '虚拟机数',
     shares_high: '高份额', shares_normal: '正常份额', shares_low: '低份额',
@@ -550,6 +552,10 @@ const dict = {
     host_st_online: '已连接', host_st_maint: '维护模式', host_st_offline: '已断开',
     // N3 主机右键菜单
     hctx_group_power: '电源（IPMI/BMC）', hctx_group_maint: '维护', hctx_group_config: '网络与配置',
+    hctx_group_conn: '连接管理', hctx_reconnect: '重新连接', hctx_disconnect: '断开连接', hctx_open_shell: '连接 Shell 终端',
+    hctx_reconnecting: '正在重新连接…', hctx_disconnect_confirm: '确认断开主机 {name}？将标记为离线（凭据与配置保留，可随时重连）。',
+    hctx_shell_hint: '浏览器无法直接打开本机终端。请复制下方命令到你的终端（已自动填入实时 SSH 端口）。',
+    hctx_shell_cmd: 'SSH 连接命令', hctx_shell_copy: '复制', hctx_shell_copied: '已复制到剪贴板',
     hctx_power_on: '开机', hctx_reboot: '重启主机', hctx_shutdown: '关机',
     hctx_enter_maint: '进入维护模式', hctx_exit_maint: '退出维护模式',
     hctx_edit_network: '修改管理网络', hctx_open_detail: '主机详情', hctx_remove: '从集群移除',
@@ -717,6 +723,7 @@ const dict = {
     cc_full: 'Fully Automated', cc_aggr: 'Migration Threshold (Aggressiveness)',
     cc_admission: 'Admission Control', cc_admission_desc: 'Reserve failover capacity to guarantee HA',
     cc_host_failures: 'Host failures to tolerate', cc_cpu_over: 'CPU Overcommit', cc_mem_over: 'Memory Overcommit',
+    cc_on: 'Enabled', cc_off: 'Disabled', cl_no_desc: '(no description)', hw_add_host_short: 'Host',
     cc_evc_baseline: 'CPU Baseline', cc_members: 'Cluster Member Hosts', cc_saved: 'Cluster settings saved',
 
     perm_roles: 'Roles', perm_users: 'Users & Global Permissions', perm_role_def: 'Role Definitions',
@@ -1067,6 +1074,7 @@ const dict = {
     bond_need_two: 'This bond mode requires at least 2 NICs',
 
     // ===== Infrastructure resource pools =====
+    pool_unready_title: 'Resource Pools — under construction', pool_unready_hint: 'The backend for this module is not online yet (/resource-pools not implemented). To avoid showing fake placeholder data, no pools are displayed here. Real data will appear automatically once the backend is ready.',
     pool_title: 'Resource Pools', pool_add: 'New Pool', pool_cpu_limit: 'CPU Limit',
     pool_cpu_reserved: 'CPU Reserved', pool_mem_limit: 'Mem Limit', pool_mem_reserved: 'Mem Reserved', pool_vms: 'VMs',
     shares_high: 'High Shares', shares_normal: 'Normal Shares', shares_low: 'Low Shares',
@@ -1151,6 +1159,10 @@ const dict = {
     host_search_ph: 'Search hostname / IP / cluster', host_filter_all: 'All Status',
     host_st_online: 'Connected', host_st_maint: 'Maintenance', host_st_offline: 'Disconnected',
     hctx_group_power: 'Power (IPMI/BMC)', hctx_group_maint: 'Maintenance', hctx_group_config: 'Network & Config',
+    hctx_group_conn: 'Connection', hctx_reconnect: 'Reconnect', hctx_disconnect: 'Disconnect', hctx_open_shell: 'Open Shell',
+    hctx_reconnecting: 'Reconnecting…', hctx_disconnect_confirm: 'Disconnect host {name}? It will be marked offline (credentials & config kept, reconnect anytime).',
+    hctx_shell_hint: 'The browser cannot open a native terminal. Copy the command below to your terminal (live SSH port pre-filled).',
+    hctx_shell_cmd: 'SSH command', hctx_shell_copy: 'Copy', hctx_shell_copied: 'Copied to clipboard',
     hctx_power_on: 'Power On', hctx_reboot: 'Reboot Host', hctx_shutdown: 'Shut Down',
     hctx_enter_maint: 'Enter Maintenance Mode', hctx_exit_maint: 'Exit Maintenance Mode',
     hctx_edit_network: 'Edit Management Network', hctx_open_detail: 'Host Details', hctx_remove: 'Remove from Cluster',

@@ -298,6 +298,11 @@ function buildHostMenu(h) {
   const maintenance = h.status === 'maintenance' || h.maintenance_mode
   const off = h.status === 'disconnected' || h.status === 'poweroff'
   return [
+    { group: 'hctx_group_conn', items: [
+      { command: 'reconnect', label: 'hctx_reconnect', icon: 'fa-plug-circle-check', hint: 'SSH 重新探活并恢复在线状态' },
+      { command: 'disconnect', label: 'hctx_disconnect', icon: 'fa-plug-circle-xmark', disabled: off, hint: '标记断开（保留凭据，可随时重连）' },
+      { command: 'open_shell', label: 'hctx_open_shell', icon: 'fa-terminal', disabled: off, hint: '打开 SSH 终端窗口' },
+    ]},
     { group: 'hctx_group_power', items: [
       { command: 'power_on', label: 'hctx_power_on', icon: 'fa-play', disabled: connected || maintenance, hint: 'IPMI/BMC 开机' },
       { command: 'reboot', label: 'hctx_reboot', icon: 'fa-rotate-right', disabled: off, hint: '重启宿主机' },
