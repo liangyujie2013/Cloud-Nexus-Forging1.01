@@ -493,6 +493,118 @@ const HostsView = {
       } catch (err) { toast(t('op_failed'), 'error') } finally { swDlg.busy = false }
     }
 
+    // ====================== 第6点 · VLAN（access 端口组 + trunk 中继）======================
+    const vlanDlg = reactive({
+      open: false, busy: false, loading: false, host: null,
+      loadError: '', reachable: true, hasNm: true,
+      accessPorts: [], trunkBridges: [], parents: [], warnings: [],
+      mode: 'access', // access | trunk
+      acc: { parent: '', vlanId: 100, bridgeName: '', ackMgmt: false },
+      trk: { bridge: '', vlansText: '', ackMgmt: false },
+      errors: {},
+    })
+    const vlanAccParentIsMgmt = computed(() => {
+      const p = vlanDlg.parents.find((x) => x.device === vlanDlg.acc.parent)
+      return !!(p && p.is_mgmt)
+    })
+    const vlanTrkBridgeIsMgmt = computed(() => {
+      const p = vlanDlg.parents.find((x) => x.device === vlanDlg.trk.bridge && x.kind === 'bridge')
+      return !!(p && p.is_mgmt)
+    })
+    const reloadVLANs = async () => {
+      vlanDlg.loading = true; vlanDlg.loadError = ''
+      try {
+        const res = await api('/hosts/' + vlanDlg.host.id + '/vlans')
+        if (!res || res.error) { vlanDlg.loadError = (res && res.error) || t('swd_unreachable'); vlanDlg.reachable = false; return }
+        vlanDlg.reachable = res.reachable !== false
+        vlanDlg.hasNm = res.has_nm !== false
+        vlanDlg.accessPorts = Array.isArray(res.access_ports) ? res.access_ports : []
+        vlanDlg.trunkBridges = Array.isArray(res.trunk_bridges) ? res.trunk_bridges : []
+        vlanDlg.parents = Array.isArray(res.parents) ? res.parents : []
+        vlanDlg.warnings = Array.isArray(res.warnings) ? res.warnings : []
+        if (!vlanDlg.reachable) vlanDlg.loadError = t('swd_unreachable')
+        else if (!vlanDlg.hasNm) vlanDlg.loadError = t('swd_no_nm')
+        // 默认选第一个父设备 / 网桥
+        if (!vlanDlg.acc.parent && vlanDlg.parents.length) vlanDlg.acc.parent = vlanDlg.parents[0].device
+        const brs = vlanDlg.parents.filter((p) => p.kind === 'bridge')
+        if (!vlanDlg.trk.bridge && brs.length) vlanDlg.trk.bridge = brs[0].device
+      } catch (e) { vlanDlg.loadError = t('op_failed') } finally { vlanDlg.loading = false }
+    }
+    const openVLAN = async (h) => {
+      vlanDlg.host = h
+      vlanDlg.accessPorts = []; vlanDlg.trunkBridges = []; vlanDlg.parents = []; vlanDlg.warnings = []
+      vlanDlg.errors = {}; vlanDlg.loadError = ''; vlanDlg.reachable = true; vlanDlg.hasNm = true; vlanDlg.mode = 'access'
+      vlanDlg.acc = { parent: '', vlanId: 100, bridgeName: '', ackMgmt: false }
+      vlanDlg.trk = { bridge: '', vlansText: '', ackMgmt: false }
+      vlanDlg.open = true
+      await reloadVLANs()
+    }
+    const submitAccessVLAN = async () => {
+      const e = {}
+      if (!vlanDlg.acc.parent) e.parent = t('op_required')
+      const vid = Number(vlanDlg.acc.vlanId)
+      if (!(vid >= 1 && vid <= 4094)) e.vlanId = t('vld_vlan_invalid')
+      if (vlanAccParentIsMgmt.value && !vlanDlg.acc.ackMgmt) e.ack = t('vld_mgmt_warn')
+      vlanDlg.errors = e
+      if (Object.keys(e).length) return
+      vlanDlg.busy = true
+      try {
+        const payload = { parent: vlanDlg.acc.parent, vlan_id: vid, ack_mgmt_risk: vlanDlg.acc.ackMgmt }
+        if ((vlanDlg.acc.bridgeName || '').trim()) payload.bridge_name = vlanDlg.acc.bridgeName.trim()
+        const res = await api('/hosts/' + vlanDlg.host.id + '/vlans', { method: 'POST', body: JSON.stringify(payload) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        toast((res && res.message) || t('vld_created'), 'success')
+        vlanDlg.acc.ackMgmt = false
+        await reloadVLANs()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { vlanDlg.busy = false }
+    }
+    const submitTrunk = async () => {
+      const e = {}
+      if (!vlanDlg.trk.bridge) e.bridge = t('op_required')
+      // 解析 VLAN 列表：支持逗号分隔与 a-b 范围。
+      const vlans = []
+      const seen = {}
+      let bad = false
+      ;(vlanDlg.trk.vlansText || '').split(',').forEach((tok) => {
+        tok = tok.trim()
+        if (!tok) return
+        if (tok.indexOf('-') > 0) {
+          const [a, b] = tok.split('-').map((x) => Number(x.trim()))
+          if (!(a >= 1 && b <= 4094 && a <= b)) { bad = true; return }
+          for (let v = a; v <= b; v++) { if (!seen[v]) { seen[v] = 1; vlans.push(v) } }
+        } else {
+          const v = Number(tok)
+          if (!(v >= 1 && v <= 4094)) { bad = true; return }
+          if (!seen[v]) { seen[v] = 1; vlans.push(v) }
+        }
+      })
+      if (bad || !vlans.length) e.vlans = t('vld_vlan_invalid')
+      if (vlanTrkBridgeIsMgmt.value && !vlanDlg.trk.ackMgmt) e.ack = t('vld_mgmt_warn')
+      vlanDlg.errors = e
+      if (Object.keys(e).length) return
+      vlanDlg.busy = true
+      try {
+        const payload = { bridge: vlanDlg.trk.bridge, vlans, ack_mgmt_risk: vlanDlg.trk.ackMgmt }
+        const res = await api('/hosts/' + vlanDlg.host.id + '/vlans/trunk', { method: 'POST', body: JSON.stringify(payload) })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        toast((res && res.message) || t('vld_trunk_done'), 'success')
+        vlanDlg.trk.ackMgmt = false
+        await reloadVLANs()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { vlanDlg.busy = false }
+    }
+    const deleteAccessVLAN = async (port) => {
+      if (!window.confirm(t('vld_del_confirm'))) return
+      vlanDlg.busy = true
+      try {
+        const p = vlanDlg.parents.find((x) => x.device === port.parent)
+        const ack = (p && p.is_mgmt) ? '?ack_mgmt_risk=true' : ''
+        const res = await api('/hosts/' + vlanDlg.host.id + '/vlans/' + encodeURIComponent(port.name) + ack, { method: 'DELETE' })
+        if (res && res.error) { toast(res.error, 'error'); return }
+        toast((res && res.message) || t('vld_deleted'), 'success')
+        await reloadVLANs()
+      } catch (err) { toast(t('op_failed'), 'error') } finally { vlanDlg.busy = false }
+    }
+
 
     // react to nav tab changes（列表/管理/网络三个独立视图）
     watch(() => props.tab, (nv) => {
@@ -830,6 +942,7 @@ const HostsView = {
       metricsLoading, refreshMetrics, hMetric, pctText, pctWidth, uptimeText,
       clusterGroups, netDlg, openNetEdit, submitNet, pickNic,
       swDlg, openSwitch, toggleUplink, submitSwitch, deleteSwitch, swSelectedHasMgmt,
+      vlanDlg, openVLAN, submitAccessVLAN, submitTrunk, deleteAccessVLAN, vlanAccParentIsMgmt, vlanTrkBridgeIsMgmt,
       fwDlg, openFirewall, fwToggle, fwOpenPlatform, fwAddPort, fwRemovePort, reloadFirewall,
       fwBatch, openFwBatch, fwBatchCount, submitFwBatch,
       seDlg, openSelinux, submitSelinux, seBatch, openSeBatch, seBatchCount, submitSeBatch,
@@ -975,6 +1088,7 @@ const HostsView = {
                 <td style="text-align:right">
                   <button class="apple-btn apple-btn--secondary apple-btn--sm" @click="openNetEdit(h)"><i class="fas fa-ethernet"></i> {{ t('hv_open_net') }}</button>
                   <button class="apple-btn apple-btn--secondary apple-btn--sm" style="margin-left:6px" @click="openSwitch(h)"><i class="fas fa-diagram-project"></i> {{ t('swd_open') }}</button>
+                  <button class="apple-btn apple-btn--secondary apple-btn--sm" style="margin-left:6px" @click="openVLAN(h)"><i class="fas fa-tags"></i> {{ t('vld_open') }}</button>
                 </td>
               </tr>
               <tr v-if="!g.hosts.length"><td colspan="4" class="muted" style="text-align:center;padding:16px">{{ t('hmn_no_hosts') }}</td></tr>
@@ -1300,6 +1414,122 @@ const HostsView = {
         <div class="modal-foot">
           <button class="apple-btn apple-btn--ghost" :disabled="swDlg.busy" @click="swDlg.open=false">{{ t('op_cancel') }}</button>
           <button class="apple-btn apple-btn--primary" :disabled="swDlg.busy || swDlg.loading || !!swDlg.loadError || !swDlg.freeNics.length" @click="submitSwitch"><i v-if="swDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-check"></i> {{ t('swd_create') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 第6点 · VLAN 对话框（access 端口组 + trunk 中继）-->
+    <div v-if="vlanDlg.open" class="modal-mask" @click.self="!vlanDlg.busy && (vlanDlg.open=false)">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-head"><i class="fas fa-tags" :style="{color:C.purple||C.indigo}"></i> {{ t('vld_title') }}<span class="muted" style="font-weight:400;margin-left:8px" v-if="vlanDlg.host">· {{ vlanDlg.host.name }}</span></div>
+        <div class="modal-body">
+          <div class="muted" style="font-size:13px;line-height:1.6;margin-bottom:12px">{{ t('vld_desc') }}</div>
+
+          <div v-if="vlanDlg.loading" class="apple-card" style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>
+          <div v-else-if="vlanDlg.loadError" class="apple-alert apple-alert--error"><i class="fas fa-triangle-exclamation"></i> {{ vlanDlg.loadError }}</div>
+
+          <template v-else>
+            <div v-for="w in vlanDlg.warnings" :key="w" class="apple-alert apple-alert--warning" style="margin-bottom:10px"><i class="fas fa-circle-info"></i> {{ w }}</div>
+
+            <!-- 已有 access 端口组 -->
+            <div class="hw-section-title"><i class="fas fa-network-wired" :style="{color:C.indigo}"></i> {{ t('vld_access_existing') }}</div>
+            <div class="apple-card" style="padding:0;margin-bottom:14px">
+              <table class="apple-table">
+                <thead><tr><th>{{ t('vld_port_name') }}</th><th>{{ t('vld_vlan_id') }}</th><th>{{ t('vld_parent') }}</th><th>{{ t('swd_state') }}</th><th style="text-align:right">{{ t('actions') }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="p in vlanDlg.accessPorts" :key="p.name">
+                    <td><strong>{{ p.name }}</strong></td>
+                    <td><span class="apple-badge apple-badge--info"><span class="dot"></span>VLAN {{ p.vlan_id }}</span></td>
+                    <td class="mono" style="font-size:12px">{{ p.parent }} <span class="muted">({{ p.vlan_if }})</span></td>
+                    <td><span class="apple-badge" :class="p.state==='up'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ p.state||'—' }}</span></td>
+                    <td style="text-align:right"><button class="apple-btn apple-btn--ghost apple-btn--sm" :disabled="vlanDlg.busy" @click="deleteAccessVLAN(p)"><i class="fas fa-trash"></i> {{ t('vld_delete') }}</button></td>
+                  </tr>
+                  <tr v-if="!vlanDlg.accessPorts.length"><td colspan="5" class="muted" style="text-align:center;padding:16px">{{ t('vld_no_access') }}</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 已有 trunk 网桥 -->
+            <div class="hw-section-title"><i class="fas fa-code-branch" :style="{color:C.teal}"></i> {{ t('vld_trunk_existing') }}</div>
+            <div class="apple-card" style="padding:0;margin-bottom:14px">
+              <table class="apple-table">
+                <thead><tr><th>{{ t('sw_name') }}</th><th>{{ t('vld_allowed_vlans') }}</th><th>{{ t('swd_state') }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="tb in vlanDlg.trunkBridges" :key="tb.name">
+                    <td><strong>{{ tb.name }}</strong></td>
+                    <td class="mono" style="font-size:12px">{{ (tb.vlans||[]).join(', ') || '—' }}</td>
+                    <td><span class="apple-badge" :class="tb.state==='up'?'apple-badge--running':'apple-badge--stopped'"><span class="dot"></span>{{ tb.state||'—' }}</span></td>
+                  </tr>
+                  <tr v-if="!vlanDlg.trunkBridges.length"><td colspan="3" class="muted" style="text-align:center;padding:16px">{{ t('vld_no_trunk') }}</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 新建：模式切换 access / trunk -->
+            <div class="hw-section-title"><i class="fas fa-plus-circle" :style="{color:C.green}"></i> {{ t('vld_new') }}</div>
+            <div class="seg-control" style="margin-bottom:14px;display:inline-flex;border:1px solid var(--border-color);border-radius:8px;overflow:hidden">
+              <button class="apple-btn apple-btn--sm" :class="vlanDlg.mode==='access'?'apple-btn--primary':'apple-btn--ghost'" style="border-radius:0" @click="vlanDlg.mode='access'">{{ t('vld_mode_access') }}</button>
+              <button class="apple-btn apple-btn--sm" :class="vlanDlg.mode==='trunk'?'apple-btn--primary':'apple-btn--ghost'" style="border-radius:0" @click="vlanDlg.mode='trunk'">{{ t('vld_mode_trunk') }}</button>
+            </div>
+
+            <!-- access 表单 -->
+            <template v-if="vlanDlg.mode==='access'">
+              <div class="muted" style="font-size:12px;margin-bottom:10px">{{ t('vld_access_hint') }}</div>
+              <div class="form-grid-2">
+                <div class="form-row">
+                  <label>{{ t('vld_parent') }}</label>
+                  <select v-model="vlanDlg.acc.parent" :class="{invalid:vlanDlg.errors.parent}">
+                    <option v-for="p in vlanDlg.parents" :key="p.device" :value="p.device">{{ p.device }} ({{ p.kind }}{{ p.is_mgmt?' · '+t('swd_mgmt_nic'):'' }})</option>
+                  </select>
+                  <div v-if="vlanDlg.errors.parent" class="form-err">{{ vlanDlg.errors.parent }}</div>
+                  <div v-if="!vlanDlg.parents.length" class="muted" style="font-size:12px">{{ t('vld_no_parent') }}</div>
+                </div>
+                <div class="form-row">
+                  <label>{{ t('vld_vlan_id') }} <span class="muted" style="font-weight:400;font-size:11px">1-4094</span></label>
+                  <input type="number" min="1" max="4094" v-model="vlanDlg.acc.vlanId" :class="{invalid:vlanDlg.errors.vlanId}">
+                  <div v-if="vlanDlg.errors.vlanId" class="form-err">{{ vlanDlg.errors.vlanId }}</div>
+                </div>
+                <div class="form-row">
+                  <label>{{ t('vld_bridge_name') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('vld_optional') }}</span></label>
+                  <input v-model="vlanDlg.acc.bridgeName" :placeholder="(vlanDlg.acc.parent||'br')+'.'+(vlanDlg.acc.vlanId||100)">
+                </div>
+              </div>
+              <div v-if="vlanAccParentIsMgmt" class="apple-alert apple-alert--warning" style="margin-top:8px">
+                <i class="fas fa-triangle-exclamation"></i> {{ t('vld_mgmt_warn') }}
+                <label style="display:block;margin-top:8px;font-size:13px"><input type="checkbox" v-model="vlanDlg.acc.ackMgmt"> {{ t('vld_ack_mgmt') }}</label>
+                <div v-if="vlanDlg.errors.ack" class="form-err">{{ vlanDlg.errors.ack }}</div>
+              </div>
+            </template>
+
+            <!-- trunk 表单 -->
+            <template v-else>
+              <div class="muted" style="font-size:12px;margin-bottom:10px">{{ t('vld_trunk_hint') }}</div>
+              <div class="form-grid-2">
+                <div class="form-row">
+                  <label>{{ t('vld_trunk_bridge') }}</label>
+                  <select v-model="vlanDlg.trk.bridge" :class="{invalid:vlanDlg.errors.bridge}">
+                    <option v-for="p in vlanDlg.parents.filter(x=>x.kind==='bridge')" :key="p.device" :value="p.device">{{ p.device }}{{ p.is_mgmt?' · '+t('swd_mgmt_nic'):'' }}</option>
+                  </select>
+                  <div v-if="vlanDlg.errors.bridge" class="form-err">{{ vlanDlg.errors.bridge }}</div>
+                </div>
+                <div class="form-row">
+                  <label>{{ t('vld_allowed_vlans') }} <span class="muted" style="font-weight:400;font-size:11px">{{ t('vld_vlans_hint') }}</span></label>
+                  <input v-model="vlanDlg.trk.vlansText" placeholder="10,20,30 或 100-200" :class="{invalid:vlanDlg.errors.vlans}">
+                  <div v-if="vlanDlg.errors.vlans" class="form-err">{{ vlanDlg.errors.vlans }}</div>
+                </div>
+              </div>
+              <div v-if="vlanTrkBridgeIsMgmt" class="apple-alert apple-alert--warning" style="margin-top:8px">
+                <i class="fas fa-triangle-exclamation"></i> {{ t('vld_mgmt_warn') }}
+                <label style="display:block;margin-top:8px;font-size:13px"><input type="checkbox" v-model="vlanDlg.trk.ackMgmt"> {{ t('vld_ack_mgmt') }}</label>
+                <div v-if="vlanDlg.errors.ack" class="form-err">{{ vlanDlg.errors.ack }}</div>
+              </div>
+            </template>
+          </template>
+        </div>
+        <div class="modal-foot">
+          <button class="apple-btn apple-btn--ghost" :disabled="vlanDlg.busy" @click="vlanDlg.open=false">{{ t('op_cancel') }}</button>
+          <button v-if="vlanDlg.mode==='access'" class="apple-btn apple-btn--primary" :disabled="vlanDlg.busy || vlanDlg.loading || !!vlanDlg.loadError || !vlanDlg.parents.length" @click="submitAccessVLAN"><i v-if="vlanDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-check"></i> {{ t('vld_create') }}</button>
+          <button v-else class="apple-btn apple-btn--primary" :disabled="vlanDlg.busy || vlanDlg.loading || !!vlanDlg.loadError" @click="submitTrunk"><i v-if="vlanDlg.busy" class="fas fa-spinner fa-spin"></i><i v-else class="fas fa-check"></i> {{ t('vld_set_trunk') }}</button>
         </div>
       </div>
     </div>

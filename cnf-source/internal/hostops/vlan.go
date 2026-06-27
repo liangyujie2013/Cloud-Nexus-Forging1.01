@@ -195,7 +195,7 @@ func CollectVLANs(c *onboard.SSHClient) (*VLANInventory, error) {
 		if master != "" && master != "--" {
 			port.BridgeConn = master
 			// 端口组网桥设备名：取 master 连接对应的设备。
-			brDev := strings.TrimSpace(c.RunQuiet(fmt.Sprintf(`nmcli -t -f connection.interface-name connection show %q 2>/dev/null | awk -F: '{print $2}'`, master)))
+			brDev := strings.TrimSpace(c.RunQuiet(fmt.Sprintf(`nmcli -t -f connection.interface-name connection show %q 2>/dev/null | awk -F: '{print $2}' | head -1`, master)))
 			if brDev == "" {
 				brDev = master
 			}
@@ -268,7 +268,16 @@ func CreateAccessVLAN(c *onboard.SSHClient, req CreateAccessVLANRequest) ([]stri
 	vlanIf := fmt.Sprintf("%s.%d", parent, req.VLANID)
 	bridgeName := strings.TrimSpace(req.BridgeName)
 	if bridgeName == "" {
-		bridgeName = vlanIf // 默认端口组网桥名与 VLAN 子接口同名（br0.100 等）
+		// 默认端口组网桥名必须与 VLAN 子接口区分，否则会出现两个同名连接导致解析/删除混乱。
+		// 采用 vlbr<id> 短名（受 Linux IFNAMSIZ 15 字符限制约束）。
+		bridgeName = defaultVLANBridgeName(parent, req.VLANID)
+	}
+	// 端口组网桥名不得与 VLAN 子接口同名（避免同名连接冲突）。
+	if bridgeName == vlanIf {
+		return nil, fmt.Errorf("端口组网桥名不能与 VLAN 子接口 %q 同名，请换一个名称", vlanIf)
+	}
+	if len(bridgeName) > 15 {
+		return nil, fmt.Errorf("端口组网桥名 %q 超过 15 字符（Linux 网卡名长度上限），请换一个更短的名称", bridgeName)
 	}
 	if existsConn(c, vlanIf) {
 		return nil, fmt.Errorf("VLAN 子接口 %q 已存在（父设备上已配置该 VLAN）", vlanIf)
@@ -450,6 +459,29 @@ func SetTrunk(c *onboard.SSHClient, req SetTrunkRequest) ([]string, error) {
 	}
 	steps = append(steps, "trunk（VLAN 中继）配置完成")
 	return steps, nil
+}
+
+// defaultVLANBridgeName 生成与 VLAN 子接口区分、且满足 Linux 网卡名 15 字符上限的默认端口组网桥名。
+// 形如 vlbr100、vlbr100-bo（父设备较长时截断），始终不等于 "<parent>.<vlan>"。
+func defaultVLANBridgeName(parent string, vlanID int) string {
+	base := fmt.Sprintf("vlbr%d", vlanID) // 例：vlbr100
+	// 追加父设备短标识增强可读性（去掉 .），但保证总长 <=15。
+	tag := strings.ReplaceAll(parent, ".", "")
+	if tag != "" {
+		cand := base + "-" + tag
+		if len(cand) <= 15 {
+			return cand
+		}
+		// 截断父设备标识以适配长度上限。
+		room := 15 - len(base) - 1
+		if room > 0 {
+			if room > len(tag) {
+				room = len(tag)
+			}
+			return base + "-" + tag[:room]
+		}
+	}
+	return base
 }
 
 // parseBridgeVlanShow 解析 `bridge -j vlan show` 的 JSON 输出，返回每个网桥设备放行的
