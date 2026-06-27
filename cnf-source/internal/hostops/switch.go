@@ -113,8 +113,10 @@ func CollectSwitches(c *onboard.SSHClient) (*SwitchInventory, error) {
 	script := strings.Join([]string{
 		`echo "===BRIDGES==="; nmcli -t -f NAME,DEVICE,TYPE connection show 2>/dev/null | awk -F: '$3=="bridge"{print $1":"$2}'`,
 		`echo "===BONDS==="; nmcli -t -f NAME,DEVICE,TYPE connection show 2>/dev/null | awk -F: '$3=="bond"{print $1":"$2}'`,
-		// 每个连接的 master / slave-type / bond 选项
-		`echo "===SLAVEMAP==="; nmcli -t -f NAME,DEVICE,connection.master,connection.slave-type connection show 2>/dev/null`,
+		// 每个连接的 device / master / slave-type。
+		// 注意：nmcli -t 不能在一次查询里混用通用字段(NAME/DEVICE)与具体属性(connection.master)，
+		// 否则 -t 模式返回空。改为逐连接查询，输出 "dev|master|slaveType"，稳健可靠。
+		`echo "===SLAVEMAP==="; for cn in $(nmcli -t -f NAME connection show 2>/dev/null); do echo "$(nmcli -t -f connection.interface-name,connection.master,connection.slave-type connection show "$cn" 2>/dev/null | awk -F: '{print $2}' | tr '\n' '|')"; done`,
 		`echo "===END==="`,
 	}, "; ")
 	out := c.RunQuiet(script)
@@ -149,18 +151,21 @@ func CollectSwitches(c *onboard.SSHClient) (*SwitchInventory, error) {
 		}
 	}
 
-	// 解析从属关系：device -> master(设备名)。
+	// 解析从属关系：device -> master(设备名/连接名)。
+	// SLAVEMAP 每行形如 "dev|master|slaveType|"（逐连接查询，竖线分隔）。
 	masterOf := map[string]string{} // childDev -> masterDev(或masterConn)
 	usedAsSlave := map[string]bool{}
 	for _, line := range strings.Split(sections["SLAVEMAP"], "\n") {
 		if line = strings.TrimSpace(line); line == "" {
 			continue
 		}
-		f := splitNM(line)
-		if len(f) < 4 {
+		f := strings.Split(line, "|")
+		if len(f) < 3 {
 			continue
 		}
-		dev, master, slaveType := f[1], f[2], f[3]
+		dev := strings.TrimSpace(f[0])
+		master := strings.TrimSpace(f[1])
+		slaveType := strings.TrimSpace(f[2])
 		if dev == "" || dev == "--" {
 			continue
 		}

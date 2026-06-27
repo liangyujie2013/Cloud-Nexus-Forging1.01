@@ -66,6 +66,10 @@ func RegisterAPIRoutes(app *fiber.App, h *Handlers) {
 	api.Get("/hosts", h.listHosts, h.Mw.RequirePermission("host.read"))
 	// 批量实时指标（列表卡片用）——静态段，置于 /hosts/:id 之前确保不被当作 :id。
 	api.Get("/hosts/metrics", h.getHostsMetrics, h.Mw.RequirePermission("host.read"))
+	// 第5点 全局交换机（多主机一致下发标准交换机）——静态段，置于 /hosts/:id 之前。
+	api.Get("/hosts/global-switch/status", h.getGlobalSwitchStatus, h.Mw.RequirePermission("host.read"))
+	api.Post("/hosts/global-switch/apply", h.applyGlobalSwitch, h.Mw.RequirePermission("host.update"))
+	api.Post("/hosts/global-switch/delete", h.deleteGlobalSwitch, h.Mw.RequirePermission("host.update"))
 	api.Get("/hosts/:id", h.getHost, h.Mw.RequirePermission("host.read"))
 	api.Get("/hosts/:id/hardware", h.getHostHardware, h.Mw.RequirePermission("host.read"))
 	api.Post("/hosts", h.createHost, h.Mw.RequirePermission("host.create"))
